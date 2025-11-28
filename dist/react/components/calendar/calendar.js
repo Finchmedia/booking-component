@@ -1,7 +1,7 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "convex-helpers/react/cache/hooks";
 import { CalendarGrid } from "./calendar-grid";
 import { TimeSlotsPanel } from "./time-slots-panel";
 import { EventMetaPanel } from "./event-meta-panel";

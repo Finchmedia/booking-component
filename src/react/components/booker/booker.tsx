@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../../context";
 import { useSlotHold } from "../../hooks/use-slot-hold";
 import { useBookingValidation } from "../../hooks/use-booking-validation";

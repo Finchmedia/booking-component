@@ -1,6 +1,6 @@
 "use client";
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../context";
 import { getSessionId } from "../utils/session";
 /**
