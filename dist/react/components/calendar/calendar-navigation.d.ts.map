@@ -1,0 +1,1 @@
+{"version":3,"file":"calendar-navigation.d.ts","sourceRoot":"","sources":["../../../../src/react/components/calendar/calendar-navigation.tsx"],"names":[],"mappings":"AAEA,OAAO,KAAK,MAAM,OAAO,CAAC;AAI1B,UAAU,uBAAuB;IAC/B,WAAW,EAAE,IAAI,CAAC;IAClB,eAAe,EAAE,MAAM,IAAI,CAAC;IAC5B,WAAW,EAAE,MAAM,IAAI,CAAC;CACzB;AAED,eAAO,MAAM,kBAAkB,EAAE,KAAK,CAAC,EAAE,CAAC,uBAAuB,CA4BhE,CAAC"}

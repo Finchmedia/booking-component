@@ -4,7 +4,7 @@
 *.log
 /.vscode/
 /docs/.vitepress/cache
-dist
+# dist committed for GitHub installs
 dist-ssr
 explorations
 node_modules
