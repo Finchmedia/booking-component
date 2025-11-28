@@ -9,7 +9,7 @@ interface EventType {
   description?: string;
   lengthInMinutes: number;
   lengthInMinutesOptions?: number[];
-  locations: Array<{
+  locations?: Array<{
     type: string;
     address?: string;
     public?: boolean;
@@ -64,7 +64,7 @@ export const EventMetaPanel: React.FC<EventMetaPanelProps> = ({
   };
 
   // Get public address from locations
-  const publicAddress = eventType.locations.find(
+  const publicAddress = eventType.locations?.find(
     (loc) => loc.type === "address" && loc.public
   )?.address;
 

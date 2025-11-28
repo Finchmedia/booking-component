@@ -56,10 +56,10 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
           </div>
         </div>
 
-        {booking.location.value && (
+        {booking.location?.value && (
           <div className="flex items-start gap-3">
             <MapPin className="h-5 w-5 text-muted-foreground mt-0.5" />
-            <p className="text-sm text-foreground">{booking.location.value}</p>
+            <p className="text-sm text-foreground">{booking.location?.value}</p>
           </div>
         )}
 

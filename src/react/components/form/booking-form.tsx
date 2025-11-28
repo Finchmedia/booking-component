@@ -17,7 +17,7 @@ interface EventType {
   description?: string;
   lengthInMinutes: number;
   lengthInMinutesOptions?: number[];
-  locations: Array<{
+  locations?: Array<{
     type: string;
     address?: string;
     public?: boolean;

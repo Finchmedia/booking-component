@@ -11,6 +11,7 @@ export type {
   Booking,
   EventType,
   Resource,
+  Schedule,
   TimeSlot,
   MonthSlots,
   PresenceRecord,

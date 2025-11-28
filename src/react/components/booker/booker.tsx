@@ -137,7 +137,7 @@ export function Booker({
         booker: formData,
         location: {
           type: "address",
-          value: eventType.locations[0]?.address || "Studio A",
+          value: eventType.locations?.[0]?.address || "Studio A",
         },
       });
 

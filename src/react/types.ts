@@ -24,20 +24,21 @@ export interface Booking {
   start: number;
   end: number;
   timezone: string;
-  status: "confirmed" | "cancelled" | "rescheduled";
+  status: "pending" | "confirmed" | "cancelled" | "completed" | "rescheduled";
   bookerName: string;
   bookerEmail: string;
   bookerPhone?: string;
   bookerNotes?: string;
   eventTitle: string;
   eventDescription?: string;
-  location: { type: string; value?: string };
-  createdAt: number;
-  updatedAt: number;
+  location?: { type: string; value?: string };
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 // Event type from database
 export interface EventType {
+  _id: string;
   id: string;
   title: string;
   slug: string;
@@ -45,17 +46,47 @@ export interface EventType {
   lengthInMinutes: number;
   lengthInMinutesOptions?: number[];
   slotInterval?: number;
-  locations: Array<{ type: string; address?: string }>;
+  locations?: Array<{ type: string; address?: string; public?: boolean }>;
   isActive?: boolean;
+  timezone: string;
+  lockTimeZoneToggle?: boolean;
+  bufferBefore?: number;
+  bufferAfter?: number;
+  minNoticeMinutes?: number;
+  maxFutureMinutes?: number;
+  requiresConfirmation?: boolean;
+  scheduleId?: string;
+  organizationId?: string;
 }
 
 // Resource from database
 export interface Resource {
+  _id: string;
   id: string;
   name: string;
+  type: string;
   description?: string;
-  timezone?: string;
-  isActive?: boolean;
+  timezone: string;
+  isActive: boolean;
+  isFungible?: boolean;
+  isStandalone?: boolean;
+  quantity?: number;
+  organizationId?: string;
+}
+
+// Schedule from database
+export interface Schedule {
+  _id: string;
+  id: string;
+  name: string;
+  timezone: string;
+  isDefault: boolean;
+  organizationId: string;
+  weeklyHours: Array<{
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+  }>;
 }
 
 // Time slot for display
