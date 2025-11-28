@@ -1,10 +1,10 @@
 export declare const checkMultiResourceAvailability: import("convex/server").RegisteredQuery<"public", {
-    start: number;
     end: number;
     resources: {
         quantity?: number | undefined;
         resourceId: string;
     }[];
+    start: number;
 }, Promise<{
     available: boolean;
     resources: {
@@ -21,20 +21,20 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
         value?: string | undefined;
         type: string;
     } | undefined;
-    eventTypeId: string;
-    timezone: string;
-    start: number;
     end: number;
+    resources: {
+        quantity?: number | undefined;
+        resourceId: string;
+    }[];
+    start: number;
     booker: {
         phone?: string | undefined;
         notes?: string | undefined;
         name: string;
         email: string;
     };
-    resources: {
-        quantity?: number | undefined;
-        resourceId: string;
-    }[];
+    eventTypeId: string;
+    timezone: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"bookings">;
     _creationTime: number;
@@ -45,16 +45,16 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
-    eventTypeId: string;
-    timezone: string;
-    resourceId: string;
-    start: number;
     end: number;
-    actorId: string;
+    start: number;
+    eventTypeId: string;
     location: {
         value?: string | undefined;
         type: string;
     };
+    timezone: string;
+    resourceId: string;
+    actorId: string;
     uid: string;
     status: string;
     createdAt: number;
@@ -71,22 +71,22 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
             _id: import("convex/values").GenericId<"resources">;
             _creationTime: number;
             description?: string | undefined;
-            quantity?: number | undefined;
             isFungible?: boolean | undefined;
             isStandalone?: boolean | undefined;
-            id: string;
-            type: string;
+            quantity?: number | undefined;
             organizationId: string;
             timezone: string;
+            id: string;
             isActive: boolean;
             name: string;
+            type: string;
             createdAt: number;
             updatedAt: number;
         } | null;
         _id: import("convex/values").GenericId<"booking_items">;
         _creationTime: number;
-        resourceId: string;
         bookingId: import("convex/values").GenericId<"bookings">;
+        resourceId: string;
         quantity: number;
     }[];
     _id: import("convex/values").GenericId<"bookings">;
@@ -98,16 +98,16 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
-    eventTypeId: string;
-    timezone: string;
-    resourceId: string;
-    start: number;
     end: number;
-    actorId: string;
+    start: number;
+    eventTypeId: string;
     location: {
         value?: string | undefined;
         type: string;
     };
+    timezone: string;
+    resourceId: string;
+    actorId: string;
     uid: string;
     status: string;
     createdAt: number;
