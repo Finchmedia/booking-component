@@ -5,3 +5,4 @@ export { CalendarDayButton } from "./calendar-day-button";
 export { TimeSlotsPanel } from "./time-slots-panel";
 export { TimeSlotButton } from "./time-slot-button";
 export { EventMetaPanel } from "./event-meta-panel";
+export { CalendarSkeleton } from "./calendar-skeleton";

@@ -6,7 +6,7 @@ import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../../context";
 import { useSlotHold } from "../../hooks/use-slot-hold";
 import { useBookingValidation } from "../../hooks/use-booking-validation";
-import { Calendar } from "../calendar/calendar";
+import { Calendar, CalendarSkeleton } from "../calendar";
 import { BookingForm } from "../form/booking-form";
 import { BookingSuccess } from "../form/booking-success";
 import { BookingErrorDialog } from "./booking-error-dialog";
@@ -117,7 +117,7 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
     }, [eventType, selectedDuration]);
     // Show loading state if event type is still loading
     if (eventType === undefined) {
-        return (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl p-8", children: _jsx("div", { className: "h-64 w-full bg-muted animate-pulse rounded-md" }) }));
+        return _jsx(CalendarSkeleton, {});
     }
     return (_jsxs(_Fragment, { children: [validation.status === "error" && validation.error && (_jsx(BookingErrorDialog, { error: validation.error, onReset: handleReset, onEventTypeReset: onEventTypeReset, onNavigate: onNavigate })), showHeader &&
                 bookingStep === "event-meta" &&

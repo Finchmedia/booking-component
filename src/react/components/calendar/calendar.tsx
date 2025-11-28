@@ -5,6 +5,7 @@ import { useQuery } from "convex-helpers/react/cache/hooks";
 import { CalendarGrid } from "./calendar-grid";
 import { TimeSlotsPanel } from "./time-slots-panel";
 import { EventMetaPanel } from "./event-meta-panel";
+import { CalendarSkeleton } from "./calendar-skeleton";
 import { useBookingAPI } from "../../context";
 import { useConvexSlots } from "../../hooks/use-convex-slots";
 import { useIntersectionObserver } from "../../hooks/use-intersection-observer";
@@ -60,11 +61,7 @@ export const Calendar: React.FC<CalendarProps> = ({
 
   // Show loading state if event type is still loading
   if (eventType === undefined) {
-    return (
-      <div className="bg-card overflow-hidden rounded-xl border border-border shadow p-8">
-        <div className="h-96 w-full bg-muted animate-pulse rounded-md" />
-      </div>
-    );
+    return <CalendarSkeleton />;
   }
 
   // Event type timezone (overrides browser timezone when locked)

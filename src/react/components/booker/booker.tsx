@@ -6,7 +6,7 @@ import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../../context";
 import { useSlotHold } from "../../hooks/use-slot-hold";
 import { useBookingValidation } from "../../hooks/use-booking-validation";
-import { Calendar } from "../calendar/calendar";
+import { Calendar, CalendarSkeleton } from "../calendar";
 import { BookingForm } from "../form/booking-form";
 import { BookingSuccess } from "../form/booking-success";
 import { BookingErrorDialog } from "./booking-error-dialog";
@@ -193,11 +193,7 @@ export function Booker({
 
   // Show loading state if event type is still loading
   if (eventType === undefined) {
-    return (
-      <div className="bg-card rounded-xl border border-border overflow-hidden shadow-2xl p-8">
-        <div className="h-64 w-full bg-muted animate-pulse rounded-md" />
-      </div>
-    );
+    return <CalendarSkeleton />;
   }
 
   return (
