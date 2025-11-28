@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 
 const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
 
@@ -59,7 +60,7 @@ export const heartbeat = mutation({
       if (!existingHeartbeat) {
         const scheduledId = await ctx.scheduler.runAfter(
           TIMEOUT_MS,
-          "presence:cleanup",
+          internal.presence.cleanup,
           {
             resourceId: args.resourceId,
             slot: slot,
@@ -210,7 +211,7 @@ export const getActivePresenceCount = query({
       presenceRecords = await ctx.db
         .query("presence")
         .withIndex("by_resource_slot_updated", (q) =>
-          q.eq("resourceId", args.resourceId)
+          q.eq("resourceId", args.resourceId!)
         )
         .collect();
     } else if (args.eventTypeId) {
@@ -244,7 +245,7 @@ export const getActivePresenceCount = query({
  * Checks if a user has timed out. If so, deletes them.
  * If they are still active, reschedules itself.
  */
-export const cleanup = mutation({
+export const cleanup = internalMutation({
   args: {
     resourceId: v.string(),
     slot: v.string(),
@@ -282,7 +283,7 @@ export const cleanup = mutation({
       // Reschedule the check.
       const scheduledId = await ctx.scheduler.runAfter(
         TIMEOUT_MS,
-        "presence:cleanup",
+        internal.presence.cleanup,
         args
       );
       await ctx.db.patch(heartbeatDoc._id, { markAsGone: scheduledId });

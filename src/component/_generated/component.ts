@@ -128,13 +128,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       >;
     };
     presence: {
-      cleanup: FunctionReference<
-        "mutation",
-        "internal",
-        { resourceId: string; slot: string; user: string },
-        any,
-        Name
-      >;
       getActivePresenceCount: FunctionReference<
         "query",
         "internal",

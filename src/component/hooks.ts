@@ -1,4 +1,5 @@
 import { mutation, query, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { FunctionHandle } from "convex/server";
 
@@ -216,7 +217,7 @@ export const transitionBookingState = mutation({
     // Trigger hooks for the transition
     const hookEventType = `booking.${args.toStatus}` as string;
     if (HOOK_EVENTS.includes(hookEventType as HookEventType)) {
-      await ctx.scheduler.runAfter(0, triggerHooks, {
+      await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
         eventType: hookEventType,
         organizationId: booking.organizationId,
         payload: {

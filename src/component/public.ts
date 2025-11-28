@@ -633,12 +633,12 @@ export const listBookings = query({
     } else if (args.resourceId) {
       bookings = await ctx.db
         .query("bookings")
-        .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+        .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId!))
         .collect();
     } else if (args.eventTypeId) {
       bookings = await ctx.db
         .query("bookings")
-        .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+        .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId!))
         .collect();
     } else {
       bookings = await ctx.db.query("bookings").collect();

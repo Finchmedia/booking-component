@@ -63,10 +63,18 @@
   },
   "peerDependencies": {
     "convex": "^1.29.3",
-    "react": "^18.3.1 || ^19.0.0"
+    "react": "^18.3.1 || ^19.0.0",
+    "lucide-react": "^0.400.0",
+    "react-hook-form": "^7.50.0",
+    "@hookform/resolvers": "^3.3.0",
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@convex-dev/eslint-plugin": "^1.0.0",
+    "@hookform/resolvers": "^3.9.0",
+    "lucide-react": "^0.454.0",
+    "react-hook-form": "^7.54.0",
+    "zod": "^3.24.0",
     "@edge-runtime/vm": "^5.0.0",
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "9.39.1",
