@@ -260,7 +260,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         getResourcesForEventType: FunctionReference<"query", "internal", {
             eventTypeId: string;
         }, any, Name>;
-        hasLink: FunctionReference<"query", "internal", {
+        hasResourceEventTypeLink: FunctionReference<"query", "internal", {
             eventTypeId: string;
             resourceId: string;
         }, any, Name>;

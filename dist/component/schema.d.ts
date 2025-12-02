@@ -1,17 +1,17 @@
 declare const _default: import("convex/server").SchemaDefinition<{
     resources: import("convex/server").TableDefinition<import("convex/values").VObject<{
         description?: string | undefined;
+        quantity?: number | undefined;
         isFungible?: boolean | undefined;
         isStandalone?: boolean | undefined;
-        quantity?: number | undefined;
-        organizationId: string;
-        timezone: string;
         id: string;
-        isActive: boolean;
+        organizationId: string;
         name: string;
-        type: string;
+        timezone: string;
+        isActive: boolean;
         createdAt: number;
         updatedAt: number;
+        type: string;
     }, {
         id: import("convex/values").VString<string, "required">;
         organizationId: import("convex/values").VString<string, "required">;
@@ -25,24 +25,24 @@ declare const _default: import("convex/server").SchemaDefinition<{
         isActive: import("convex/values").VBoolean<boolean, "required">;
         createdAt: import("convex/values").VFloat64<number, "required">;
         updatedAt: import("convex/values").VFloat64<number, "required">;
-    }, "required", "organizationId" | "timezone" | "description" | "id" | "isActive" | "isFungible" | "isStandalone" | "name" | "quantity" | "type" | "createdAt" | "updatedAt">, {
+    }, "required", "id" | "organizationId" | "name" | "description" | "timezone" | "quantity" | "isFungible" | "isStandalone" | "isActive" | "createdAt" | "updatedAt" | "type">, {
         by_external_id: ["id", "_creationTime"];
         by_org: ["organizationId", "_creationTime"];
         by_org_type: ["organizationId", "type", "_creationTime"];
     }, {}, {}>;
     schedules: import("convex/server").TableDefinition<import("convex/values").VObject<{
-        organizationId: string;
-        timezone: string;
         id: string;
+        organizationId: string;
         name: string;
+        timezone: string;
+        createdAt: number;
+        updatedAt: number;
         isDefault: boolean;
         weeklyHours: {
             dayOfWeek: number;
             startTime: string;
             endTime: string;
         }[];
-        createdAt: number;
-        updatedAt: number;
     }, {
         id: import("convex/values").VString<string, "required">;
         organizationId: import("convex/values").VString<string, "required">;
@@ -64,7 +64,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
         }, "required", "dayOfWeek" | "startTime" | "endTime">, "required">;
         createdAt: import("convex/values").VFloat64<number, "required">;
         updatedAt: import("convex/values").VFloat64<number, "required">;
-    }, "required", "organizationId" | "timezone" | "id" | "name" | "isDefault" | "weeklyHours" | "createdAt" | "updatedAt">, {
+    }, "required", "id" | "organizationId" | "name" | "timezone" | "createdAt" | "updatedAt" | "isDefault" | "weeklyHours">, {
         by_external_id: ["id", "_creationTime"];
         by_org: ["organizationId", "_creationTime"];
     }, {}, {}>;
@@ -73,9 +73,9 @@ declare const _default: import("convex/server").SchemaDefinition<{
             startTime: string;
             endTime: string;
         }[] | undefined;
-        date: string;
-        scheduleId: import("convex/values").GenericId<"schedules">;
         type: string;
+        scheduleId: import("convex/values").GenericId<"schedules">;
+        date: string;
     }, {
         scheduleId: import("convex/values").VId<import("convex/values").GenericId<"schedules">, "required">;
         date: import("convex/values").VString<string, "required">;
@@ -90,34 +90,34 @@ declare const _default: import("convex/server").SchemaDefinition<{
             startTime: import("convex/values").VString<string, "required">;
             endTime: import("convex/values").VString<string, "required">;
         }, "required", "startTime" | "endTime">, "optional">;
-    }, "required", "date" | "scheduleId" | "type" | "customHours">, {
+    }, "required", "type" | "scheduleId" | "date" | "customHours">, {
         by_schedule_date: ["scheduleId", "date", "_creationTime"];
     }, {}, {}>;
     event_types: import("convex/server").TableDefinition<import("convex/values").VObject<{
         organizationId?: string | undefined;
-        bufferAfter?: number | undefined;
-        bufferBefore?: number | undefined;
         description?: string | undefined;
         isActive?: boolean | undefined;
-        lengthInMinutesOptions?: number[] | undefined;
-        maxFutureMinutes?: number | undefined;
-        minNoticeMinutes?: number | undefined;
-        requiresConfirmation?: boolean | undefined;
-        scheduleId?: string | undefined;
-        slotInterval?: number | undefined;
         createdAt?: number | undefined;
         updatedAt?: number | undefined;
-        timezone: string;
+        scheduleId?: string | undefined;
+        lengthInMinutesOptions?: number[] | undefined;
+        slotInterval?: number | undefined;
+        bufferBefore?: number | undefined;
+        bufferAfter?: number | undefined;
+        minNoticeMinutes?: number | undefined;
+        maxFutureMinutes?: number | undefined;
+        requiresConfirmation?: boolean | undefined;
         id: string;
-        lengthInMinutes: number;
-        locations: {
-            public?: boolean | undefined;
-            address?: string | undefined;
-            type: string;
-        }[];
-        lockTimeZoneToggle: boolean;
+        timezone: string;
         slug: string;
         title: string;
+        lengthInMinutes: number;
+        lockTimeZoneToggle: boolean;
+        locations: {
+            address?: string | undefined;
+            public?: boolean | undefined;
+            type: string;
+        }[];
     }, {
         id: import("convex/values").VString<string, "required">;
         slug: import("convex/values").VString<string, "required">;
@@ -129,18 +129,18 @@ declare const _default: import("convex/server").SchemaDefinition<{
         timezone: import("convex/values").VString<string, "required">;
         lockTimeZoneToggle: import("convex/values").VBoolean<boolean, "required">;
         locations: import("convex/values").VArray<{
-            public?: boolean | undefined;
             address?: string | undefined;
+            public?: boolean | undefined;
             type: string;
         }[], import("convex/values").VObject<{
-            public?: boolean | undefined;
             address?: string | undefined;
+            public?: boolean | undefined;
             type: string;
         }, {
             type: import("convex/values").VString<string, "required">;
             address: import("convex/values").VString<string | undefined, "optional">;
             public: import("convex/values").VBoolean<boolean | undefined, "optional">;
-        }, "required", "public" | "type" | "address">, "required">;
+        }, "required", "type" | "address" | "public">, "required">;
         organizationId: import("convex/values").VString<string | undefined, "optional">;
         scheduleId: import("convex/values").VString<string | undefined, "optional">;
         bufferBefore: import("convex/values").VFloat64<number | undefined, "optional">;
@@ -151,41 +151,41 @@ declare const _default: import("convex/server").SchemaDefinition<{
         isActive: import("convex/values").VBoolean<boolean | undefined, "optional">;
         createdAt: import("convex/values").VFloat64<number | undefined, "optional">;
         updatedAt: import("convex/values").VFloat64<number | undefined, "optional">;
-    }, "required", "organizationId" | "timezone" | "bufferAfter" | "bufferBefore" | "description" | "id" | "isActive" | "lengthInMinutes" | "lengthInMinutesOptions" | "locations" | "lockTimeZoneToggle" | "maxFutureMinutes" | "minNoticeMinutes" | "requiresConfirmation" | "scheduleId" | "slotInterval" | "slug" | "title" | "createdAt" | "updatedAt">, {
+    }, "required", "id" | "organizationId" | "description" | "timezone" | "isActive" | "createdAt" | "updatedAt" | "scheduleId" | "slug" | "title" | "lengthInMinutes" | "lengthInMinutesOptions" | "slotInterval" | "lockTimeZoneToggle" | "locations" | "bufferBefore" | "bufferAfter" | "minNoticeMinutes" | "maxFutureMinutes" | "requiresConfirmation">, {
         by_external_id: ["id", "_creationTime"];
         by_slug: ["slug", "_creationTime"];
         by_org: ["organizationId", "_creationTime"];
     }, {}, {}>;
     resource_event_types: import("convex/server").TableDefinition<import("convex/values").VObject<{
-        eventTypeId: string;
         resourceId: string;
+        eventTypeId: string;
     }, {
         resourceId: import("convex/values").VString<string, "required">;
         eventTypeId: import("convex/values").VString<string, "required">;
-    }, "required", "eventTypeId" | "resourceId">, {
+    }, "required", "resourceId" | "eventTypeId">, {
         by_resource: ["resourceId", "_creationTime"];
         by_event_type: ["eventTypeId", "_creationTime"];
     }, {}, {}>;
     daily_availability: import("convex/server").TableDefinition<import("convex/values").VObject<{
-        resourceId: string;
         date: string;
+        resourceId: string;
         busySlots: number[];
     }, {
         resourceId: import("convex/values").VString<string, "required">;
         date: import("convex/values").VString<string, "required">;
         busySlots: import("convex/values").VArray<number[], import("convex/values").VFloat64<number, "required">, "required">;
-    }, "required", "resourceId" | "date" | "busySlots">, {
+    }, "required", "date" | "resourceId" | "busySlots">, {
         by_resource_date: ["resourceId", "date", "_creationTime"];
     }, {}, {}>;
     quantity_availability: import("convex/server").TableDefinition<import("convex/values").VObject<{
-        resourceId: string;
         date: string;
+        resourceId: string;
         slotQuantities: any;
     }, {
         resourceId: import("convex/values").VString<string, "required">;
         date: import("convex/values").VString<string, "required">;
         slotQuantities: import("convex/values").VAny<any, "required", string>;
-    }, "required", "resourceId" | "date" | "slotQuantities" | `slotQuantities.${string}`>, {
+    }, "required", "date" | "resourceId" | "slotQuantities" | `slotQuantities.${string}`>, {
         by_resource_date: ["resourceId", "date", "_creationTime"];
     }, {}, {}>;
     bookings: import("convex/server").TableDefinition<import("convex/values").VObject<{
@@ -196,23 +196,23 @@ declare const _default: import("convex/server").SchemaDefinition<{
         cancelledAt?: number | undefined;
         rescheduleUid?: string | undefined;
         cancellationReason?: string | undefined;
-        end: number;
-        start: number;
+        timezone: string;
+        createdAt: number;
+        updatedAt: number;
+        resourceId: string;
         eventTypeId: string;
+        actorId: string;
+        start: number;
+        end: number;
+        status: string;
+        uid: string;
+        bookerName: string;
+        bookerEmail: string;
+        eventTitle: string;
         location: {
             value?: string | undefined;
             type: string;
         };
-        timezone: string;
-        resourceId: string;
-        actorId: string;
-        uid: string;
-        status: string;
-        createdAt: number;
-        updatedAt: number;
-        bookerName: string;
-        bookerEmail: string;
-        eventTitle: string;
     }, {
         resourceId: import("convex/values").VString<string, "required">;
         actorId: import("convex/values").VString<string, "required">;
@@ -241,7 +241,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
         cancelledAt: import("convex/values").VFloat64<number | undefined, "optional">;
         rescheduleUid: import("convex/values").VString<string | undefined, "optional">;
         cancellationReason: import("convex/values").VString<string | undefined, "optional">;
-    }, "required", "organizationId" | "end" | "start" | "eventTypeId" | "location" | "timezone" | "resourceId" | "actorId" | "uid" | "status" | "createdAt" | "updatedAt" | "bookerName" | "bookerEmail" | "bookerPhone" | "bookerNotes" | "eventTitle" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "location.type" | "location.value">, {
+    }, "required", "organizationId" | "timezone" | "createdAt" | "updatedAt" | "resourceId" | "eventTypeId" | "actorId" | "start" | "end" | "status" | "uid" | "bookerName" | "bookerEmail" | "bookerPhone" | "bookerNotes" | "eventTitle" | "eventDescription" | "location" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "location.type" | "location.value">, {
         by_resource: ["resourceId", "_creationTime"];
         by_uid: ["uid", "_creationTime"];
         by_email: ["bookerEmail", "_creationTime"];
@@ -250,22 +250,22 @@ declare const _default: import("convex/server").SchemaDefinition<{
         by_event_type: ["eventTypeId", "_creationTime"];
     }, {}, {}>;
     booking_items: import("convex/server").TableDefinition<import("convex/values").VObject<{
-        bookingId: import("convex/values").GenericId<"bookings">;
-        resourceId: string;
         quantity: number;
+        resourceId: string;
+        bookingId: import("convex/values").GenericId<"bookings">;
     }, {
         bookingId: import("convex/values").VId<import("convex/values").GenericId<"bookings">, "required">;
         resourceId: import("convex/values").VString<string, "required">;
         quantity: import("convex/values").VFloat64<number, "required">;
-    }, "required", "bookingId" | "resourceId" | "quantity">, {
+    }, "required", "quantity" | "resourceId" | "bookingId">, {
         by_booking: ["bookingId", "_creationTime"];
     }, {}, {}>;
     booking_history: import("convex/server").TableDefinition<import("convex/values").VObject<{
         changedBy?: string | undefined;
         reason?: string | undefined;
         bookingId: import("convex/values").GenericId<"bookings">;
-        toStatus: string;
         fromStatus: string;
+        toStatus: string;
         timestamp: number;
     }, {
         bookingId: import("convex/values").VId<import("convex/values").GenericId<"bookings">, "required">;
@@ -274,7 +274,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
         changedBy: import("convex/values").VString<string | undefined, "optional">;
         reason: import("convex/values").VString<string | undefined, "optional">;
         timestamp: import("convex/values").VFloat64<number, "required">;
-    }, "required", "bookingId" | "changedBy" | "reason" | "toStatus" | "fromStatus" | "timestamp">, {
+    }, "required", "bookingId" | "fromStatus" | "toStatus" | "changedBy" | "reason" | "timestamp">, {
         by_booking: ["bookingId", "_creationTime"];
     }, {}, {}>;
     presence: import("convex/server").TableDefinition<import("convex/values").VObject<{
@@ -291,7 +291,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
         eventTypeId: import("convex/values").VString<string | undefined, "optional">;
         updated: import("convex/values").VFloat64<number, "required">;
         data: import("convex/values").VAny<any, "optional", string>;
-    }, "required", "eventTypeId" | "resourceId" | "data" | "user" | "slot" | "updated" | `data.${string}`>, {
+    }, "required", "resourceId" | "eventTypeId" | "user" | "slot" | "updated" | "data" | `data.${string}`>, {
         by_resource_slot_updated: ["resourceId", "slot", "updated", "_creationTime"];
         by_user_slot: ["user", "slot", "_creationTime"];
         by_event_type: ["eventTypeId", "_creationTime"];
@@ -311,17 +311,17 @@ declare const _default: import("convex/server").SchemaDefinition<{
     }, {}, {}>;
     hooks: import("convex/server").TableDefinition<import("convex/values").VObject<{
         organizationId?: string | undefined;
+        createdAt: number;
         eventType: string;
         functionHandle: string;
         enabled: boolean;
-        createdAt: number;
     }, {
         eventType: import("convex/values").VString<string, "required">;
         functionHandle: import("convex/values").VString<string, "required">;
         organizationId: import("convex/values").VString<string | undefined, "optional">;
         enabled: import("convex/values").VBoolean<boolean, "required">;
         createdAt: import("convex/values").VFloat64<number, "required">;
-    }, "required", "eventType" | "organizationId" | "functionHandle" | "enabled" | "createdAt">, {
+    }, "required", "organizationId" | "createdAt" | "eventType" | "functionHandle" | "enabled">, {
         by_event: ["eventType", "enabled", "_creationTime"];
     }, {}, {}>;
 }, true>;

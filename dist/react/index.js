@@ -1,6 +1,6 @@
 "use client";
 // Context and Provider
-export { BookingProvider, useBookingAPI } from "./context";
+export { BookingProvider, useBookingAPI, } from "./context";
 // Hooks
 export { useConvexSlots, } from "./hooks/use-convex-slots";
 export { useSlotHold } from "./hooks/use-slot-hold";

@@ -11,5 +11,5 @@
  * Per UX design, once a user selects a slot, the duration is LOCKED and cannot change.
  * If the user wants a different duration, they must click "Back" and reselect.
  */
-export declare function useSlotHold(resourceId: string, slotId: string | null, durationMinutes?: number, eventTypeId?: string): string;
+export declare function useSlotHold(resourceId: string, slotId: string | null, durationMinutes?: number, eventTypeId?: string): any;
 //# sourceMappingURL=use-slot-hold.d.ts.map

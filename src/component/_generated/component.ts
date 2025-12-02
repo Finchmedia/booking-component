@@ -404,7 +404,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         any,
         Name
       >;
-      hasLink: FunctionReference<
+      hasResourceEventTypeLink: FunctionReference<
         "query",
         "internal",
         { eventTypeId: string; resourceId: string },

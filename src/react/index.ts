@@ -1,7 +1,14 @@
 "use client";
 
 // Context and Provider
-export { BookingProvider, useBookingAPI, type BookingAPI } from "./context";
+export {
+  BookingProvider,
+  useBookingAPI,
+  type BookingAPI,
+  type PublicBookingAPI,
+  type AdminBookingAPI,
+  type BookingProviderProps,
+} from "./context";
 
 // Types
 export type {

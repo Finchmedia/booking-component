@@ -310,7 +310,7 @@ export function makeBookingAPI(component) {
                 eventTypeId: v.string(),
             },
             handler: async (ctx, args) => {
-                return await ctx.runQuery(component.resource_event_types.hasLink, args);
+                return await ctx.runQuery(component.resource_event_types.hasResourceEventTypeLink, args);
             },
         }),
         linkResourceToEventType: mutationGeneric({

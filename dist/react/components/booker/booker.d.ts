@@ -20,6 +20,12 @@ export interface BookerProps {
     onEventTypeReset?: () => void;
     /** Callback for navigation (used when resource is deleted/deactivated) */
     onNavigate?: (path: string) => void;
+    /** Callback when authentication is required (user not signed in) */
+    onAuthRequired?: (slotData: {
+        slot: string;
+        duration: number;
+        eventTypeId: string;
+    }) => void;
 }
-export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, onBookingComplete, onEventTypeReset, onNavigate, }: BookerProps): import("react/jsx-runtime").JSX.Element;
+export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, }: BookerProps): import("react/jsx-runtime").JSX.Element;
 //# sourceMappingURL=booker.d.ts.map

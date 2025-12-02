@@ -86,10 +86,14 @@ export const useConvexSlots = (resourceId, eventLength, slotInterval, allDuratio
     const processedSlots = useMemo(() => {
         if (!daySlots)
             return undefined;
-        const formatted = daySlots.map((slot) => ({
+        const now = Date.now();
+        // Map and filter out past slots (slots that have already passed)
+        const formatted = daySlots
+            .map((slot) => ({
             time: slot.time,
             attendees: 0,
-        }));
+        }))
+            .filter((slot) => new Date(slot.time).getTime() > now);
         formatted.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
         // PRESENCE-AWARE SPLIT: Separate available vs reserved slots
         if (datePresence && datePresence.length > 0) {

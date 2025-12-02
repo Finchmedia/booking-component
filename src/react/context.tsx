@@ -1,136 +1,258 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, useMemo } from "react";
 import type { ReactNode } from "react";
 import type { FunctionReference } from "convex/server";
 
+// ============================================
+// TYPE HELPERS
+// ============================================
+
+type QueryReference = FunctionReference<"query", "public", any, any>;
+type MutationReference = FunctionReference<"mutation", "public", any, any>;
+
+// ============================================
+// PUBLIC BOOKING API
+// Functions available for anonymous/public booking flow
+// ============================================
+
 /**
- * Type for the booking API object.
- * This matches the return type of makeBookingAPI() from src/client/index.ts
- *
- * We use a loose type here to avoid circular dependencies and allow
- * flexibility in how the API is constructed.
+ * Public API for the booking flow.
+ * These functions can be called without authentication.
+ * Used by: Booker, Calendar, public booking pages
  */
-export interface BookingAPI {
-  // Event Types
-  getEventType: FunctionReference<"query", "public", any, any>;
-  getEventTypeBySlug: FunctionReference<"query", "public", any, any>;
-  listEventTypes: FunctionReference<"query", "public", any, any>;
-  createEventType: FunctionReference<"mutation", "public", any, any>;
-  updateEventType: FunctionReference<"mutation", "public", any, any>;
-  deleteEventType: FunctionReference<"mutation", "public", any, any>;
-  toggleEventTypeActive: FunctionReference<"mutation", "public", any, any>;
+export interface PublicBookingAPI {
+  // Event Types (Read-only)
+  getEventType: QueryReference;
+  getEventTypeBySlug: QueryReference;
+  listEventTypes: QueryReference;
 
-  // Availability
-  getAvailability: FunctionReference<"query", "public", any, any>;
-  getMonthAvailability: FunctionReference<"query", "public", any, any>;
-  getDaySlots: FunctionReference<"query", "public", any, any>;
+  // Availability (Read-only)
+  getAvailability: QueryReference;
+  getMonthAvailability: QueryReference;
+  getDaySlots: QueryReference;
 
-  // Bookings
-  createReservation: FunctionReference<"mutation", "public", any, any>;
-  createBooking: FunctionReference<"mutation", "public", any, any>;
-  getBooking: FunctionReference<"query", "public", any, any>;
-  getBookingByUid: FunctionReference<"query", "public", any, any>;
-  listBookings: FunctionReference<"query", "public", any, any>;
-  cancelReservation: FunctionReference<"mutation", "public", any, any>;
+  // Bookings (Create + Read own)
+  createBooking: MutationReference;
+  getBooking: QueryReference;
+  getBookingByUid: QueryReference;
 
-  // Resources
-  getResource: FunctionReference<"query", "public", any, any>;
-  listResources: FunctionReference<"query", "public", any, any>;
-  createResource: FunctionReference<"mutation", "public", any, any>;
-  updateResource: FunctionReference<"mutation", "public", any, any>;
-  deleteResource: FunctionReference<"mutation", "public", any, any>;
-  toggleResourceActive: FunctionReference<"mutation", "public", any, any>;
+  // Resources (Read-only)
+  getResource: QueryReference;
+  listResources: QueryReference;
 
-  // Resource ↔ Event Type Mapping
-  getEventTypesForResource: FunctionReference<"query", "public", any, any>;
-  getResourcesForEventType: FunctionReference<"query", "public", any, any>;
-  getResourceIdsForEventType: FunctionReference<"query", "public", any, any>;
-  getEventTypeIdsForResource: FunctionReference<"query", "public", any, any>;
-  hasResourceEventTypeLink: FunctionReference<"query", "public", any, any>;
-  linkResourceToEventType: FunctionReference<"mutation", "public", any, any>;
-  unlinkResourceFromEventType: FunctionReference<"mutation", "public", any, any>;
-  setResourcesForEventType: FunctionReference<"mutation", "public", any, any>;
-  setEventTypesForResource: FunctionReference<"mutation", "public", any, any>;
+  // Resource ↔ Event Type Mapping (Read-only)
+  getEventTypesForResource: QueryReference;
+  hasResourceEventTypeLink: QueryReference;
 
-  // Schedules
-  getSchedule: FunctionReference<"query", "public", any, any>;
-  listSchedules: FunctionReference<"query", "public", any, any>;
-  getDefaultSchedule: FunctionReference<"query", "public", any, any>;
-  createSchedule: FunctionReference<"mutation", "public", any, any>;
-  updateSchedule: FunctionReference<"mutation", "public", any, any>;
-  deleteSchedule: FunctionReference<"mutation", "public", any, any>;
-  getEffectiveAvailability: FunctionReference<"query", "public", any, any>;
-  listDateOverrides: FunctionReference<"query", "public", any, any>;
-  createDateOverride: FunctionReference<"mutation", "public", any, any>;
-  deleteDateOverride: FunctionReference<"mutation", "public", any, any>;
+  // Schedules (Read-only for display)
+  getEffectiveAvailability: QueryReference;
+
+  // Presence (Session-based, no strict auth)
+  heartbeat: MutationReference;
+  leave: MutationReference;
+  getPresence: QueryReference;
+  getDatePresence: QueryReference;
+}
+
+// ============================================
+// ADMIN BOOKING API
+// Functions requiring authentication + admin role
+// ============================================
+
+/**
+ * Admin API for managing booking configuration.
+ * These functions require authentication and admin permissions.
+ * Used by: Admin dashboard, management pages
+ */
+export interface AdminBookingAPI {
+  // Event Types (CRUD)
+  createEventType: MutationReference;
+  updateEventType: MutationReference;
+  deleteEventType: MutationReference;
+  toggleEventTypeActive: MutationReference;
+
+  // Bookings (Admin operations)
+  createReservation: MutationReference;
+  listBookings: QueryReference;
+  cancelReservation: MutationReference;
+
+  // Resources (CRUD)
+  createResource: MutationReference;
+  updateResource: MutationReference;
+  deleteResource: MutationReference;
+  toggleResourceActive: MutationReference;
+
+  // Resource ↔ Event Type Mapping (Read + Write)
+  getResourcesForEventType: QueryReference;
+  getResourceIdsForEventType: QueryReference;
+  getEventTypeIdsForResource: QueryReference;
+  linkResourceToEventType: MutationReference;
+  unlinkResourceFromEventType: MutationReference;
+  setResourcesForEventType: MutationReference;
+  setEventTypesForResource: MutationReference;
+
+  // Schedules (CRUD)
+  getSchedule: QueryReference;
+  listSchedules: QueryReference;
+  getDefaultSchedule: QueryReference;
+  createSchedule: MutationReference;
+  updateSchedule: MutationReference;
+  deleteSchedule: MutationReference;
+  listDateOverrides: QueryReference;
+  createDateOverride: MutationReference;
+  deleteDateOverride: MutationReference;
 
   // Multi-Resource Booking
-  checkMultiResourceAvailability: FunctionReference<"query", "public", any, any>;
-  createMultiResourceBooking: FunctionReference<"mutation", "public", any, any>;
-  getBookingWithItems: FunctionReference<"query", "public", any, any>;
-  cancelMultiResourceBooking: FunctionReference<"mutation", "public", any, any>;
+  checkMultiResourceAvailability: QueryReference;
+  createMultiResourceBooking: MutationReference;
+  getBookingWithItems: QueryReference;
+  cancelMultiResourceBooking: MutationReference;
 
-  // Hooks
-  registerHook: FunctionReference<"mutation", "public", any, any>;
-  unregisterHook: FunctionReference<"mutation", "public", any, any>;
-  transitionBookingState: FunctionReference<"mutation", "public", any, any>;
-  getBookingHistory: FunctionReference<"query", "public", any, any>;
+  // Hooks (State machine)
+  registerHook: MutationReference;
+  unregisterHook: MutationReference;
+  transitionBookingState: MutationReference;
+  getBookingHistory: QueryReference;
 
-  // Presence (Real-time slot locking)
-  heartbeat: FunctionReference<"mutation", "public", any, any>;
-  leave: FunctionReference<"mutation", "public", any, any>;
-  getPresence: FunctionReference<"query", "public", any, any>;
-  getDatePresence: FunctionReference<"query", "public", any, any>;
-  getActivePresenceCount: FunctionReference<"query", "public", any, any>;
+  // Presence (Admin view)
+  getActivePresenceCount: QueryReference;
 }
+
+// ============================================
+// MERGED API TYPE
+// The combined API available through useBookingAPI()
+// ============================================
+
+/**
+ * Combined Booking API type.
+ * Merges PublicBookingAPI with optional AdminBookingAPI functions.
+ * Components access functions through this unified interface.
+ */
+export type BookingAPI = PublicBookingAPI & Partial<AdminBookingAPI>;
+
+// ============================================
+// CONTEXT
+// ============================================
 
 const BookingContext = createContext<BookingAPI | null>(null);
 
+// ============================================
+// PROVIDER PROPS
+// ============================================
+
 export interface BookingProviderProps {
   /**
-   * The booking API object, typically from re-exported makeBookingAPI functions.
+   * The public booking API - functions for anonymous browsing and booking.
+   * Required for all booking flows.
    *
    * @example
-   * // In your convex/booking.ts:
-   * export const { getEventType, createBooking, ... } = makeBookingAPI(components.booking);
+   * // In your convex/public.ts:
+   * export const getEventType = publicQuery({ ... });
+   * export const createBooking = publicMutation({ ... });
    *
    * // In your App.tsx:
    * import { api } from "./convex/_generated/api";
-   * <BookingProvider api={api.booking}>
+   * <BookingProvider publicApi={api.public}>
    */
-  api: BookingAPI;
+  publicApi: PublicBookingAPI;
+
+  /**
+   * The admin booking API - functions requiring authentication.
+   * Optional - only needed for admin components.
+   *
+   * @example
+   * // In your convex/admin.ts:
+   * export const createResource = adminMutation({ ... });
+   *
+   * // In your admin layout:
+   * import { api } from "./convex/_generated/api";
+   * <BookingProvider publicApi={api.public} adminApi={api.admin}>
+   */
+  adminApi?: Partial<AdminBookingAPI>;
+
   children: ReactNode;
 }
 
 /**
  * Provider component that makes the booking API available to all child components.
- * Wrap your booking UI components with this provider.
+ * Implements dependency injection pattern for separating public and admin APIs.
+ *
+ * ## Two-Gateway Architecture
+ *
+ * This provider merges two API gateways:
+ * - **publicApi** (required): Functions for anonymous browsing and booking
+ * - **adminApi** (optional): Functions requiring authentication
+ *
+ * Components access both through a single `useBookingAPI()` hook.
+ * The app controls authorization by deciding which functions to provide.
  *
  * @example
  * ```tsx
+ * // Public booking pages (no auth required)
  * import { BookingProvider, Booker } from "@mrfinch/booking/react";
  * import { api } from "./convex/_generated/api";
  *
- * function App() {
+ * function PublicBookingPage() {
  *   return (
- *     <ConvexProvider client={convex}>
- *       <BookingProvider api={api.booking}>
- *         <Booker eventTypeId="event-1" resourceId="studio-a" />
- *       </BookingProvider>
- *     </ConvexProvider>
+ *     <BookingProvider publicApi={api.public}>
+ *       <Booker eventTypeId="event-1" resourceId="studio-a" />
+ *     </BookingProvider>
+ *   );
+ * }
+ * ```
+ *
+ * @example
+ * ```tsx
+ * // Admin pages (auth required)
+ * import { BookingProvider } from "@mrfinch/booking/react";
+ * import { api } from "./convex/_generated/api";
+ *
+ * function AdminLayout({ children }) {
+ *   return (
+ *     <BookingProvider publicApi={api.public} adminApi={api.admin}>
+ *       {children}
+ *     </BookingProvider>
  *   );
  * }
  * ```
  */
-export function BookingProvider({ api, children }: BookingProviderProps) {
+export function BookingProvider({
+  publicApi,
+  adminApi,
+  children,
+}: BookingProviderProps) {
+  // Merge public and admin APIs using Proxy to preserve Convex's dynamic function references
+  // Note: Spreading Proxy objects (like api.public) doesn't work - it loses the Proxy behavior
+  const mergedApi = useMemo<BookingAPI>(
+    () => {
+      if (!adminApi) return publicApi;
+      // Use Proxy to delegate to both APIs
+      return new Proxy(publicApi as BookingAPI, {
+        get(target, prop) {
+          // Check adminApi first (admin overrides public if overlap)
+          if (adminApi && prop in adminApi) {
+            return (adminApi as any)[prop];
+          }
+          return (target as any)[prop];
+        },
+      });
+    },
+    [publicApi, adminApi]
+  );
+
   return (
-    <BookingContext.Provider value={api}>{children}</BookingContext.Provider>
+    <BookingContext.Provider value={mergedApi}>
+      {children}
+    </BookingContext.Provider>
   );
 }
 
 /**
  * Hook to access the booking API from within a BookingProvider.
+ *
+ * Returns the merged API object containing both public and admin functions
+ * (if adminApi was provided to the BookingProvider).
  *
  * @throws Error if used outside of a BookingProvider
  *
@@ -138,9 +260,16 @@ export function BookingProvider({ api, children }: BookingProviderProps) {
  * ```tsx
  * function MyBookingComponent() {
  *   const api = useBookingAPI();
+ *
+ *   // Public functions - always available
  *   const eventType = useQuery(api.getEventType, { eventTypeId: "event-1" });
  *   const createBooking = useMutation(api.createBooking);
- *   // ...
+ *
+ *   // Admin functions - only available if adminApi was provided
+ *   // TypeScript will show these as optional (with ?)
+ *   const createResource = api.createResource
+ *     ? useMutation(api.createResource)
+ *     : null;
  * }
  * ```
  */
@@ -149,8 +278,21 @@ export function useBookingAPI(): BookingAPI {
   if (!api) {
     throw new Error(
       "useBookingAPI must be used within a BookingProvider. " +
-        "Make sure to wrap your booking components with <BookingProvider api={api.booking}>."
+        "Wrap your booking components with <BookingProvider publicApi={api.public}>."
     );
   }
   return api;
+}
+
+// ============================================
+// LEGACY SUPPORT (Deprecated)
+// ============================================
+
+/**
+ * @deprecated Use BookingProviderProps with publicApi/adminApi instead.
+ * This type is kept for documentation purposes only.
+ */
+export interface LegacyBookingProviderProps {
+  api: PublicBookingAPI & AdminBookingAPI;
+  children: ReactNode;
 }

@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useMutation } from "convex/react";
+import { ConvexError } from "convex/values";
 import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../../context";
 import { useSlotHold } from "../../hooks/use-slot-hold";
@@ -39,6 +40,8 @@ export interface BookerProps {
   onEventTypeReset?: () => void;
   /** Callback for navigation (used when resource is deleted/deactivated) */
   onNavigate?: (path: string) => void;
+  /** Callback when authentication is required (user not signed in) */
+  onAuthRequired?: (slotData: { slot: string; duration: number; eventTypeId: string }) => void;
 }
 
 export function Booker({
@@ -52,6 +55,7 @@ export function Booker({
   onBookingComplete,
   onEventTypeReset,
   onNavigate,
+  onAuthRequired,
 }: BookerProps) {
   const api = useBookingAPI();
 
@@ -151,6 +155,22 @@ export function Booker({
       onBookingComplete?.(completedBookingData);
     } catch (error) {
       console.error("Booking failed:", error);
+
+      // Check for authentication error
+      if (
+        error instanceof ConvexError &&
+        (error.data as { code?: string })?.code === "UNAUTHENTICATED"
+      ) {
+        if (onAuthRequired && selectedSlot) {
+          onAuthRequired({
+            slot: selectedSlot,
+            duration: selectedDuration,
+            eventTypeId,
+          });
+          return;
+        }
+      }
+
       alert("Booking failed. Please try again.");
     } finally {
       setIsSubmitting(false);

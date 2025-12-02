@@ -2,6 +2,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useState, useMemo } from "react";
 import { useMutation } from "convex/react";
+import { ConvexError } from "convex/values";
 import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../../context";
 import { useSlotHold } from "../../hooks/use-slot-hold";
@@ -10,7 +11,7 @@ import { Calendar, CalendarSkeleton } from "../calendar";
 import { BookingForm } from "../form/booking-form";
 import { BookingSuccess } from "../form/booking-success";
 import { BookingErrorDialog } from "./booking-error-dialog";
-export function Booker({ eventTypeId, resourceId, title, description, showHeader = true, organizerName, organizerAvatar, onBookingComplete, onEventTypeReset, onNavigate, }) {
+export function Booker({ eventTypeId, resourceId, title, description, showHeader = true, organizerName, organizerAvatar, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, }) {
     const api = useBookingAPI();
     // Step state
     const [bookingStep, setBookingStep] = useState("event-meta");
@@ -77,6 +78,18 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
         }
         catch (error) {
             console.error("Booking failed:", error);
+            // Check for authentication error
+            if (error instanceof ConvexError &&
+                error.data?.code === "UNAUTHENTICATED") {
+                if (onAuthRequired && selectedSlot) {
+                    onAuthRequired({
+                        slot: selectedSlot,
+                        duration: selectedDuration,
+                        eventTypeId,
+                    });
+                    return;
+                }
+            }
             alert("Booking failed. Please try again.");
         }
         finally {

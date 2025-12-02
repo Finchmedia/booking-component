@@ -54,9 +54,9 @@ export const getResourcesForEventType = query({
     },
 });
 /**
- * Check if a specific link exists
+ * Check if a specific resource-event type link exists
  */
-export const hasLink = query({
+export const hasResourceEventTypeLink = query({
     args: {
         resourceId: v.string(),
         eventTypeId: v.string(),

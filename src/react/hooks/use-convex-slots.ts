@@ -142,10 +142,15 @@ export const useConvexSlots = (
   >(() => {
     if (!daySlots) return undefined;
 
-    const formatted = (daySlots as any[]).map((slot) => ({
-      time: slot.time,
-      attendees: 0,
-    }));
+    const now = Date.now();
+
+    // Map and filter out past slots (slots that have already passed)
+    const formatted = (daySlots as any[])
+      .map((slot) => ({
+        time: slot.time,
+        attendees: 0,
+      }))
+      .filter((slot) => new Date(slot.time).getTime() > now);
 
     formatted.sort(
       (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
