@@ -9,6 +9,7 @@
  */
 
 import type * as availability from "../availability.js";
+import type * as emails from "../emails.js";
 import type * as hooks from "../hooks.js";
 import type * as multi_resource from "../multi_resource.js";
 import type * as presence from "../presence.js";
@@ -27,6 +28,7 @@ import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
   availability: typeof availability;
+  emails: typeof emails;
   hooks: typeof hooks;
   multi_resource: typeof multi_resource;
   presence: typeof presence;
@@ -63,4 +65,6 @@ export const internal: FilterApi<
   FunctionReference<any, "internal">
 > = anyApi as any;
 
-export const components = componentsGeneric() as unknown as {};
+export const components = componentsGeneric() as unknown as {
+  resend: import("@convex-dev/resend/_generated/component.js").ComponentApi<"resend">;
+};

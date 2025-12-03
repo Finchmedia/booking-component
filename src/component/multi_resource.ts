@@ -139,6 +139,11 @@ export const createMultiResourceBooking = mutation({
         value: v.optional(v.string()),
       })
     ),
+    // Resend config passed from main app (components can't access process.env)
+    resendOptions: v.optional(v.object({
+      apiKey: v.string(),
+      fromEmail: v.optional(v.string()),
+    })),
   },
   handler: async (ctx, args) => {
     // 1. Get event type for metadata
@@ -340,6 +345,7 @@ export const createMultiResourceBooking = mutation({
         isMultiResource: true,
         resources: args.resources,
       },
+      resendOptions: args.resendOptions,
     });
 
     // 8. Return the booking
@@ -393,6 +399,11 @@ export const cancelMultiResourceBooking = mutation({
     bookingId: v.id("bookings"),
     reason: v.optional(v.string()),
     cancelledBy: v.optional(v.string()),
+    // Resend config passed from main app (components can't access process.env)
+    resendOptions: v.optional(v.object({
+      apiKey: v.string(),
+      fromEmail: v.optional(v.string()),
+    })),
   },
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
@@ -501,6 +512,7 @@ export const cancelMultiResourceBooking = mutation({
         cancelledBy: args.cancelledBy,
         isMultiResource: true,
       },
+      resendOptions: args.resendOptions,
     });
 
     return { success: true };

@@ -98,9 +98,46 @@ export const triggerHooks = internalMutation({
         eventType: v.string(),
         organizationId: v.optional(v.string()),
         payload: v.any(),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+        })),
     },
     handler: async (ctx, args) => {
-        // Find all enabled hooks for this event type
+        const payload = args.payload;
+        // ========================================
+        // BUILT-IN: Send transactional emails
+        // ========================================
+        if (args.eventType === "booking.created" && payload.bookerEmail) {
+            await ctx.scheduler.runAfter(0, internal.emails.sendBookingConfirmation, {
+                to: payload.bookerEmail,
+                bookerName: payload.bookerName ?? "Guest",
+                eventTitle: payload.eventTitle ?? "Your Booking",
+                start: payload.start,
+                end: payload.end,
+                timezone: payload.timezone ?? "UTC",
+                resourceId: payload.resourceId,
+                resendApiKey: args.resendOptions?.apiKey,
+                resendFromEmail: args.resendOptions?.fromEmail,
+            });
+        }
+        if (args.eventType === "booking.cancelled" && payload.bookerEmail) {
+            await ctx.scheduler.runAfter(0, internal.emails.sendBookingCancellation, {
+                to: payload.bookerEmail,
+                bookerName: payload.bookerName ?? "Guest",
+                eventTitle: payload.eventTitle ?? "Your Booking",
+                start: payload.start,
+                end: payload.end,
+                timezone: payload.timezone ?? "UTC",
+                reason: payload.reason,
+                resendApiKey: args.resendOptions?.apiKey,
+                resendFromEmail: args.resendOptions?.fromEmail,
+            });
+        }
+        // ========================================
+        // CUSTOM: Trigger user-registered hooks
+        // ========================================
         const allHooks = await ctx.db
             .query("hooks")
             .withIndex("by_event", (q) => q.eq("eventType", args.eventType).eq("enabled", true))
@@ -126,7 +163,7 @@ export const triggerHooks = internalMutation({
                 console.error(`Failed to trigger hook ${hook._id}:`, error);
             }
         }
-        return { triggeredCount: hooks.length };
+        return { triggeredCount: hooks.length, emailsSent: true };
     },
 });
 // ============================================
@@ -144,6 +181,11 @@ export const transitionBookingState = mutation({
         toStatus: v.string(),
         reason: v.optional(v.string()),
         changedBy: v.optional(v.string()),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+        })),
     },
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.bookingId);
@@ -187,6 +229,7 @@ export const transitionBookingState = mutation({
                     previousStatus: currentStatus,
                     reason: args.reason,
                 },
+                resendOptions: args.resendOptions,
             });
         }
         return { success: true };

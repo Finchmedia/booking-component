@@ -2,26 +2,15 @@ import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Resend } from "@convex-dev/resend";
 import { components } from "./_generated/api";
-
 // Resend client is created inside handlers with API key from args
 // (Components cannot access process.env - must be passed from main app)
-
 // ============================================
 // EMAIL TEMPLATES (HTML)
 // ============================================
-
-function generateBookingConfirmationHTML(details: {
-    bookerName: string;
-    eventTitle: string;
-    start: number;
-    end: number;
-    timezone: string;
-    resourceId?: string;
-}): string {
+function generateBookingConfirmationHTML(details) {
     const startDate = new Date(details.start);
     const endDate = new Date(details.end);
-
-    const formatOptions: Intl.DateTimeFormatOptions = {
+    const formatOptions = {
         weekday: "long",
         year: "numeric",
         month: "long",
@@ -31,7 +20,6 @@ function generateBookingConfirmationHTML(details: {
         timeZone: details.timezone,
         timeZoneName: "short",
     };
-
     const formattedStart = startDate.toLocaleString("en-US", formatOptions);
     const formattedEnd = endDate.toLocaleString("en-US", {
         hour: "2-digit",
@@ -39,7 +27,6 @@ function generateBookingConfirmationHTML(details: {
         timeZone: details.timezone,
         timeZoneName: "short",
     });
-
     return `
 <!DOCTYPE html>
 <html>
@@ -216,18 +203,9 @@ function generateBookingConfirmationHTML(details: {
 </html>
     `.trim();
 }
-
-function generateBookingCancellationHTML(details: {
-    bookerName: string;
-    eventTitle: string;
-    start: number;
-    end: number;
-    timezone: string;
-    reason?: string;
-}): string {
+function generateBookingCancellationHTML(details) {
     const startDate = new Date(details.start);
-
-    const formatOptions: Intl.DateTimeFormatOptions = {
+    const formatOptions = {
         weekday: "long",
         year: "numeric",
         month: "long",
@@ -237,9 +215,7 @@ function generateBookingCancellationHTML(details: {
         timeZone: details.timezone,
         timeZoneName: "short",
     };
-
     const formattedStart = startDate.toLocaleString("en-US", formatOptions);
-
     return `
 <!DOCTYPE html>
 <html>
@@ -425,11 +401,9 @@ function generateBookingCancellationHTML(details: {
 </html>
     `.trim();
 }
-
 // ============================================
 // EMAIL SENDING MUTATIONS
 // ============================================
-
 export const sendBookingConfirmation = internalMutation({
     args: {
         to: v.string(),
@@ -450,15 +424,12 @@ export const sendBookingConfirmation = internalMutation({
             console.warn("[emails] No resendApiKey provided, skipping confirmation email");
             return { success: false, error: "No API key provided" };
         }
-
         // Create Resend client with API key from args
         const resend = new Resend(components.resend, {
             apiKey: args.resendApiKey,
             testMode: false,
         });
-
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
-
         const html = generateBookingConfirmationHTML({
             bookerName: args.bookerName,
             eventTitle: args.eventTitle,
@@ -467,7 +438,6 @@ export const sendBookingConfirmation = internalMutation({
             timezone: args.timezone,
             resourceId: args.resourceId,
         });
-
         try {
             const emailId = await resend.sendEmail(ctx, {
                 from: fromAddress,
@@ -475,16 +445,15 @@ export const sendBookingConfirmation = internalMutation({
                 subject: `Booking Confirmed: ${args.eventTitle}`,
                 html,
             });
-
             console.log(`[emails] Confirmation sent to ${args.to}, emailId: ${emailId}`);
             return { success: true, emailId };
-        } catch (error) {
+        }
+        catch (error) {
             console.error(`[emails] Failed to send confirmation to ${args.to}:`, error);
             return { success: false, error: String(error) };
         }
     },
 });
-
 export const sendBookingCancellation = internalMutation({
     args: {
         to: v.string(),
@@ -505,15 +474,12 @@ export const sendBookingCancellation = internalMutation({
             console.warn("[emails] No resendApiKey provided, skipping cancellation email");
             return { success: false, error: "No API key provided" };
         }
-
         // Create Resend client with API key from args
         const resend = new Resend(components.resend, {
             apiKey: args.resendApiKey,
             testMode: false,
         });
-
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
-
         const html = generateBookingCancellationHTML({
             bookerName: args.bookerName,
             eventTitle: args.eventTitle,
@@ -522,7 +488,6 @@ export const sendBookingCancellation = internalMutation({
             timezone: args.timezone,
             reason: args.reason,
         });
-
         try {
             const emailId = await resend.sendEmail(ctx, {
                 from: fromAddress,
@@ -530,12 +495,13 @@ export const sendBookingCancellation = internalMutation({
                 subject: `Booking Cancelled: ${args.eventTitle}`,
                 html,
             });
-
             console.log(`[emails] Cancellation sent to ${args.to}, emailId: ${emailId}`);
             return { success: true, emailId };
-        } catch (error) {
+        }
+        catch (error) {
             console.error(`[emails] Failed to send cancellation to ${args.to}:`, error);
             return { success: false, error: String(error) };
         }
     },
 });
+//# sourceMappingURL=emails.js.map

@@ -122,6 +122,11 @@ export const triggerHooks = internalMutation({
     eventType: v.string(),
     organizationId: v.optional(v.string()),
     payload: v.any(),
+    // Resend config passed from main app (components can't access process.env)
+    resendOptions: v.optional(v.object({
+      apiKey: v.string(),
+      fromEmail: v.optional(v.string()),
+    })),
   },
   handler: async (ctx, args) => {
     const payload = args.payload as Record<string, unknown>;
@@ -138,6 +143,8 @@ export const triggerHooks = internalMutation({
         end: payload.end as number,
         timezone: (payload.timezone as string) ?? "UTC",
         resourceId: payload.resourceId as string | undefined,
+        resendApiKey: args.resendOptions?.apiKey,
+        resendFromEmail: args.resendOptions?.fromEmail,
       });
     }
 
@@ -150,6 +157,8 @@ export const triggerHooks = internalMutation({
         end: payload.end as number,
         timezone: (payload.timezone as string) ?? "UTC",
         reason: payload.reason as string | undefined,
+        resendApiKey: args.resendOptions?.apiKey,
+        resendFromEmail: args.resendOptions?.fromEmail,
       });
     }
 
@@ -204,6 +213,11 @@ export const transitionBookingState = mutation({
     toStatus: v.string(),
     reason: v.optional(v.string()),
     changedBy: v.optional(v.string()),
+    // Resend config passed from main app (components can't access process.env)
+    resendOptions: v.optional(v.object({
+      apiKey: v.string(),
+      fromEmail: v.optional(v.string()),
+    })),
   },
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
@@ -257,6 +271,7 @@ export const transitionBookingState = mutation({
           previousStatus: currentStatus,
           reason: args.reason,
         },
+        resendOptions: args.resendOptions,
       });
     }
 

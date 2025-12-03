@@ -7,8 +7,8 @@ export declare const heartbeat: import("convex/server").RegisteredMutation<"publ
     eventTypeId?: string | undefined;
     data?: any;
     resourceId: string;
-    user: string;
     slots: string[];
+    user: string;
 }, Promise<void>>;
 /**
  * Explicitly removes a user from one or more slots.
@@ -17,24 +17,24 @@ export declare const heartbeat: import("convex/server").RegisteredMutation<"publ
  */
 export declare const leave: import("convex/server").RegisteredMutation<"public", {
     resourceId: string;
-    user: string;
     slots: string[];
+    user: string;
 }, Promise<void>>;
 /**
  * Returns a list of users currently present in a slot.
  * filters out stale entries just in case cleanup hasn't run yet.
  */
 export declare const list: import("convex/server").RegisteredQuery<"public", {
-    slot: string;
     resourceId: string;
+    slot: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"presence">;
     _creationTime: number;
     eventTypeId?: string | undefined;
     data?: any;
-    slot: string;
     resourceId: string;
     user: string;
+    slot: string;
     updated: number;
 }[]>>;
 /**
@@ -46,8 +46,8 @@ export declare const list: import("convex/server").RegisteredQuery<"public", {
  * @returns Array of active presence records for that resource+date
  */
 export declare const getDatePresence: import("convex/server").RegisteredQuery<"public", {
-    date: string;
     resourceId: string;
+    date: string;
 }, Promise<{
     slot: string;
     user: string;
@@ -62,8 +62,8 @@ export declare const getDatePresence: import("convex/server").RegisteredQuery<"p
  * @returns Object with count and array of unique user IDs
  */
 export declare const getActivePresenceCount: import("convex/server").RegisteredQuery<"public", {
-    resourceId?: string | undefined;
     eventTypeId?: string | undefined;
+    resourceId?: string | undefined;
 }, Promise<{
     count: number;
     users: string[];
@@ -74,8 +74,8 @@ export declare const getActivePresenceCount: import("convex/server").RegisteredQ
  * If they are still active, reschedules itself.
  */
 export declare const cleanup: import("convex/server").RegisteredMutation<"internal", {
-    slot: string;
     resourceId: string;
     user: string;
+    slot: string;
 }, Promise<void>>;
 //# sourceMappingURL=presence.d.ts.map

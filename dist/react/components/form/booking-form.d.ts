@@ -13,6 +13,18 @@ interface EventType {
     timezone?: string;
     lockTimeZoneToggle?: boolean;
 }
+/**
+ * Current user information for prefilling the form
+ * This data typically comes from the authentication provider
+ */
+export interface CurrentUser {
+    /** User's display name */
+    name?: string;
+    /** User's email address */
+    email?: string;
+    /** User's avatar URL */
+    avatarUrl?: string;
+}
 interface BookingFormProps {
     eventType: EventType;
     selectedSlot: string;
@@ -21,6 +33,8 @@ interface BookingFormProps {
     onSubmit: (data: BookingFormData) => Promise<void>;
     onBack: () => void;
     isSubmitting: boolean;
+    /** Optional: Current logged-in user for prefilling name/email */
+    currentUser?: CurrentUser;
 }
 export declare const BookingForm: React.FC<BookingFormProps>;
 export {};

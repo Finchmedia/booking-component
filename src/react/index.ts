@@ -81,4 +81,4 @@ export {
 } from "./components/calendar";
 
 // Form Components
-export { BookingForm, BookingSuccess } from "./components/form";
+export { BookingForm, BookingSuccess, type CurrentUser } from "./components/form";

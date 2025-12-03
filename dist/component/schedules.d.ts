@@ -3,79 +3,79 @@ export declare const getSchedule: import("convex/server").RegisteredQuery<"publi
 }, Promise<{
     _id: import("convex/values").GenericId<"schedules">;
     _creationTime: number;
-    id: string;
     organizationId: string;
-    name: string;
     timezone: string;
-    createdAt: number;
-    updatedAt: number;
+    id: string;
+    name: string;
     isDefault: boolean;
     weeklyHours: {
         dayOfWeek: number;
         startTime: string;
         endTime: string;
     }[];
+    createdAt: number;
+    updatedAt: number;
 } | null>>;
 export declare const getScheduleById: import("convex/server").RegisteredQuery<"public", {
     scheduleId: import("convex/values").GenericId<"schedules">;
 }, Promise<{
     _id: import("convex/values").GenericId<"schedules">;
     _creationTime: number;
-    id: string;
     organizationId: string;
-    name: string;
     timezone: string;
-    createdAt: number;
-    updatedAt: number;
+    id: string;
+    name: string;
     isDefault: boolean;
     weeklyHours: {
         dayOfWeek: number;
         startTime: string;
         endTime: string;
     }[];
+    createdAt: number;
+    updatedAt: number;
 } | null>>;
 export declare const listSchedules: import("convex/server").RegisteredQuery<"public", {
     organizationId: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"schedules">;
     _creationTime: number;
-    id: string;
     organizationId: string;
-    name: string;
     timezone: string;
-    createdAt: number;
-    updatedAt: number;
+    id: string;
+    name: string;
     isDefault: boolean;
     weeklyHours: {
         dayOfWeek: number;
         startTime: string;
         endTime: string;
     }[];
+    createdAt: number;
+    updatedAt: number;
 }[]>>;
 export declare const getDefaultSchedule: import("convex/server").RegisteredQuery<"public", {
     organizationId: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"schedules">;
     _creationTime: number;
-    id: string;
     organizationId: string;
-    name: string;
     timezone: string;
-    createdAt: number;
-    updatedAt: number;
+    id: string;
+    name: string;
     isDefault: boolean;
     weeklyHours: {
         dayOfWeek: number;
         startTime: string;
         endTime: string;
     }[];
+    createdAt: number;
+    updatedAt: number;
 }>>;
 export declare const createSchedule: import("convex/server").RegisteredMutation<"public", {
     isDefault?: boolean | undefined;
-    id: string;
     organizationId: string;
-    name: string;
     timezone: string;
+    id: string;
+    name: string;
     weeklyHours: {
         dayOfWeek: number;
         startTime: string;
@@ -83,8 +83,8 @@ export declare const createSchedule: import("convex/server").RegisteredMutation<
     }[];
 }, Promise<import("convex/values").GenericId<"schedules">>>;
 export declare const updateSchedule: import("convex/server").RegisteredMutation<"public", {
-    name?: string | undefined;
     timezone?: string | undefined;
+    name?: string | undefined;
     isDefault?: boolean | undefined;
     weeklyHours?: {
         dayOfWeek: number;
@@ -110,8 +110,8 @@ export declare const listDateOverrides: import("convex/server").RegisteredQuery<
         endTime: string;
     }[] | undefined;
     date: string;
-    type: string;
     scheduleId: import("convex/values").GenericId<"schedules">;
+    type: string;
 }[]>>;
 export declare const getDateOverride: import("convex/server").RegisteredQuery<"public", {
     date: string;
@@ -124,8 +124,8 @@ export declare const getDateOverride: import("convex/server").RegisteredQuery<"p
         endTime: string;
     }[] | undefined;
     date: string;
-    type: string;
     scheduleId: import("convex/values").GenericId<"schedules">;
+    type: string;
 } | null>>;
 export declare const createDateOverride: import("convex/server").RegisteredMutation<"public", {
     customHours?: {
@@ -133,8 +133,8 @@ export declare const createDateOverride: import("convex/server").RegisteredMutat
         endTime: string;
     }[] | undefined;
     date: string;
-    type: string;
     scheduleId: import("convex/values").GenericId<"schedules">;
+    type: string;
 }, Promise<import("convex/values").GenericId<"date_overrides">>>;
 export declare const updateDateOverride: import("convex/server").RegisteredMutation<"public", {
     type?: string | undefined;

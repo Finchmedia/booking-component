@@ -26,6 +26,19 @@ interface EventType {
   lockTimeZoneToggle?: boolean;
 }
 
+/**
+ * Current user information for prefilling the form
+ * This data typically comes from the authentication provider
+ */
+export interface CurrentUser {
+  /** User's display name */
+  name?: string;
+  /** User's email address */
+  email?: string;
+  /** User's avatar URL */
+  avatarUrl?: string;
+}
+
 interface BookingFormProps {
   eventType: EventType;
   selectedSlot: string; // ISO timestamp
@@ -34,6 +47,8 @@ interface BookingFormProps {
   onSubmit: (data: BookingFormData) => Promise<void>;
   onBack: () => void;
   isSubmitting: boolean;
+  /** Optional: Current logged-in user for prefilling name/email */
+  currentUser?: CurrentUser;
 }
 
 export const BookingForm: React.FC<BookingFormProps> = ({
@@ -44,14 +59,23 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   onSubmit,
   onBack,
   isSubmitting,
+  currentUser,
 }) => {
+  // Check if user has prefilled data
+  const isPrefilled = !!(currentUser?.name || currentUser?.email);
+
   const {
     register,
     handleSubmit,
     formState: { errors },
   } = useForm<BookingFormValues>({
     resolver: zodResolver(bookingFormSchema),
-    defaultValues: { name: "", email: "", phone: "", notes: "" },
+    defaultValues: {
+      name: currentUser?.name ?? "",
+      email: currentUser?.email ?? "",
+      phone: "",
+      notes: "",
+    },
   });
 
   const submitHandler = async (data: BookingFormValues) => {
@@ -83,6 +107,31 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           </p>
         </div>
 
+        {/* User identity indicator when logged in */}
+        {isPrefilled && (
+          <div className="flex items-center gap-3 mb-6 p-3 rounded-lg bg-muted/50 border border-border">
+            {currentUser?.avatarUrl ? (
+              <img
+                src={currentUser.avatarUrl}
+                alt={currentUser.name ?? "User"}
+                className="w-10 h-10 rounded-full object-cover"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
+                {(currentUser?.name ?? currentUser?.email ?? "U")[0].toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1">
+              <p className="text-sm font-medium text-foreground">
+                Booking as {currentUser?.name ?? currentUser?.email}
+              </p>
+              {currentUser?.email && currentUser?.name && (
+                <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+              )}
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit(submitHandler)} className="space-y-4">
           {/* Name Field */}
           <div className="space-y-2">
@@ -108,7 +157,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               {...register("email")}
               type="email"
               placeholder="john@example.com"
-              className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring"
+              readOnly={!!currentUser?.email}
+              className={`w-full px-3 py-2 rounded-md border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring ${
+                currentUser?.email
+                  ? "bg-muted/50 cursor-not-allowed opacity-75"
+                  : "bg-muted"
+              }`}
             />
             {errors.email && (
               <p className="text-sm text-destructive">{errors.email.message}</p>

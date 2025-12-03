@@ -1,3 +1,4 @@
+import { type CurrentUser } from "../form/booking-form";
 import type { Booking } from "../../types";
 export interface BookerProps {
     /** Event type ID to book */
@@ -14,6 +15,8 @@ export interface BookerProps {
     organizerName?: string;
     /** Organizer avatar URL */
     organizerAvatar?: string;
+    /** Current logged-in user for prefilling name/email in the form */
+    currentUser?: CurrentUser;
     /** Callback when booking is successfully created */
     onBookingComplete?: (booking: Booking) => void;
     /** Callback to reset event type selection (for embedded Booker) */
@@ -27,5 +30,5 @@ export interface BookerProps {
         eventTypeId: string;
     }) => void;
 }
-export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, }: BookerProps): import("react/jsx-runtime").JSX.Element;
+export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, currentUser, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, }: BookerProps): import("react/jsx-runtime").JSX.Element;
 //# sourceMappingURL=booker.d.ts.map

@@ -8,7 +8,7 @@ import { useBookingAPI } from "../../context";
 import { useSlotHold } from "../../hooks/use-slot-hold";
 import { useBookingValidation } from "../../hooks/use-booking-validation";
 import { Calendar, CalendarSkeleton } from "../calendar";
-import { BookingForm } from "../form/booking-form";
+import { BookingForm, type CurrentUser } from "../form/booking-form";
 import { BookingSuccess } from "../form/booking-success";
 import { BookingErrorDialog } from "./booking-error-dialog";
 import type {
@@ -34,6 +34,8 @@ export interface BookerProps {
   organizerName?: string;
   /** Organizer avatar URL */
   organizerAvatar?: string;
+  /** Current logged-in user for prefilling name/email in the form */
+  currentUser?: CurrentUser;
   /** Callback when booking is successfully created */
   onBookingComplete?: (booking: Booking) => void;
   /** Callback to reset event type selection (for embedded Booker) */
@@ -52,6 +54,7 @@ export function Booker({
   showHeader = true,
   organizerName,
   organizerAvatar,
+  currentUser,
   onBookingComplete,
   onEventTypeReset,
   onNavigate,
@@ -278,6 +281,7 @@ export function Booker({
             onSubmit={handleFormSubmit}
             onBack={handleBack}
             isSubmitting={isSubmitting}
+            currentUser={currentUser}
           />
         </div>
       )}

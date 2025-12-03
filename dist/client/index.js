@@ -150,6 +150,10 @@ export function makeBookingAPI(component) {
                 actorId: v.string(),
                 start: v.number(),
                 end: v.number(),
+                resendOptions: v.optional(v.object({
+                    apiKey: v.string(),
+                    fromEmail: v.optional(v.string()),
+                })),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.public.createReservation, args);
@@ -172,6 +176,10 @@ export function makeBookingAPI(component) {
                     type: v.string(),
                     value: v.optional(v.string()),
                 }),
+                resendOptions: v.optional(v.object({
+                    apiKey: v.string(),
+                    fromEmail: v.optional(v.string()),
+                })),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.public.createBooking, args);
@@ -206,10 +214,17 @@ export function makeBookingAPI(component) {
             },
         }),
         cancelReservation: mutationGeneric({
-            args: { reservationId: v.string() },
+            args: {
+                reservationId: v.string(),
+                resendOptions: v.optional(v.object({
+                    apiKey: v.string(),
+                    fromEmail: v.optional(v.string()),
+                })),
+            },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.public.cancelReservation, {
                     reservationId: args.reservationId,
+                    resendOptions: args.resendOptions,
                 });
             },
         }),
@@ -494,6 +509,10 @@ export function makeBookingAPI(component) {
                     type: v.string(),
                     value: v.optional(v.string()),
                 })),
+                resendOptions: v.optional(v.object({
+                    apiKey: v.string(),
+                    fromEmail: v.optional(v.string()),
+                })),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.multi_resource.createMultiResourceBooking, args);
@@ -512,12 +531,17 @@ export function makeBookingAPI(component) {
                 bookingId: v.string(),
                 reason: v.optional(v.string()),
                 cancelledBy: v.optional(v.string()),
+                resendOptions: v.optional(v.object({
+                    apiKey: v.string(),
+                    fromEmail: v.optional(v.string()),
+                })),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.multi_resource.cancelMultiResourceBooking, {
                     bookingId: args.bookingId,
                     reason: args.reason,
                     cancelledBy: args.cancelledBy,
+                    resendOptions: args.resendOptions,
                 });
             },
         }),
@@ -548,6 +572,10 @@ export function makeBookingAPI(component) {
                 toStatus: v.string(),
                 reason: v.optional(v.string()),
                 changedBy: v.optional(v.string()),
+                resendOptions: v.optional(v.object({
+                    apiKey: v.string(),
+                    fromEmail: v.optional(v.string()),
+                })),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.hooks.transitionBookingState, {
@@ -555,6 +583,7 @@ export function makeBookingAPI(component) {
                     toStatus: args.toStatus,
                     reason: args.reason,
                     changedBy: args.changedBy,
+                    resendOptions: args.resendOptions,
                 });
             },
         }),

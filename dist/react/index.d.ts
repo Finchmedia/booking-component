@@ -13,5 +13,5 @@ export { bookingFormSchema, type BookingFormValues } from "./utils/validation";
 export { Booker, type BookerProps } from "./components/booker";
 export { BookingErrorDialog } from "./components/booker";
 export { Calendar, CalendarGrid, CalendarNavigation, CalendarDayButton, TimeSlotsPanel, TimeSlotButton, EventMetaPanel, } from "./components/calendar";
-export { BookingForm, BookingSuccess } from "./components/form";
+export { BookingForm, BookingSuccess, type CurrentUser } from "./components/form";
 //# sourceMappingURL=index.d.ts.map

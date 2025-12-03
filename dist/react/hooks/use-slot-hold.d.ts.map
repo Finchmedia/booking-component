@@ -1,1 +1,1 @@
-{"version":3,"file":"use-slot-hold.d.ts","sourceRoot":"","sources":["../../../src/react/hooks/use-slot-hold.ts"],"names":[],"mappings":"AAOA;;;;;;;;;;;;GAYG;AACH,wBAAgB,WAAW,CACzB,UAAU,EAAE,MAAM,EAClB,MAAM,EAAE,MAAM,GAAG,IAAI,EACrB,eAAe,GAAE,MAAW,EAC5B,WAAW,CAAC,EAAE,MAAM,OA2CrB"}
+{"version":3,"file":"use-slot-hold.d.ts","sourceRoot":"","sources":["../../../src/react/hooks/use-slot-hold.ts"],"names":[],"mappings":"AAOA;;;;;;;;;;;;GAYG;AACH,wBAAgB,WAAW,CACzB,UAAU,EAAE,MAAM,EAClB,MAAM,EAAE,MAAM,GAAG,IAAI,EACrB,eAAe,GAAE,MAAW,EAC5B,WAAW,CAAC,EAAE,MAAM,UA2CrB"}

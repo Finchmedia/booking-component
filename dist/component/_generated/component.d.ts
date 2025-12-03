@@ -39,6 +39,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             bookingId: string;
             changedBy?: string;
             reason?: string;
+            resendOptions?: {
+                apiKey: string;
+                fromEmail?: string;
+            };
             toStatus: string;
         }, any, Name>;
         unregisterHook: FunctionReference<"mutation", "internal", {
@@ -55,6 +59,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             bookingId: string;
             cancelledBy?: string;
             reason?: string;
+            resendOptions?: {
+                apiKey: string;
+                fromEmail?: string;
+            };
         }, any, Name>;
         checkMultiResourceAvailability: FunctionReference<"query", "internal", {
             end: number;
@@ -78,6 +86,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 value?: string;
             };
             organizationId?: string;
+            resendOptions?: {
+                apiKey: string;
+                fromEmail?: string;
+            };
             resources: Array<{
                 quantity?: number;
                 resourceId: string;
@@ -117,6 +129,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
     };
     public: {
         cancelReservation: FunctionReference<"mutation", "internal", {
+            resendOptions?: {
+                apiKey: string;
+                fromEmail?: string;
+            };
             reservationId: string;
         }, any, Name>;
         createBooking: FunctionReference<"mutation", "internal", {
@@ -131,6 +147,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             location: {
                 type: string;
                 value?: string;
+            };
+            resendOptions?: {
+                apiKey: string;
+                fromEmail?: string;
             };
             resourceId: string;
             start: number;
@@ -163,6 +183,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         createReservation: FunctionReference<"mutation", "internal", {
             actorId: string;
             end: number;
+            resendOptions?: {
+                apiKey: string;
+                fromEmail?: string;
+            };
             resourceId: string;
             start: number;
         }, any, Name>;
@@ -181,9 +205,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             uid: string;
         }, any, Name>;
         getDaySlots: FunctionReference<"query", "internal", {
+            availableSlots?: Array<number>;
             date: string;
             eventLength: number;
             resourceId: string;
+            resourceTimezone?: string;
             slotInterval?: number;
         }, any, Name>;
         getEventType: FunctionReference<"query", "internal", {
@@ -198,6 +224,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             dateTo: string;
             eventLength: number;
             resourceId: string;
+            resourceTimezone?: string;
             slotInterval?: number;
         }, any, Name>;
         listBookings: FunctionReference<"query", "internal", {

@@ -1,1 +1,1 @@
-{"version":3,"file":"convex.config.js","sourceRoot":"","sources":["../../src/component/convex.config.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,eAAe,EAAE,MAAM,eAAe,CAAC;AAEhD,eAAe,eAAe,CAAC,SAAS,CAAC,CAAC"}
+{"version":3,"file":"convex.config.js","sourceRoot":"","sources":["../../src/component/convex.config.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,eAAe,EAAE,MAAM,eAAe,CAAC;AAChD,OAAO,MAAM,MAAM,qCAAqC,CAAC;AAEzD,MAAM,SAAS,GAAG,eAAe,CAAC,SAAS,CAAC,CAAC;AAC7C,SAAS,CAAC,GAAG,CAAC,MAAM,CAAC,CAAC;AAEtB,eAAe,SAAS,CAAC"}

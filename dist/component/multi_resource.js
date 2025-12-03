@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots } from "./utils";
 // ============================================
@@ -101,6 +102,11 @@ export const createMultiResourceBooking = mutation({
         location: v.optional(v.object({
             type: v.string(),
             value: v.optional(v.string()),
+        })),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
         })),
     },
     handler: async (ctx, args) => {
@@ -254,7 +260,27 @@ export const createMultiResourceBooking = mutation({
             reason: "Booking created",
             timestamp: now,
         });
-        // 7. Return the booking
+        // 7. Trigger booking.created hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.created",
+            organizationId: args.organizationId,
+            payload: {
+                bookingId,
+                resourceId: primaryResourceId,
+                eventTypeId: args.eventTypeId,
+                start: args.start,
+                end: args.end,
+                timezone: args.timezone,
+                status: eventType.requiresConfirmation ? "pending" : "confirmed",
+                bookerName: args.booker.name,
+                bookerEmail: args.booker.email,
+                eventTitle: eventType.title,
+                isMultiResource: true,
+                resources: args.resources,
+            },
+            resendOptions: args.resendOptions,
+        });
+        // 8. Return the booking
         const booking = await ctx.db.get(bookingId);
         return booking;
     },
@@ -297,6 +323,11 @@ export const cancelMultiResourceBooking = mutation({
         bookingId: v.id("bookings"),
         reason: v.optional(v.string()),
         cancelledBy: v.optional(v.string()),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+        })),
     },
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.bookingId);
@@ -368,6 +399,25 @@ export const cancelMultiResourceBooking = mutation({
             changedBy: args.cancelledBy ?? "unknown",
             reason: args.reason,
             timestamp: now,
+        });
+        // Trigger booking.cancelled hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.cancelled",
+            organizationId: booking.organizationId,
+            payload: {
+                bookingId: args.bookingId,
+                resourceId: booking.resourceId,
+                eventTypeId: booking.eventTypeId,
+                start: booking.start,
+                end: booking.end,
+                status: "cancelled",
+                bookerEmail: booking.bookerEmail,
+                previousStatus: booking.status,
+                reason: args.reason,
+                cancelledBy: args.cancelledBy,
+                isMultiResource: true,
+            },
+            resendOptions: args.resendOptions,
         });
         return { success: true };
     },

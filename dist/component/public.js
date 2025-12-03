@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, areSlotsAvailable, isDayAvailable, getDateInTimezone, } from "./utils";
 import { isAvailable } from "./availability";
@@ -122,6 +123,11 @@ export const createReservation = mutation({
         actorId: v.string(),
         start: v.number(),
         end: v.number(),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+        })),
     },
     handler: async (ctx, args) => {
         const { resourceId, start, end, actorId } = args;
@@ -178,6 +184,19 @@ export const createReservation = mutation({
             createdAt: Date.now(),
             updatedAt: Date.now(),
         });
+        // Trigger booking.created hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.created",
+            payload: {
+                bookingId,
+                resourceId,
+                start,
+                end,
+                status: "confirmed",
+                bookerEmail: actorId,
+            },
+            resendOptions: args.resendOptions,
+        });
         return bookingId;
     },
 });
@@ -202,6 +221,11 @@ export const createBooking = mutation({
             type: v.string(),
             value: v.optional(v.string()),
         }),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+        })),
     },
     handler: async (ctx, args) => {
         // 1. Fetch event type (for snapshot)
@@ -286,7 +310,24 @@ export const createBooking = mutation({
                 busySlots: busyChunks,
             });
         }
-        // 8. Return full booking object
+        // 8. Trigger booking.created hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.created",
+            payload: {
+                bookingId,
+                resourceId: args.resourceId,
+                eventTypeId: args.eventTypeId,
+                start: args.start,
+                end: args.end,
+                timezone: args.timezone,
+                status: "confirmed",
+                bookerName: args.booker.name,
+                bookerEmail: args.booker.email,
+                eventTitle: eventType.title,
+            },
+            resendOptions: args.resendOptions,
+        });
+        // 9. Return full booking object
         return await ctx.db.get(bookingId);
     },
 });
@@ -299,6 +340,11 @@ export const getBooking = query({
 export const cancelReservation = mutation({
     args: {
         reservationId: v.id("bookings"),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+        })),
     },
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.reservationId);
@@ -323,6 +369,22 @@ export const cancelReservation = mutation({
         }
         // 3. Update booking status
         await ctx.db.patch(args.reservationId, { status: "cancelled" });
+        // 4. Trigger booking.cancelled hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.cancelled",
+            organizationId: booking.organizationId,
+            payload: {
+                bookingId: args.reservationId,
+                resourceId: booking.resourceId,
+                eventTypeId: booking.eventTypeId,
+                start: booking.start,
+                end: booking.end,
+                status: "cancelled",
+                bookerEmail: booking.bookerEmail,
+                previousStatus: booking.status,
+            },
+            resendOptions: args.resendOptions,
+        });
     },
 });
 export const createEventType = mutation({

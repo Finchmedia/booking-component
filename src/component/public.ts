@@ -161,6 +161,11 @@ export const createReservation = mutation({
         actorId: v.string(),
         start: v.number(),
         end: v.number(),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+        })),
     },
     handler: async (ctx, args) => {
         const { resourceId, start, end, actorId } = args;
@@ -236,6 +241,7 @@ export const createReservation = mutation({
                 status: "confirmed",
                 bookerEmail: actorId,
             },
+            resendOptions: args.resendOptions,
         });
 
         return bookingId;
@@ -266,6 +272,12 @@ export const createBooking = mutation({
       type: v.string(),
       value: v.optional(v.string()),
     }),
+
+    // Resend config passed from main app (components can't access process.env)
+    resendOptions: v.optional(v.object({
+      apiKey: v.string(),
+      fromEmail: v.optional(v.string()),
+    })),
   },
 
   handler: async (ctx, args) => {
@@ -383,6 +395,7 @@ export const createBooking = mutation({
         bookerEmail: args.booker.email,
         eventTitle: eventType.title,
       },
+      resendOptions: args.resendOptions,
     });
 
     // 9. Return full booking object
@@ -400,6 +413,11 @@ export const getBooking = query({
 export const cancelReservation = mutation({
     args: {
         reservationId: v.id("bookings"),
+        // Resend config passed from main app (components can't access process.env)
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+        })),
     },
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.reservationId);
@@ -448,6 +466,7 @@ export const cancelReservation = mutation({
                 bookerEmail: booking.bookerEmail,
                 previousStatus: booking.status,
             },
+            resendOptions: args.resendOptions,
         });
     },
 });
