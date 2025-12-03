@@ -1,6 +1,14 @@
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { getRequiredSlots, generateDaySlots, areSlotsAvailable, isDayAvailable } from "./utils";
+import {
+    getRequiredSlots,
+    generateDaySlots,
+    generateDaySlotsWithTimezone,
+    areSlotsAvailable,
+    isDayAvailable,
+    getDateInTimezone,
+} from "./utils";
 import { isAvailable } from "./availability";
 
 export const getEventType = query({
@@ -35,6 +43,11 @@ export const getAvailability = query({
 /**
  * Gets availability status for a date range
  * Optimized for month view: Returns boolean map, no slot objects
+ *
+ * TIMEZONE HANDLING:
+ * - dateFrom/dateTo are expected to be ISO date strings (e.g., "2025-06-17")
+ * - These are interpreted as UTC dates for consistency
+ * - The resourceTimezone parameter (optional) can be used for timezone-aware availability
  */
 export const getMonthAvailability = query({
     args: {
@@ -43,13 +56,15 @@ export const getMonthAvailability = query({
         dateTo: v.string(), // "2025-06-20"
         eventLength: v.number(), // Duration in minutes (e.g., 30)
         slotInterval: v.optional(v.number()), // Slot interval
+        resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
     },
     handler: async (ctx, args) => {
         const { resourceId, dateFrom, dateTo, eventLength } = args;
 
-        // Parse dates
-        const startDate = new Date(dateFrom);
-        const endDate = new Date(dateTo);
+        // Parse dates with explicit UTC context to avoid timezone bugs
+        // Adding T00:00:00.000Z ensures we get UTC midnight, not local midnight
+        const startDate = new Date(dateFrom + "T00:00:00.000Z");
+        const endDate = new Date(dateTo + "T00:00:00.000Z");
 
         // Result object: { "2025-06-17": true, "2025-06-18": false }
         const availabilityByDate: Record<string, boolean> = {};
@@ -57,6 +72,7 @@ export const getMonthAvailability = query({
         // Iterate through each day in the range
         let currentDate = new Date(startDate);
         while (currentDate <= endDate) {
+            // Extract date string in UTC context
             const dateStr = currentDate.toISOString().split("T")[0];
 
             // Fetch availability data for this day
@@ -74,8 +90,8 @@ export const getMonthAvailability = query({
 
             availabilityByDate[dateStr] = hasAvailability;
 
-            // Move to next day
-            currentDate.setDate(currentDate.getDate() + 1);
+            // Move to next day (using UTC methods to avoid DST issues)
+            currentDate.setUTCDate(currentDate.getUTCDate() + 1);
         }
 
         return availabilityByDate;
@@ -85,19 +101,40 @@ export const getMonthAvailability = query({
 /**
  * Gets detailed slots for a SINGLE day
  * Used for day view / slot picker
+ *
+ * TIMEZONE HANDLING:
+ * - date is expected to be an ISO date string (e.g., "2025-06-17")
+ * - If resourceTimezone is provided, slots are generated in that timezone context
+ * - If availableSlots are provided (from schedule), those are used instead of hardcoded business hours
  */
 export const getDaySlots = query({
     args: {
         resourceId: v.string(),
         date: v.string(), // "2025-06-17"
         eventLength: v.number(), // Duration in minutes
-        slotInterval: v.optional(v.number()), // Step between slots (default: 15 or equal to eventLength if business logic dictates, but utils defaults to 15)
+        slotInterval: v.optional(v.number()), // Step between slots (default: 15)
+        resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
+        availableSlots: v.optional(v.array(v.number())), // Schedule-based available slot indices (in resource's local timezone)
     },
     handler: async (ctx, args) => {
-        const { resourceId, date, eventLength, slotInterval } = args;
+        const { resourceId, date, eventLength, slotInterval, resourceTimezone, availableSlots } = args;
 
         // Generate all possible slots for this day
-        const possibleSlots = generateDaySlots(date, eventLength, slotInterval);
+        let possibleSlots;
+
+        if (resourceTimezone && availableSlots && availableSlots.length > 0) {
+            // Use timezone-aware slot generation with schedule-based hours
+            possibleSlots = generateDaySlotsWithTimezone(
+                date,
+                eventLength,
+                slotInterval ?? 15,
+                availableSlots,
+                resourceTimezone
+            );
+        } else {
+            // Fallback to legacy hardcoded business hours (UTC-based)
+            possibleSlots = generateDaySlots(date, eventLength, slotInterval);
+        }
 
         // Fetch availability data for this day
         const availabilityDoc = await ctx.db
@@ -110,11 +147,11 @@ export const getDaySlots = query({
         const busySlots = availabilityDoc?.busySlots || [];
 
         // Filter to only available slots
-        const availableSlots = possibleSlots
+        const available = possibleSlots
             .filter((slot) => areSlotsAvailable(slot.slots, busySlots))
             .map((slot) => ({ time: slot.start }));
 
-        return availableSlots;
+        return available;
     },
 });
 
@@ -186,6 +223,19 @@ export const createReservation = mutation({
             location: { type: "unknown" },
             createdAt: Date.now(),
             updatedAt: Date.now(),
+        });
+
+        // Trigger booking.created hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.created",
+            payload: {
+                bookingId,
+                resourceId,
+                start,
+                end,
+                status: "confirmed",
+                bookerEmail: actorId,
+            },
         });
 
         return bookingId;
@@ -318,7 +368,24 @@ export const createBooking = mutation({
       });
     }
 
-    // 8. Return full booking object
+    // 8. Trigger booking.created hook
+    await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+      eventType: "booking.created",
+      payload: {
+        bookingId,
+        resourceId: args.resourceId,
+        eventTypeId: args.eventTypeId,
+        start: args.start,
+        end: args.end,
+        timezone: args.timezone,
+        status: "confirmed",
+        bookerName: args.booker.name,
+        bookerEmail: args.booker.email,
+        eventTitle: eventType.title,
+      },
+    });
+
+    // 9. Return full booking object
     return await ctx.db.get(bookingId);
   },
 });
@@ -366,6 +433,22 @@ export const cancelReservation = mutation({
 
         // 3. Update booking status
         await ctx.db.patch(args.reservationId, { status: "cancelled" });
+
+        // 4. Trigger booking.cancelled hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.cancelled",
+            organizationId: booking.organizationId,
+            payload: {
+                bookingId: args.reservationId,
+                resourceId: booking.resourceId,
+                eventTypeId: booking.eventTypeId,
+                start: booking.start,
+                end: booking.end,
+                status: "cancelled",
+                bookerEmail: booking.bookerEmail,
+                previousStatus: booking.status,
+            },
+        });
     },
 });
 

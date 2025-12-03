@@ -90,7 +90,6 @@ export const Calendar: React.FC<CalendarProps> = ({
     availableSlots,
     reservedSlots,
     isLoading,
-    isReloading,
     fetchMonthSlots,
     fetchSlots,
   } = useConvexSlots(
@@ -98,7 +97,8 @@ export const Calendar: React.FC<CalendarProps> = ({
     eventLength,
     slotInterval,
     allDurationOptions,
-    hasIntersected
+    hasIntersected,
+    timezone // Pass timezone for proper date string generation
   );
 
   // Auto-select today's date
@@ -190,20 +190,21 @@ export const Calendar: React.FC<CalendarProps> = ({
           onDateSelect={handleDateSelect}
           onPreviousMonth={goToPreviousMonth}
           onNextMonth={goToNextMonth}
+          timezone={timezone}
         />
 
-        {/* Time Slots Panel (timezone removed) */}
+        {/* Time Slots Panel */}
         <TimeSlotsPanel
           selectedDate={selectedDate}
           availableSlots={availableSlots}
           reservedSlots={reservedSlots}
           loading={isLoading}
-          isReloading={isReloading}
           timeFormat={timeFormat}
           onTimeFormatChange={onTimeFormatChange}
           onSlotSelect={(slot) =>
             onSlotSelect({ slot, duration: selectedDuration })
           }
+          timezone={timezone}
         />
       </div>
     </div>

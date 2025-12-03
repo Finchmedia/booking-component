@@ -13,6 +13,7 @@ interface CalendarGridProps {
   onDateSelect: (date: Date) => void;
   onPreviousMonth: () => void;
   onNextMonth: () => void;
+  timezone: string; // IANA timezone for date calculations
 }
 
 export const CalendarGrid: React.FC<CalendarGridProps> = ({
@@ -22,11 +23,13 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
   onDateSelect,
   onPreviousMonth,
   onNextMonth,
+  timezone,
 }) => {
   const calendarDays = generateCalendarDays(
     currentDate,
     selectedDate,
-    monthSlots
+    monthSlots,
+    timezone
   );
 
   return (

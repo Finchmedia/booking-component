@@ -35,7 +35,8 @@ selectedDate, onDateChange, currentMonth, onMonthChange, selectedDuration, onDur
         triggerOnce: true,
     });
     // Use Convex hook for slots data - only enabled when visible
-    const { monthSlots, availableSlots, reservedSlots, isLoading, isReloading, fetchMonthSlots, fetchSlots, } = useConvexSlots(resourceId, eventLength, slotInterval, allDurationOptions, hasIntersected);
+    const { monthSlots, availableSlots, reservedSlots, isLoading, fetchMonthSlots, fetchSlots, } = useConvexSlots(resourceId, eventLength, slotInterval, allDurationOptions, hasIntersected, timezone // Pass timezone for proper date string generation
+    );
     // Auto-select today's date
     const autoSelectToday = () => {
         if (!selectedDate) {
@@ -79,6 +80,6 @@ selectedDate, onDateChange, currentMonth, onMonthChange, selectedDuration, onDur
             fetchSlots(selectedDate);
         }
     }, [selectedDate, fetchSlots]);
-    return (_jsxs("div", { ref: calendarRef, className: "bg-card overflow-hidden rounded-xl border border-border shadow", children: [showHeader && (_jsxs("div", { className: "border-b border-border p-6 text-center", children: [_jsx("h1", { className: "mb-2 text-2xl font-bold text-foreground", children: title }), _jsx("p", { className: "text-muted-foreground", children: description })] })), _jsxs("div", { className: "flex flex-col md:flex-row", children: [_jsx(EventMetaPanel, { eventType: eventType, selectedDuration: selectedDuration, onDurationChange: onDurationChange, userTimezone: timezone, onTimezoneChange: onTimezoneChange, timezoneLocked: isTimezoneLocked, organizerName: organizerName, organizerAvatar: organizerAvatar }), _jsx(CalendarGrid, { currentDate: currentMonth, selectedDate: selectedDate, monthSlots: monthSlots, onDateSelect: handleDateSelect, onPreviousMonth: goToPreviousMonth, onNextMonth: goToNextMonth }), _jsx(TimeSlotsPanel, { selectedDate: selectedDate, availableSlots: availableSlots, reservedSlots: reservedSlots, loading: isLoading, isReloading: isReloading, timeFormat: timeFormat, onTimeFormatChange: onTimeFormatChange, onSlotSelect: (slot) => onSlotSelect({ slot, duration: selectedDuration }) })] })] }));
+    return (_jsxs("div", { ref: calendarRef, className: "bg-card overflow-hidden rounded-xl border border-border shadow", children: [showHeader && (_jsxs("div", { className: "border-b border-border p-6 text-center", children: [_jsx("h1", { className: "mb-2 text-2xl font-bold text-foreground", children: title }), _jsx("p", { className: "text-muted-foreground", children: description })] })), _jsxs("div", { className: "flex flex-col md:flex-row", children: [_jsx(EventMetaPanel, { eventType: eventType, selectedDuration: selectedDuration, onDurationChange: onDurationChange, userTimezone: timezone, onTimezoneChange: onTimezoneChange, timezoneLocked: isTimezoneLocked, organizerName: organizerName, organizerAvatar: organizerAvatar }), _jsx(CalendarGrid, { currentDate: currentMonth, selectedDate: selectedDate, monthSlots: monthSlots, onDateSelect: handleDateSelect, onPreviousMonth: goToPreviousMonth, onNextMonth: goToNextMonth, timezone: timezone }), _jsx(TimeSlotsPanel, { selectedDate: selectedDate, availableSlots: availableSlots, reservedSlots: reservedSlots, loading: isLoading, timeFormat: timeFormat, onTimeFormatChange: onTimeFormatChange, onSlotSelect: (slot) => onSlotSelect({ slot, duration: selectedDuration }), timezone: timezone })] })] }));
 };
 //# sourceMappingURL=calendar.js.map

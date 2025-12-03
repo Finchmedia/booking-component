@@ -8,11 +8,11 @@ interface TimeSlotsPanelProps {
   selectedDate: Date | null;
   availableSlots: CalcomSlot[];
   reservedSlots: CalcomSlot[]; // Slots held by other users
-  loading: boolean; // Initial loading (skeleton)
-  isReloading: boolean; // Reloading (opacity)
+  loading: boolean;
   timeFormat: "12h" | "24h";
   onTimeFormatChange: (format: "12h" | "24h") => void;
   onSlotSelect: (slotTime: string) => void;
+  timezone: string; // User's selected/locked timezone for display
 }
 
 export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
@@ -20,13 +20,13 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
   availableSlots,
   reservedSlots,
   loading,
-  isReloading,
   timeFormat,
   onTimeFormatChange,
   onSlotSelect,
+  timezone,
 }) => {
-  // Get user's timezone for displaying slot times
-  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // Use passed timezone for displaying slot times (may be locked to event type TZ)
+  const displayTimezone = timezone;
 
   // Merge available and reserved slots into single chronologically-sorted list
   const allSlots = React.useMemo(() => {
@@ -103,9 +103,7 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
       <div className="relative">
         {/* Scroll container with visible scrollbar and height limit */}
         <div
-          className={`scrollbar-thin scrollbar-track-muted scrollbar-thumb-accent hover:scrollbar-thumb-accent/80 max-h-96 overflow-y-auto px-6 pb-4 transition-opacity duration-200 ${
-            isReloading ? "opacity-50 pointer-events-none" : "opacity-100"
-          }`}
+          className="scrollbar-thin scrollbar-track-muted scrollbar-thumb-accent hover:scrollbar-thumb-accent/80 max-h-96 overflow-y-auto px-6 pb-4"
         >
           <div className="space-y-2">
             {!selectedDate ? (
@@ -131,7 +129,7 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
                   key={slot.time}
                   slot={slot}
                   timeFormat={timeFormat}
-                  timezone={userTimezone}
+                  timezone={displayTimezone}
                   onSlotSelect={onSlotSelect}
                   isReserved={slot.isReserved}
                 />

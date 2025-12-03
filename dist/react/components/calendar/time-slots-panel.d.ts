@@ -5,10 +5,10 @@ interface TimeSlotsPanelProps {
     availableSlots: CalcomSlot[];
     reservedSlots: CalcomSlot[];
     loading: boolean;
-    isReloading: boolean;
     timeFormat: "12h" | "24h";
     onTimeFormatChange: (format: "12h" | "24h") => void;
     onSlotSelect: (slotTime: string) => void;
+    timezone: string;
 }
 export declare const TimeSlotsPanel: React.FC<TimeSlotsPanelProps>;
 export {};

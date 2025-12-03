@@ -7,6 +7,7 @@ interface CalendarGridProps {
     onDateSelect: (date: Date) => void;
     onPreviousMonth: () => void;
     onNextMonth: () => void;
+    timezone: string;
 }
 export declare const CalendarGrid: React.FC<CalendarGridProps>;
 export {};

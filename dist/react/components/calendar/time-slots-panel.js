@@ -2,9 +2,9 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React from "react";
 import { TimeSlotButton } from "./time-slot-button";
-export const TimeSlotsPanel = ({ selectedDate, availableSlots, reservedSlots, loading, isReloading, timeFormat, onTimeFormatChange, onSlotSelect, }) => {
-    // Get user's timezone for displaying slot times
-    const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+export const TimeSlotsPanel = ({ selectedDate, availableSlots, reservedSlots, loading, timeFormat, onTimeFormatChange, onSlotSelect, timezone, }) => {
+    // Use passed timezone for displaying slot times (may be locked to event type TZ)
+    const displayTimezone = timezone;
     // Merge available and reserved slots into single chronologically-sorted list
     const allSlots = React.useMemo(() => {
         return [
@@ -43,6 +43,6 @@ export const TimeSlotsPanel = ({ selectedDate, availableSlots, reservedSlots, lo
                                         ? "bg-accent text-foreground"
                                         : "text-muted-foreground hover:text-foreground"}`, children: "12h" }), _jsx("button", { onClick: () => onTimeFormatChange("24h"), className: `px-2 py-1 text-xs font-medium transition-colors ${timeFormat === "24h"
                                         ? "bg-accent text-foreground"
-                                        : "text-muted-foreground hover:text-foreground"}`, children: "24h" })] })] }) }), _jsx("div", { className: "relative", children: _jsx("div", { className: `scrollbar-thin scrollbar-track-muted scrollbar-thumb-accent hover:scrollbar-thumb-accent/80 max-h-96 overflow-y-auto px-6 pb-4 transition-opacity duration-200 ${isReloading ? "opacity-50 pointer-events-none" : "opacity-100"}`, children: _jsx("div", { className: "space-y-2", children: !selectedDate ? (_jsx("p", { className: "text-sm text-muted-foreground", children: "Please select a date to see available times" })) : loading ? (_jsx("div", { className: "space-y-2", children: [...Array(6)].map((_, i) => (_jsx("div", { className: "h-9 animate-pulse rounded-md bg-accent" }, i))) })) : allSlots.length === 0 ? (_jsx("p", { className: "text-sm text-muted-foreground", children: "No available times for this date" })) : (allSlots.map((slot) => (_jsx(TimeSlotButton, { slot: slot, timeFormat: timeFormat, timezone: userTimezone, onSlotSelect: onSlotSelect, isReserved: slot.isReserved }, slot.time)))) }) }) })] }));
+                                        : "text-muted-foreground hover:text-foreground"}`, children: "24h" })] })] }) }), _jsx("div", { className: "relative", children: _jsx("div", { className: "scrollbar-thin scrollbar-track-muted scrollbar-thumb-accent hover:scrollbar-thumb-accent/80 max-h-96 overflow-y-auto px-6 pb-4", children: _jsx("div", { className: "space-y-2", children: !selectedDate ? (_jsx("p", { className: "text-sm text-muted-foreground", children: "Please select a date to see available times" })) : loading ? (_jsx("div", { className: "space-y-2", children: [...Array(6)].map((_, i) => (_jsx("div", { className: "h-9 animate-pulse rounded-md bg-accent" }, i))) })) : allSlots.length === 0 ? (_jsx("p", { className: "text-sm text-muted-foreground", children: "No available times for this date" })) : (allSlots.map((slot) => (_jsx(TimeSlotButton, { slot: slot, timeFormat: timeFormat, timezone: displayTimezone, onSlotSelect: onSlotSelect, isReserved: slot.isReserved }, slot.time)))) }) }) })] }));
 };
 //# sourceMappingURL=time-slots-panel.js.map

@@ -4,9 +4,8 @@ export interface UseConvexSlotsResult {
     availableSlots: TimeSlot[];
     reservedSlots: TimeSlot[];
     isLoading: boolean;
-    isReloading: boolean;
     fetchMonthSlots: (currentDate: Date) => void;
     fetchSlots: (date: Date) => void;
 }
-export declare const useConvexSlots: (resourceId: string, eventLength: number, slotInterval?: number, allDurationOptions?: number[], enabled?: boolean) => UseConvexSlotsResult;
+export declare const useConvexSlots: (resourceId: string, eventLength: number, slotInterval?: number, allDurationOptions?: number[], enabled?: boolean, timezone?: string) => UseConvexSlotsResult;
 //# sourceMappingURL=use-convex-slots.d.ts.map

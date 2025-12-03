@@ -14,6 +14,45 @@ export const MONTHS = [
   "December",
 ];
 
+/**
+ * Get today's date string in a specific timezone
+ * @param timezone - IANA timezone (e.g., "Europe/Berlin")
+ * @returns Date string "YYYY-MM-DD"
+ */
+export const getTodayInTimezone = (timezone: string): string => {
+  const now = new Date();
+  return now.toLocaleDateString("sv-SE", { timeZone: timezone });
+};
+
+/**
+ * Format a Date object as "YYYY-MM-DD" in a specific timezone
+ * This prevents off-by-one errors for UTC+ timezone users
+ * @param date - JavaScript Date object
+ * @param timezone - IANA timezone (e.g., "Europe/Berlin")
+ * @returns Date string "YYYY-MM-DD"
+ */
+export const formatDateInTimezone = (date: Date, timezone: string): string => {
+  return date.toLocaleDateString("sv-SE", { timeZone: timezone });
+};
+
+/**
+ * Check if two dates represent the same calendar day in a timezone
+ * @param date1 - First date
+ * @param date2 - Second date
+ * @param timezone - IANA timezone
+ * @returns true if same calendar day
+ */
+export const isSameDayInTimezone = (
+  date1: Date,
+  date2: Date,
+  timezone: string
+): boolean => {
+  return (
+    formatDateInTimezone(date1, timezone) ===
+    formatDateInTimezone(date2, timezone)
+  );
+};
+
 // Helper function to get date string in local timezone
 // Format time based on preference and user's timezone
 export const formatTime = (
@@ -51,11 +90,20 @@ export interface CalendarDay {
   disabled: boolean;
 }
 
-// Generate calendar days for a given month
+/**
+ * Generate calendar days for a given month with timezone awareness
+ *
+ * @param currentDate - Date representing the month to display
+ * @param selectedDate - Currently selected date (or null)
+ * @param monthSlots - Map of date strings to availability
+ * @param timezone - IANA timezone for date calculations (e.g., "Europe/Berlin")
+ * @returns Array of CalendarDay objects
+ */
 export const generateCalendarDays = (
   currentDate: Date,
   selectedDate: Date | null,
-  monthSlots: Record<string, boolean>
+  monthSlots: Record<string, boolean>,
+  timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone
 ): CalendarDay[] => {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -68,21 +116,23 @@ export const generateCalendarDays = (
   startDate.setDate(firstDay.getDate() - dayOffset);
 
   const days = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Get today's date string in the target timezone for comparison
+  const todayStr = getTodayInTimezone(timezone);
 
   for (let i = 0; i < 42; i++) {
     const date = new Date(startDate);
     date.setDate(startDate.getDate() + i);
 
     const isCurrentMonth = date.getMonth() === month;
-    const isPast = date < today;
-    const isToday = date.getTime() === today.getTime();
-    const isSelected =
-      !!selectedDate && date.getTime() === selectedDate.getTime();
 
-    // Check if this date has available slots using O(1) Set lookup
-    const dateStr = date.toISOString().split("T")[0];
+    // Format the date in the target timezone for proper comparison
+    const dateStr = formatDateInTimezone(date, timezone);
+    const isPast = dateStr < todayStr;
+    const isToday = dateStr === todayStr;
+    const isSelected =
+      !!selectedDate && isSameDayInTimezone(date, selectedDate, timezone);
+
+    // Check if this date has available slots using O(1) lookup
     const hasSlots = Boolean(monthSlots[dateStr]);
 
     days.push({

@@ -106,5 +106,11 @@
     "zod": "^3.24.0"
   },
   "types": "./dist/client/index.d.ts",
-  "module": "./dist/client/index.js"
+  "module": "./dist/client/index.js",
+  "dependencies": {
+    "@convex-dev/resend": "^0.2.0",
+    "@mrfinch/booking": "file:mrfinch-booking-0.2.0.tgz",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0"
+  }
 }

@@ -124,7 +124,38 @@ export const triggerHooks = internalMutation({
     payload: v.any(),
   },
   handler: async (ctx, args) => {
-    // Find all enabled hooks for this event type
+    const payload = args.payload as Record<string, unknown>;
+
+    // ========================================
+    // BUILT-IN: Send transactional emails
+    // ========================================
+    if (args.eventType === "booking.created" && payload.bookerEmail) {
+      await ctx.scheduler.runAfter(0, internal.emails.sendBookingConfirmation, {
+        to: payload.bookerEmail as string,
+        bookerName: (payload.bookerName as string) ?? "Guest",
+        eventTitle: (payload.eventTitle as string) ?? "Your Booking",
+        start: payload.start as number,
+        end: payload.end as number,
+        timezone: (payload.timezone as string) ?? "UTC",
+        resourceId: payload.resourceId as string | undefined,
+      });
+    }
+
+    if (args.eventType === "booking.cancelled" && payload.bookerEmail) {
+      await ctx.scheduler.runAfter(0, internal.emails.sendBookingCancellation, {
+        to: payload.bookerEmail as string,
+        bookerName: (payload.bookerName as string) ?? "Guest",
+        eventTitle: (payload.eventTitle as string) ?? "Your Booking",
+        start: payload.start as number,
+        end: payload.end as number,
+        timezone: (payload.timezone as string) ?? "UTC",
+        reason: payload.reason as string | undefined,
+      });
+    }
+
+    // ========================================
+    // CUSTOM: Trigger user-registered hooks
+    // ========================================
     const allHooks = await ctx.db
       .query("hooks")
       .withIndex("by_event", (q) =>
@@ -152,7 +183,7 @@ export const triggerHooks = internalMutation({
       }
     }
 
-    return { triggeredCount: hooks.length };
+    return { triggeredCount: hooks.length, emailsSent: true };
   },
 });
 

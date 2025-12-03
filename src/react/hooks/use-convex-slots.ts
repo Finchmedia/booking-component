@@ -1,26 +1,29 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../context";
 import { getSessionId } from "../utils/session";
+import { formatDateInTimezone } from "../utils/date-utils";
 import type { TimeSlot, MonthSlots } from "../types";
 
 export interface UseConvexSlotsResult {
   monthSlots: MonthSlots;
   availableSlots: TimeSlot[];
   reservedSlots: TimeSlot[]; // Slots held by other users' presence
-  isLoading: boolean; // True on first load
-  isReloading: boolean; // True when refreshing data (keep showing old data)
+  isLoading: boolean;
   fetchMonthSlots: (currentDate: Date) => void;
   fetchSlots: (date: Date) => void;
 }
 
 /**
  * Helper: Calculate which 15-minute slot indices are required for a booking.
- * @param slotTime - ISO timestamp of the slot start time
+ * @param slotTime - ISO timestamp of the slot start time (UTC)
  * @param durationMinutes - Duration of the booking in minutes
  * @returns Array of 15-minute slot indices (0-95) that would be occupied
+ *
+ * IMPORTANT: Uses UTC methods to match backend slot calculations.
+ * The backend stores and generates slots in UTC context.
  */
 function calculateRequiredSlots(
   slotTime: string,
@@ -28,10 +31,10 @@ function calculateRequiredSlots(
 ): number[] {
   const slotsNeeded = Math.ceil(durationMinutes / 15); // How many 15-min chunks needed
 
-  // Convert start time to slot index (0-95)
+  // Convert start time to slot index (0-95) using UTC to match backend
   const startDate = new Date(slotTime);
-  const hours = startDate.getHours();
-  const minutes = startDate.getMinutes();
+  const hours = startDate.getUTCHours();
+  const minutes = startDate.getUTCMinutes();
   const startSlotIndex = hours * 4 + Math.floor(minutes / 15);
 
   // Return array of all required slot indices
@@ -45,6 +48,8 @@ function calculateRequiredSlots(
  * @param presence - Array of active presence records
  * @param currentUserId - Current user's session ID
  * @returns true if there's a conflict with another user's hold
+ *
+ * IMPORTANT: Uses UTC methods to match backend presence slot format.
  */
 function hasPresenceConflict(
   slotTime: string,
@@ -54,13 +59,13 @@ function hasPresenceConflict(
 ): boolean {
   const requiredSlots = calculateRequiredSlots(slotTime, durationMinutes);
 
-  // Convert all held slots to their indices
+  // Convert all held slots to their indices using UTC to match backend
   const heldSlots = presence
     .filter((p) => p.user !== currentUserId) // Ignore own holds
     .map((p) => {
       const heldDate = new Date(p.slot);
-      const hours = heldDate.getHours();
-      const minutes = heldDate.getMinutes();
+      const hours = heldDate.getUTCHours();
+      const minutes = heldDate.getUTCMinutes();
       return hours * 4 + Math.floor(minutes / 15);
     });
 
@@ -73,7 +78,8 @@ export const useConvexSlots = (
   eventLength: number,
   slotInterval?: number,
   allDurationOptions?: number[],
-  enabled: boolean = true
+  enabled: boolean = true,
+  timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone
 ): UseConvexSlotsResult => {
   const api = useBookingAPI();
   const [dateRange, setDateRange] = useState<{
@@ -130,17 +136,16 @@ export const useConvexSlots = (
 
   const monthSlots: MonthSlots = monthAvailability ?? {};
 
-  // STALENESS LOGIC: Keep previous data while loading new data
-  const prevSlotsRef = useRef<{ available: TimeSlot[]; reserved: TimeSlot[] }>({
-    available: [],
-    reserved: [],
-  });
-
-  // Process new data if available + split into available/reserved based on presence
-  const processedSlots = useMemo<
-    { available: TimeSlot[]; reserved: TimeSlot[] } | undefined
-  >(() => {
-    if (!daySlots) return undefined;
+  // Process slots: filter past slots and split by presence
+  // Note: convex-helpers caching handles stale-while-revalidate, so we don't need
+  // our own caching layer here. This simplifies the code and avoids cross-date bugs.
+  const processedSlots = useMemo<{
+    available: TimeSlot[];
+    reserved: TimeSlot[];
+  }>(() => {
+    if (!daySlots) {
+      return { available: [], reserved: [] };
+    }
 
     const now = Date.now();
 
@@ -177,32 +182,11 @@ export const useConvexSlots = (
     return { available: formatted, reserved: [] };
   }, [daySlots, datePresence, eventLength, currentUserId]);
 
-  // Update ref only when we have real data
-  useEffect(() => {
-    if (processedSlots) {
-      prevSlotsRef.current = processedSlots;
-    }
-  }, [processedSlots]);
+  const availableSlots = processedSlots.available;
+  const reservedSlots = processedSlots.reserved;
 
-  // Decide what to show: Current data OR Previous data
-  const currentData = processedSlots ?? prevSlotsRef.current;
-  const availableSlots = currentData.available;
-  const reservedSlots = currentData.reserved;
-
-  // Loading states
-  // 1. First load: We have no data at all (neither current nor prev)
-  const isLoading =
-    enabled &&
-    selectedDateStr !== null &&
-    !processedSlots &&
-    prevSlotsRef.current.available.length === 0;
-
-  // 2. Reloading: We have prev data, but are waiting for new data
-  const isReloading =
-    enabled &&
-    selectedDateStr !== null &&
-    !processedSlots &&
-    prevSlotsRef.current.available.length > 0;
+  // Loading: waiting for initial data
+  const isLoading = enabled && selectedDateStr !== null && !daySlots;
 
   // Fetch month slots (for calendar dots)
   const fetchMonthSlots = useCallback(
@@ -223,12 +207,13 @@ export const useConvexSlots = (
       const endDate = new Date(lastDay);
       endDate.setDate(lastDay.getDate() + (6 - ((lastDay.getDay() + 6) % 7)));
 
-      const dateFrom = startDate.toISOString().split("T")[0];
-      const dateTo = endDate.toISOString().split("T")[0];
+      // Use timezone-aware date formatting to prevent off-by-one errors
+      const dateFrom = formatDateInTimezone(startDate, timezone);
+      const dateTo = formatDateInTimezone(endDate, timezone);
 
       setDateRange({ from: dateFrom, to: dateTo });
     },
-    [enabled]
+    [enabled, timezone]
   );
 
   // Fetch slots for a specific date (for time slot panel)
@@ -236,10 +221,11 @@ export const useConvexSlots = (
     (date: Date) => {
       if (!enabled) return;
 
-      const dateStr = date.toISOString().split("T")[0];
+      // Use timezone-aware date formatting to prevent off-by-one errors
+      const dateStr = formatDateInTimezone(date, timezone);
       setSelectedDateStr(dateStr);
     },
-    [enabled]
+    [enabled, timezone]
   );
 
   return {
@@ -247,7 +233,6 @@ export const useConvexSlots = (
     availableSlots,
     reservedSlots,
     isLoading,
-    isReloading,
     fetchMonthSlots,
     fetchSlots,
   };

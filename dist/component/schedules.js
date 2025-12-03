@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { getDayOfWeekInTimezone } from "./utils";
 // ============================================
 // SCHEDULE QUERIES
 // ============================================
@@ -312,9 +313,9 @@ export const getEffectiveAvailability = query({
                 return { availableSlots: slots };
             }
         }
-        // Get day of week for the date
-        const dateObj = new Date(args.date);
-        const dayOfWeek = dateObj.getDay();
+        // Get day of week for the date in the schedule's timezone
+        // This ensures correct day-of-week even when querying from different timezones
+        const dayOfWeek = getDayOfWeekInTimezone(args.date, schedule.timezone);
         // Find weekly hours for this day
         const dayEntries = schedule.weeklyHours.filter((h) => h.dayOfWeek === dayOfWeek);
         if (dayEntries.length === 0) {
