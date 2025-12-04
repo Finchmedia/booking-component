@@ -1,10 +1,10 @@
 export declare const checkMultiResourceAvailability: import("convex/server").RegisteredQuery<"public", {
-    start: number;
     end: number;
     resources: {
         quantity?: number | undefined;
         resourceId: string;
     }[];
+    start: number;
 }, Promise<{
     available: boolean;
     resources: {
@@ -16,55 +16,55 @@ export declare const checkMultiResourceAvailability: import("convex/server").Reg
     }[];
 }>>;
 export declare const createMultiResourceBooking: import("convex/server").RegisteredMutation<"public", {
-    location?: {
-        value?: string | undefined;
-        type: string;
-    } | undefined;
     organizationId?: string | undefined;
     resendOptions?: {
         fromEmail?: string | undefined;
         baseUrl?: string | undefined;
         apiKey: string;
     } | undefined;
-    eventTypeId: string;
-    timezone: string;
-    start: number;
+    location?: {
+        value?: string | undefined;
+        type: string;
+    } | undefined;
     end: number;
+    resources: {
+        quantity?: number | undefined;
+        resourceId: string;
+    }[];
+    start: number;
     booker: {
         phone?: string | undefined;
         notes?: string | undefined;
         name: string;
         email: string;
     };
-    resources: {
-        quantity?: number | undefined;
-        resourceId: string;
-    }[];
+    eventTypeId: string;
+    timezone: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"bookings">;
     _creationTime: number;
-    managementToken?: string | undefined;
     organizationId?: string | undefined;
+    managementToken?: string | undefined;
     bookerPhone?: string | undefined;
     bookerNotes?: string | undefined;
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
-    eventTypeId: string;
-    resourceId: string;
-    timezone: string;
-    uid: string;
-    start: number;
     end: number;
+    start: number;
+    eventTypeId: string;
     location: {
         value?: string | undefined;
         type: string;
     };
-    createdAt: number;
-    updatedAt: number;
+    timezone: string;
+    resourceId: string;
+    uid: string;
     actorId: string;
     status: string;
+    createdAt: number;
+    updatedAt: number;
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;
@@ -77,48 +77,48 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
             _id: import("convex/values").GenericId<"resources">;
             _creationTime: number;
             description?: string | undefined;
-            quantity?: number | undefined;
             isFungible?: boolean | undefined;
             isStandalone?: boolean | undefined;
+            quantity?: number | undefined;
+            organizationId: string;
             timezone: string;
             id: string;
-            name: string;
-            organizationId: string;
             isActive: boolean;
+            name: string;
+            type: string;
             createdAt: number;
             updatedAt: number;
-            type: string;
         } | null;
         _id: import("convex/values").GenericId<"booking_items">;
         _creationTime: number;
+        bookingId: import("convex/values").GenericId<"bookings">;
         resourceId: string;
         quantity: number;
-        bookingId: import("convex/values").GenericId<"bookings">;
     }[];
     _id: import("convex/values").GenericId<"bookings">;
     _creationTime: number;
-    managementToken?: string | undefined;
     organizationId?: string | undefined;
+    managementToken?: string | undefined;
     bookerPhone?: string | undefined;
     bookerNotes?: string | undefined;
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
-    eventTypeId: string;
-    resourceId: string;
-    timezone: string;
-    uid: string;
-    start: number;
     end: number;
+    start: number;
+    eventTypeId: string;
     location: {
         value?: string | undefined;
         type: string;
     };
-    createdAt: number;
-    updatedAt: number;
+    timezone: string;
+    resourceId: string;
+    uid: string;
     actorId: string;
     status: string;
+    createdAt: number;
+    updatedAt: number;
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;

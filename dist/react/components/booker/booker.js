@@ -225,20 +225,11 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
                 bookingStep === "event-meta" &&
                 (title || description) && (_jsxs("div", { className: "text-center mb-8", children: [title && (_jsx("h1", { className: "text-4xl font-bold text-foreground mb-4", children: title })), description && (_jsx("p", { className: "text-muted-foreground", children: description }))] })), bookingStep === "event-meta" && eventType && (_jsx(Calendar, { resourceId: resourceId, eventTypeId: eventType.id, onSlotSelect: handleSlotSelect, title: eventType.title, organizerName: organizerName, organizerAvatar: organizerAvatar, 
                 // Controlled state (persists across navigation)
-                selectedDate: selectedDate, onDateChange: setSelectedDate, currentMonth: currentMonth, onMonthChange: setCurrentMonth, selectedDuration: selectedDuration, onDurationChange: setSelectedDuration, timezone: timezone, onTimezoneChange: setTimezone, timeFormat: timeFormat, onTimeFormatChange: setTimeFormat })), bookingStep === "booking-form" && selectedSlot && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: (() => {
-                    const derivedCurrentUser = currentUser ?? (originalBooking
+                selectedDate: selectedDate, onDateChange: setSelectedDate, currentMonth: currentMonth, onMonthChange: setCurrentMonth, selectedDuration: selectedDuration, onDurationChange: setSelectedDuration, timezone: timezone, onTimezoneChange: setTimezone, timeFormat: timeFormat, onTimeFormatChange: setTimeFormat })), bookingStep === "booking-form" && selectedSlot && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: _jsx(BookingForm, { eventType: displayedEventType, selectedSlot: selectedSlot, selectedDuration: selectedDuration, timezone: timezone, onSubmit: handleFormSubmit, onBack: handleBack, isSubmitting: isSubmitting, currentUser: currentUser ?? (originalBooking
                         ? {
                             name: originalBooking.bookerName,
                             email: originalBooking.bookerEmail,
                         }
-                        : undefined);
-                    console.log("DEBUG Booker - passing to BookingForm:", {
-                        currentUserProp: currentUser,
-                        originalBooking: originalBooking ? { bookerName: originalBooking.bookerName, bookerEmail: originalBooking.bookerEmail } : null,
-                        derivedCurrentUser,
-                        isRescheduling,
-                    });
-                    return (_jsx(BookingForm, { eventType: displayedEventType, selectedSlot: selectedSlot, selectedDuration: selectedDuration, timezone: timezone, onSubmit: handleFormSubmit, onBack: handleBack, isSubmitting: isSubmitting, currentUser: derivedCurrentUser, isRescheduling: isRescheduling }));
-                })() })), bookingStep === "success" && completedBooking && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: _jsx(BookingSuccess, { booking: completedBooking, eventType: displayedEventType, onBookAnother: handleBookAnother, isRescheduling: isRescheduling }) }))] }));
+                        : undefined), isRescheduling: isRescheduling }) })), bookingStep === "success" && completedBooking && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: _jsx(BookingSuccess, { booking: completedBooking, eventType: displayedEventType, onBookAnother: handleBookAnother, isRescheduling: isRescheduling }) }))] }));
 }
 //# sourceMappingURL=booker.js.map
