@@ -9,6 +9,8 @@ interface BookingSuccessProps {
     booking: Booking;
     eventType: EventType;
     onBookAnother: () => void;
+    /** Optional: Show reschedule-specific messaging */
+    isRescheduling?: boolean;
 }
 export declare const BookingSuccess: React.FC<BookingSuccessProps>;
 export {};

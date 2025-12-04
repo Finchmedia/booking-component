@@ -59,7 +59,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           bookingId: string;
           changedBy?: string;
           reason?: string;
-          resendOptions?: { apiKey: string; fromEmail?: string };
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
           toStatus: string;
         },
         any,
@@ -88,7 +92,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           bookingId: string;
           cancelledBy?: string;
           reason?: string;
-          resendOptions?: { apiKey: string; fromEmail?: string };
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
         },
         any,
         Name
@@ -118,7 +126,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           eventTypeId: string;
           location?: { type: string; value?: string };
           organizationId?: string;
-          resendOptions?: { apiKey: string; fromEmail?: string };
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
           resources: Array<{ quantity?: number; resourceId: string }>;
           start: number;
           timezone: string;
@@ -178,11 +190,31 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       >;
     };
     public: {
+      cancelBookingByToken: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          reason?: string;
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
+          token: string;
+          uid: string;
+        },
+        any,
+        Name
+      >;
       cancelReservation: FunctionReference<
         "mutation",
         "internal",
         {
-          resendOptions?: { apiKey: string; fromEmail?: string };
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
           reservationId: string;
         },
         any,
@@ -201,7 +233,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           end: number;
           eventTypeId: string;
           location: { type: string; value?: string };
-          resendOptions?: { apiKey: string; fromEmail?: string };
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
           resourceId: string;
           start: number;
           timezone: string;
@@ -245,7 +281,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         {
           actorId: string;
           end: number;
-          resendOptions?: { apiKey: string; fromEmail?: string };
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
           resourceId: string;
           start: number;
         },
@@ -270,6 +310,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "query",
         "internal",
         { bookingId: string },
+        any,
+        Name
+      >;
+      getBookingByToken: FunctionReference<
+        "query",
+        "internal",
+        { token: string; uid: string },
         any,
         Name
       >;
@@ -341,6 +388,40 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "query",
         "internal",
         { activeOnly?: boolean; organizationId?: string },
+        any,
+        Name
+      >;
+      rescheduleBooking: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          bookingId: string;
+          newEnd: number;
+          newStart: number;
+          reason?: string;
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
+        },
+        any,
+        Name
+      >;
+      rescheduleBookingByToken: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          newEnd: number;
+          newStart: number;
+          resendOptions?: {
+            apiKey: string;
+            baseUrl?: string;
+            fromEmail?: string;
+          };
+          token: string;
+          uid: string;
+        },
         any,
         Name
       >;

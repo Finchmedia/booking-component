@@ -2,6 +2,14 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots } from "./utils";
+// Generate a secure random token (64 hex chars = 256 bits)
+function generateSecureToken() {
+    const segments = [];
+    for (let i = 0; i < 8; i++) {
+        segments.push(Math.random().toString(36).substring(2));
+    }
+    return segments.join('') + Date.now().toString(36);
+}
 // ============================================
 // MULTI-RESOURCE AVAILABILITY CHECK
 // ============================================
@@ -107,6 +115,7 @@ export const createMultiResourceBooking = mutation({
         resendOptions: v.optional(v.object({
             apiKey: v.string(),
             fromEmail: v.optional(v.string()),
+            baseUrl: v.optional(v.string()),
         })),
     },
     handler: async (ctx, args) => {
@@ -162,6 +171,7 @@ export const createMultiResourceBooking = mutation({
         // 3. Create main booking record (use first resource as primary)
         const primaryResourceId = args.resources[0].resourceId;
         const bookingUid = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const managementToken = generateSecureToken();
         const now = Date.now();
         const bookingId = await ctx.db.insert("bookings", {
             resourceId: primaryResourceId,
@@ -170,6 +180,7 @@ export const createMultiResourceBooking = mutation({
             end: args.end,
             status: eventType.requiresConfirmation ? "pending" : "confirmed",
             uid: bookingUid,
+            managementToken,
             eventTypeId: args.eventTypeId,
             organizationId: args.organizationId,
             timezone: args.timezone,
@@ -275,6 +286,8 @@ export const createMultiResourceBooking = mutation({
                 bookerName: args.booker.name,
                 bookerEmail: args.booker.email,
                 eventTitle: eventType.title,
+                uid: bookingUid,
+                managementToken,
                 isMultiResource: true,
                 resources: args.resources,
             },
@@ -327,6 +340,7 @@ export const cancelMultiResourceBooking = mutation({
         resendOptions: v.optional(v.object({
             apiKey: v.string(),
             fromEmail: v.optional(v.string()),
+            baseUrl: v.optional(v.string()),
         })),
     },
     handler: async (ctx, args) => {
@@ -410,8 +424,11 @@ export const cancelMultiResourceBooking = mutation({
                 eventTypeId: booking.eventTypeId,
                 start: booking.start,
                 end: booking.end,
+                timezone: booking.timezone,
                 status: "cancelled",
                 bookerEmail: booking.bookerEmail,
+                bookerName: booking.bookerName,
+                eventTitle: booking.eventTitle,
                 previousStatus: booking.status,
                 reason: args.reason,
                 cancelledBy: args.cancelledBy,

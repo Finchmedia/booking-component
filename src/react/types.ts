@@ -34,6 +34,12 @@ export interface Booking {
   location?: { type: string; value?: string };
   createdAt?: number;
   updatedAt?: number;
+  /** Management token for public cancel/reschedule operations */
+  managementToken?: string;
+  /** Cancellation reason if cancelled */
+  cancellationReason?: string;
+  /** Timestamp when cancelled */
+  cancelledAt?: number;
 }
 
 // Event type from database

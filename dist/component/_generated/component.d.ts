@@ -41,6 +41,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             reason?: string;
             resendOptions?: {
                 apiKey: string;
+                baseUrl?: string;
                 fromEmail?: string;
             };
             toStatus: string;
@@ -61,6 +62,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             reason?: string;
             resendOptions?: {
                 apiKey: string;
+                baseUrl?: string;
                 fromEmail?: string;
             };
         }, any, Name>;
@@ -88,6 +90,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             organizationId?: string;
             resendOptions?: {
                 apiKey: string;
+                baseUrl?: string;
                 fromEmail?: string;
             };
             resources: Array<{
@@ -128,9 +131,20 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }, any, Name>;
     };
     public: {
+        cancelBookingByToken: FunctionReference<"mutation", "internal", {
+            reason?: string;
+            resendOptions?: {
+                apiKey: string;
+                baseUrl?: string;
+                fromEmail?: string;
+            };
+            token: string;
+            uid: string;
+        }, any, Name>;
         cancelReservation: FunctionReference<"mutation", "internal", {
             resendOptions?: {
                 apiKey: string;
+                baseUrl?: string;
                 fromEmail?: string;
             };
             reservationId: string;
@@ -150,6 +164,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             };
             resendOptions?: {
                 apiKey: string;
+                baseUrl?: string;
                 fromEmail?: string;
             };
             resourceId: string;
@@ -185,6 +200,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             end: number;
             resendOptions?: {
                 apiKey: string;
+                baseUrl?: string;
                 fromEmail?: string;
             };
             resourceId: string;
@@ -200,6 +216,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }, any, Name>;
         getBooking: FunctionReference<"query", "internal", {
             bookingId: string;
+        }, any, Name>;
+        getBookingByToken: FunctionReference<"query", "internal", {
+            token: string;
+            uid: string;
         }, any, Name>;
         getBookingByUid: FunctionReference<"query", "internal", {
             uid: string;
@@ -239,6 +259,28 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         listEventTypes: FunctionReference<"query", "internal", {
             activeOnly?: boolean;
             organizationId?: string;
+        }, any, Name>;
+        rescheduleBooking: FunctionReference<"mutation", "internal", {
+            bookingId: string;
+            newEnd: number;
+            newStart: number;
+            reason?: string;
+            resendOptions?: {
+                apiKey: string;
+                baseUrl?: string;
+                fromEmail?: string;
+            };
+        }, any, Name>;
+        rescheduleBookingByToken: FunctionReference<"mutation", "internal", {
+            newEnd: number;
+            newStart: number;
+            resendOptions?: {
+                apiKey: string;
+                baseUrl?: string;
+                fromEmail?: string;
+            };
+            token: string;
+            uid: string;
         }, any, Name>;
         toggleEventTypeActive: FunctionReference<"mutation", "internal", {
             id: string;

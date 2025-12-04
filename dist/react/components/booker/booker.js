@@ -1,6 +1,6 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useQuery } from "convex-helpers/react/cache/hooks";
@@ -11,8 +11,10 @@ import { Calendar, CalendarSkeleton } from "../calendar";
 import { BookingForm } from "../form/booking-form";
 import { BookingSuccess } from "../form/booking-success";
 import { BookingErrorDialog } from "./booking-error-dialog";
-export function Booker({ eventTypeId, resourceId, title, description, showHeader = true, organizerName, organizerAvatar, currentUser, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, }) {
+export function Booker({ eventTypeId, resourceId, title, description, showHeader = true, organizerName, organizerAvatar, currentUser, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, originalBooking, reuseBookerInfo = false, }) {
     const api = useBookingAPI();
+    // Detect reschedule mode
+    const isRescheduling = !!originalBooking;
     // Step state
     const [bookingStep, setBookingStep] = useState("event-meta");
     const [selectedSlot, setSelectedSlot] = useState(null);
@@ -20,12 +22,21 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
     // Calendar state (persists across navigation)
     const [selectedDate, setSelectedDate] = useState(null);
     const [currentMonth, setCurrentMonth] = useState(new Date());
-    const [selectedDuration, setSelectedDuration] = useState(60);
-    const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    // Pre-populate duration from original booking if rescheduling
+    const [selectedDuration, setSelectedDuration] = useState(originalBooking
+        ? Math.round((originalBooking.end - originalBooking.start) / 60000)
+        : 60);
+    const [timezone, setTimezone] = useState(originalBooking?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
     const [timeFormat, setTimeFormat] = useState("24h");
     // Mutations
     const createBooking = useMutation(api.createBooking);
+    // Reschedule mutation (for token-based public reschedule)
+    const rescheduleBookingByToken = api.rescheduleBookingByToken
+        ? useMutation(api.rescheduleBookingByToken)
+        : null;
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // Error state for booking/reschedule failures
+    const [bookingError, setBookingError] = useState(null);
     // Fetch event type, resource, and link state from DB
     const eventType = useQuery(api.getEventType, { eventTypeId });
     const resource = useQuery(api.getResource, { id: resourceId });
@@ -39,36 +50,110 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
             eventType.lengthInMinutesOptions.length > 0
             ? Math.min(...eventType.lengthInMinutesOptions, eventType.lengthInMinutes)
             : eventType?.lengthInMinutes);
+    // Sync selectedDuration with event type's available options when event type loads
+    // This fixes the bug where default duration (60) might not be in the event type's options
+    useEffect(() => {
+        if (!eventType || originalBooking)
+            return; // Skip if loading or rescheduling (has its own default)
+        const availableDurations = eventType.lengthInMinutesOptions?.length
+            ? eventType.lengthInMinutesOptions
+            : [eventType.lengthInMinutes];
+        // Only update if current selection is not valid
+        if (!availableDurations.includes(selectedDuration)) {
+            // Pick the first available duration (smallest if options exist)
+            const newDuration = eventType.lengthInMinutesOptions?.length
+                ? Math.min(...eventType.lengthInMinutesOptions)
+                : eventType.lengthInMinutes;
+            setSelectedDuration(newDuration);
+        }
+    }, [eventType, originalBooking, selectedDuration]);
     // Real-time Hold: Automatically reserve all affected slots (quantum coverage)
     useSlotHold(resourceId, selectedSlot, selectedDuration, eventTypeId);
     // Reactive validation: Monitor event type, resource, and link state
     const validation = useBookingValidation(eventType, resource, hasLink, selectedDuration, resourceId);
+    // Reschedule handler: Call rescheduleBookingByToken directly (skips form)
+    const handleReschedule = async (newSlot) => {
+        if (!originalBooking || !eventType || !rescheduleBookingByToken || !originalBooking.managementToken) {
+            console.error("Cannot reschedule: missing originalBooking, eventType, mutation, or managementToken");
+            return;
+        }
+        setIsSubmitting(true);
+        setBookingError(null);
+        try {
+            const newStart = new Date(newSlot).getTime();
+            const newEnd = newStart + selectedDuration * 60 * 1000;
+            const newBooking = await rescheduleBookingByToken({
+                uid: originalBooking.uid,
+                token: originalBooking.managementToken,
+                newStart,
+                newEnd,
+            });
+            const completedBookingData = newBooking;
+            setCompletedBooking(completedBookingData);
+            setBookingStep("success");
+            onBookingComplete?.(completedBookingData);
+        }
+        catch (error) {
+            console.error("Reschedule failed:", error);
+            setBookingError({
+                title: "Reschedule Failed",
+                message: error instanceof Error ? error.message : "Failed to reschedule booking. Please try again.",
+            });
+        }
+        finally {
+            setIsSubmitting(false);
+        }
+    };
     // Step 1: Calendar slot selection (captures BOTH slot AND duration atomically)
     const handleSlotSelect = (data) => {
         setSelectedSlot(data.slot);
         setSelectedDuration(data.duration); // LOCK the duration at slot selection
-        setBookingStep("booking-form");
+        // If rescheduling with booker info reuse, skip form and reschedule immediately
+        if (isRescheduling && reuseBookerInfo) {
+            handleReschedule(data.slot);
+        }
+        else {
+            setBookingStep("booking-form");
+        }
     };
-    // Step 2: Form submission
+    // Step 2: Form submission (handles both new booking and reschedule via form)
     const handleFormSubmit = async (formData) => {
         if (!selectedSlot || !eventType)
             return;
         setIsSubmitting(true);
+        setBookingError(null);
         try {
             const start = new Date(selectedSlot).getTime();
             const end = start + selectedDuration * 60 * 1000;
-            const booking = await createBooking({
-                eventTypeId: eventType.id,
-                resourceId,
-                start,
-                end,
-                timezone,
-                booker: formData,
-                location: {
-                    type: "address",
-                    value: eventType.locations?.[0]?.address || "Studio A",
-                },
-            });
+            let booking;
+            if (isRescheduling && originalBooking && rescheduleBookingByToken && originalBooking.managementToken) {
+                // RESCHEDULE PATH: Call reschedule mutation (form was shown for confirmation)
+                booking = await rescheduleBookingByToken({
+                    uid: originalBooking.uid,
+                    token: originalBooking.managementToken,
+                    newStart: start,
+                    newEnd: end,
+                });
+            }
+            else if (isRescheduling) {
+                // Missing required data for reschedule
+                throw new Error("Missing management token for reschedule");
+            }
+            else {
+                // CREATE PATH: Normal booking creation
+                booking = await createBooking({
+                    eventTypeId: eventType.id,
+                    resourceId,
+                    start,
+                    end,
+                    timezone,
+                    booker: formData,
+                    location: {
+                        type: "address",
+                        value: eventType.locations?.[0]?.address || "Studio A",
+                    },
+                });
+            }
             // Cast the result to Booking type
             const completedBookingData = booking;
             setCompletedBooking(completedBookingData);
@@ -77,9 +162,10 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
             onBookingComplete?.(completedBookingData);
         }
         catch (error) {
-            console.error("Booking failed:", error);
-            // Check for authentication error
-            if (error instanceof ConvexError &&
+            console.error(isRescheduling ? "Reschedule failed:" : "Booking failed:", error);
+            // Check for authentication error (only for new bookings)
+            if (!isRescheduling &&
+                error instanceof ConvexError &&
                 error.data?.code === "UNAUTHENTICATED") {
                 if (onAuthRequired && selectedSlot) {
                     onAuthRequired({
@@ -90,7 +176,10 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
                     return;
                 }
             }
-            alert("Booking failed. Please try again.");
+            setBookingError({
+                title: isRescheduling ? "Reschedule Failed" : "Booking Failed",
+                message: error instanceof Error ? error.message : "Please try again.",
+            });
         }
         finally {
             setIsSubmitting(false);
@@ -136,6 +225,20 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
                 bookingStep === "event-meta" &&
                 (title || description) && (_jsxs("div", { className: "text-center mb-8", children: [title && (_jsx("h1", { className: "text-4xl font-bold text-foreground mb-4", children: title })), description && (_jsx("p", { className: "text-muted-foreground", children: description }))] })), bookingStep === "event-meta" && eventType && (_jsx(Calendar, { resourceId: resourceId, eventTypeId: eventType.id, onSlotSelect: handleSlotSelect, title: eventType.title, organizerName: organizerName, organizerAvatar: organizerAvatar, 
                 // Controlled state (persists across navigation)
-                selectedDate: selectedDate, onDateChange: setSelectedDate, currentMonth: currentMonth, onMonthChange: setCurrentMonth, selectedDuration: selectedDuration, onDurationChange: setSelectedDuration, timezone: timezone, onTimezoneChange: setTimezone, timeFormat: timeFormat, onTimeFormatChange: setTimeFormat })), bookingStep === "booking-form" && selectedSlot && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: _jsx(BookingForm, { eventType: displayedEventType, selectedSlot: selectedSlot, selectedDuration: selectedDuration, timezone: timezone, onSubmit: handleFormSubmit, onBack: handleBack, isSubmitting: isSubmitting, currentUser: currentUser }) })), bookingStep === "success" && completedBooking && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: _jsx(BookingSuccess, { booking: completedBooking, eventType: displayedEventType, onBookAnother: handleBookAnother }) }))] }));
+                selectedDate: selectedDate, onDateChange: setSelectedDate, currentMonth: currentMonth, onMonthChange: setCurrentMonth, selectedDuration: selectedDuration, onDurationChange: setSelectedDuration, timezone: timezone, onTimezoneChange: setTimezone, timeFormat: timeFormat, onTimeFormatChange: setTimeFormat })), bookingStep === "booking-form" && selectedSlot && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: (() => {
+                    const derivedCurrentUser = currentUser ?? (originalBooking
+                        ? {
+                            name: originalBooking.bookerName,
+                            email: originalBooking.bookerEmail,
+                        }
+                        : undefined);
+                    console.log("DEBUG Booker - passing to BookingForm:", {
+                        currentUserProp: currentUser,
+                        originalBooking: originalBooking ? { bookerName: originalBooking.bookerName, bookerEmail: originalBooking.bookerEmail } : null,
+                        derivedCurrentUser,
+                        isRescheduling,
+                    });
+                    return (_jsx(BookingForm, { eventType: displayedEventType, selectedSlot: selectedSlot, selectedDuration: selectedDuration, timezone: timezone, onSubmit: handleFormSubmit, onBack: handleBack, isSubmitting: isSubmitting, currentUser: derivedCurrentUser, isRescheduling: isRescheduling }));
+                })() })), bookingStep === "success" && completedBooking && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: _jsx(BookingSuccess, { booking: completedBooking, eventType: displayedEventType, onBookAnother: handleBookAnother, isRescheduling: isRescheduling }) }))] }));
 }
 //# sourceMappingURL=booker.js.map

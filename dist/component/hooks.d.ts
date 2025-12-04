@@ -1,15 +1,15 @@
-export declare const HOOK_EVENTS: readonly ["booking.created", "booking.confirmed", "booking.cancelled", "booking.completed", "presence.timeout"];
+export declare const HOOK_EVENTS: readonly ["booking.created", "booking.confirmed", "booking.cancelled", "booking.completed", "booking.declined", "booking.rescheduled", "presence.timeout"];
 export type HookEventType = (typeof HOOK_EVENTS)[number];
 export declare const listHooks: import("convex/server").RegisteredQuery<"public", {
-    organizationId?: string | undefined;
     eventType?: string | undefined;
+    organizationId?: string | undefined;
 }, Promise<{
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
     eventType: string;
-    functionHandle: string;
     createdAt: number;
+    functionHandle: string;
     enabled: boolean;
 }[]>>;
 export declare const getHook: import("convex/server").RegisteredQuery<"public", {
@@ -19,8 +19,8 @@ export declare const getHook: import("convex/server").RegisteredQuery<"public", 
     _creationTime: number;
     organizationId?: string | undefined;
     eventType: string;
-    functionHandle: string;
     createdAt: number;
+    functionHandle: string;
     enabled: boolean;
 } | null>>;
 export declare const registerHook: import("convex/server").RegisteredMutation<"public", {
@@ -42,6 +42,7 @@ export declare const triggerHooks: import("convex/server").RegisteredMutation<"i
     organizationId?: string | undefined;
     resendOptions?: {
         fromEmail?: string | undefined;
+        baseUrl?: string | undefined;
         apiKey: string;
     } | undefined;
     eventType: string;
@@ -51,12 +52,13 @@ export declare const triggerHooks: import("convex/server").RegisteredMutation<"i
     emailsSent: boolean;
 }>>;
 export declare const transitionBookingState: import("convex/server").RegisteredMutation<"public", {
+    changedBy?: string | undefined;
+    reason?: string | undefined;
     resendOptions?: {
         fromEmail?: string | undefined;
+        baseUrl?: string | undefined;
         apiKey: string;
     } | undefined;
-    reason?: string | undefined;
-    changedBy?: string | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
     toStatus: string;
 }, Promise<{
@@ -67,11 +69,11 @@ export declare const getBookingHistory: import("convex/server").RegisteredQuery<
 }, Promise<{
     _id: import("convex/values").GenericId<"booking_history">;
     _creationTime: number;
-    reason?: string | undefined;
     changedBy?: string | undefined;
+    reason?: string | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
-    toStatus: string;
     fromStatus: string;
+    toStatus: string;
     timestamp: number;
 }[]>>;
 //# sourceMappingURL=hooks.d.ts.map

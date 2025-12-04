@@ -3,6 +3,14 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, areSlotsAvailable, isDayAvailable, getDateInTimezone, } from "./utils";
 import { isAvailable } from "./availability";
+// Generate a secure random token (64 hex chars = 256 bits)
+function generateSecureToken() {
+    const segments = [];
+    for (let i = 0; i < 8; i++) {
+        segments.push(Math.random().toString(36).substring(2));
+    }
+    return segments.join('') + Date.now().toString(36);
+}
 export const getEventType = query({
     args: {
         eventTypeId: v.string(),
@@ -127,6 +135,7 @@ export const createReservation = mutation({
         resendOptions: v.optional(v.object({
             apiKey: v.string(),
             fromEmail: v.optional(v.string()),
+            baseUrl: v.optional(v.string()),
         })),
     },
     handler: async (ctx, args) => {
@@ -225,6 +234,7 @@ export const createBooking = mutation({
         resendOptions: v.optional(v.object({
             apiKey: v.string(),
             fromEmail: v.optional(v.string()),
+            baseUrl: v.optional(v.string()),
         })),
     },
     handler: async (ctx, args) => {
@@ -276,16 +286,22 @@ export const createBooking = mutation({
         }
         // 5. Generate unique booking UID
         const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        // 6. Create booking record
+        // 6. Generate secure management token
+        const managementToken = generateSecureToken();
+        // 7. Determine initial status based on requiresConfirmation flag
+        const initialStatus = eventType.requiresConfirmation ? "pending" : "confirmed";
+        const now = Date.now();
+        // 8. Create booking record
         const bookingId = await ctx.db.insert("bookings", {
             uid,
+            managementToken,
             resourceId: args.resourceId,
             actorId: args.booker.email, // Use email as actorId
             eventTypeId: args.eventTypeId,
             start: args.start,
             end: args.end,
             timezone: args.timezone,
-            status: "confirmed",
+            status: initialStatus,
             bookerName: args.booker.name,
             bookerEmail: args.booker.email,
             bookerPhone: args.booker.phone,
@@ -293,10 +309,19 @@ export const createBooking = mutation({
             eventTitle: eventType.title,
             eventDescription: eventType.description,
             location: args.location,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
+            createdAt: now,
+            updatedAt: now,
         });
-        // 7. Mark slots as busy in daily_availability
+        // 9. Record initial state in booking history
+        await ctx.db.insert("booking_history", {
+            bookingId,
+            fromStatus: "",
+            toStatus: initialStatus,
+            changedBy: "system",
+            reason: "Booking created",
+            timestamp: now,
+        });
+        // 10. Mark slots as busy in daily_availability
         const busyChunks = Array.from({ length: endChunk - startChunk }, (_, i) => startChunk + i);
         if (dayAvailability) {
             await ctx.db.patch(dayAvailability._id, {
@@ -310,9 +335,10 @@ export const createBooking = mutation({
                 busySlots: busyChunks,
             });
         }
-        // 8. Trigger booking.created hook
+        // 11. Trigger booking.created hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.created",
+            organizationId: eventType.organizationId,
             payload: {
                 bookingId,
                 resourceId: args.resourceId,
@@ -320,14 +346,16 @@ export const createBooking = mutation({
                 start: args.start,
                 end: args.end,
                 timezone: args.timezone,
-                status: "confirmed",
+                status: initialStatus,
                 bookerName: args.booker.name,
                 bookerEmail: args.booker.email,
                 eventTitle: eventType.title,
+                uid,
+                managementToken,
             },
             resendOptions: args.resendOptions,
         });
-        // 9. Return full booking object
+        // 12. Return full booking object
         return await ctx.db.get(bookingId);
     },
 });
@@ -344,6 +372,7 @@ export const cancelReservation = mutation({
         resendOptions: v.optional(v.object({
             apiKey: v.string(),
             fromEmail: v.optional(v.string()),
+            baseUrl: v.optional(v.string()),
         })),
     },
     handler: async (ctx, args) => {
@@ -379,8 +408,11 @@ export const cancelReservation = mutation({
                 eventTypeId: booking.eventTypeId,
                 start: booking.start,
                 end: booking.end,
+                timezone: booking.timezone,
                 status: "cancelled",
                 bookerEmail: booking.bookerEmail,
+                bookerName: booking.bookerName,
+                eventTitle: booking.eventTitle,
                 previousStatus: booking.status,
             },
             resendOptions: args.resendOptions,
@@ -639,5 +671,364 @@ export const listBookings = query({
         }
         return bookings;
     },
+});
+// ============================================
+// TOKEN-BASED BOOKING ACCESS (Unauthenticated)
+// ============================================
+export const getBookingByToken = query({
+    args: { uid: v.string(), token: v.string() },
+    handler: async (ctx, args) => {
+        const booking = await ctx.db
+            .query("bookings")
+            .withIndex("by_uid", (q) => q.eq("uid", args.uid))
+            .unique();
+        if (!booking) {
+            throw new Error("Booking not found");
+        }
+        if (booking.managementToken !== args.token) {
+            throw new Error("Invalid token");
+        }
+        return booking;
+    }
+});
+export const cancelBookingByToken = mutation({
+    args: {
+        uid: v.string(),
+        token: v.string(),
+        reason: v.optional(v.string()),
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+            baseUrl: v.optional(v.string()),
+        })),
+    },
+    handler: async (ctx, args) => {
+        // 1. Find and verify booking
+        const booking = await ctx.db
+            .query("bookings")
+            .withIndex("by_uid", (q) => q.eq("uid", args.uid))
+            .unique();
+        if (!booking) {
+            throw new Error("Booking not found");
+        }
+        if (booking.managementToken !== args.token) {
+            throw new Error("Invalid token");
+        }
+        // 2. Check if booking can be cancelled (not already cancelled/completed/declined)
+        if (["cancelled", "completed", "declined"].includes(booking.status)) {
+            throw new Error(`Cannot cancel booking with status: ${booking.status}`);
+        }
+        const now = Date.now();
+        // 3. Record history
+        await ctx.db.insert("booking_history", {
+            bookingId: booking._id,
+            fromStatus: booking.status,
+            toStatus: "cancelled",
+            changedBy: "user",
+            reason: args.reason || "Cancelled by booker",
+            timestamp: now,
+        });
+        // 4. Update booking
+        await ctx.db.patch(booking._id, {
+            status: "cancelled",
+            cancelledAt: now,
+            cancellationReason: args.reason || "Cancelled by booker",
+            updatedAt: now,
+        });
+        // 5. Release the slots in daily_availability
+        const requiredSlots = getRequiredSlots(booking.start, booking.end);
+        for (const [date, slots] of requiredSlots.entries()) {
+            const availability = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", booking.resourceId).eq("date", date))
+                .unique();
+            if (availability) {
+                const updatedSlots = availability.busySlots.filter((s) => !slots.includes(s));
+                await ctx.db.patch(availability._id, { busySlots: updatedSlots });
+            }
+        }
+        // 6. Trigger booking.cancelled hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.cancelled",
+            organizationId: booking.organizationId,
+            payload: {
+                bookingId: booking._id,
+                booking: { ...booking, status: "cancelled" },
+                previousStatus: booking.status,
+                reason: args.reason || "Cancelled by booker",
+                bookerEmail: booking.bookerEmail,
+                bookerName: booking.bookerName,
+                eventTitle: booking.eventTitle,
+                start: booking.start,
+                end: booking.end,
+                timezone: booking.timezone,
+            },
+            resendOptions: args.resendOptions,
+        });
+        return { success: true };
+    }
+});
+export const rescheduleBooking = mutation({
+    args: {
+        bookingId: v.id("bookings"),
+        newStart: v.number(),
+        newEnd: v.number(),
+        reason: v.optional(v.string()),
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+            baseUrl: v.optional(v.string()),
+        })),
+    },
+    handler: async (ctx, args) => {
+        // 1. Get original booking
+        const original = await ctx.db.get(args.bookingId);
+        if (!original) {
+            throw new Error("Booking not found");
+        }
+        // 2. Check if booking can be rescheduled (only pending or confirmed)
+        if (!["pending", "confirmed"].includes(original.status)) {
+            throw new Error(`Cannot reschedule booking with status: ${original.status}`);
+        }
+        // 3. Generate new UID
+        const newUid = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        // 4. Determine new booking status
+        // If original required confirmation, new one also requires it
+        const newStatus = original.status === "pending" ? "pending" : "confirmed";
+        // 5. Create new booking (copy most fields from original)
+        const now = Date.now();
+        const newBookingId = await ctx.db.insert("bookings", {
+            uid: newUid,
+            resourceId: original.resourceId,
+            organizationId: original.organizationId,
+            eventTypeId: original.eventTypeId,
+            eventTitle: original.eventTitle,
+            eventDescription: original.eventDescription,
+            bookerName: original.bookerName,
+            bookerEmail: original.bookerEmail,
+            bookerPhone: original.bookerPhone,
+            bookerNotes: original.bookerNotes,
+            start: args.newStart,
+            end: args.newEnd,
+            timezone: original.timezone,
+            status: newStatus,
+            rescheduleUid: original.uid, // Link to original
+            actorId: original.actorId,
+            location: original.location,
+            managementToken: original.managementToken, // Keep same token
+            createdAt: now,
+            updatedAt: now,
+        });
+        // 6. Cancel original booking
+        await ctx.db.insert("booking_history", {
+            bookingId: args.bookingId,
+            fromStatus: original.status,
+            toStatus: "cancelled",
+            changedBy: "system",
+            reason: "Rescheduled to new time",
+            timestamp: now,
+        });
+        await ctx.db.patch(args.bookingId, {
+            status: "cancelled",
+            cancelledAt: now,
+            cancellationReason: "Rescheduled to new time",
+            updatedAt: now,
+        });
+        // 7. Free up old slots in daily_availability
+        const oldSlotsToFree = getRequiredSlots(original.start, original.end);
+        for (const [date, slots] of oldSlotsToFree.entries()) {
+            const availability = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", original.resourceId).eq("date", date))
+                .unique();
+            if (availability) {
+                const updatedSlots = availability.busySlots.filter((s) => !slots.includes(s));
+                await ctx.db.patch(availability._id, { busySlots: updatedSlots });
+            }
+        }
+        // 8. Mark new slots as busy in daily_availability
+        const newRequiredSlots = getRequiredSlots(args.newStart, args.newEnd);
+        for (const [date, slots] of newRequiredSlots.entries()) {
+            const existing = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", original.resourceId).eq("date", date))
+                .unique();
+            if (existing) {
+                // Check for conflicts
+                for (const slot of slots) {
+                    if (existing.busySlots.includes(slot)) {
+                        throw new Error(`Conflict detected on ${date} at slot ${slot}`);
+                    }
+                }
+                // Merge new slots
+                const updatedSlots = [...existing.busySlots, ...slots].sort((a, b) => a - b);
+                await ctx.db.patch(existing._id, { busySlots: updatedSlots });
+            }
+            else {
+                // Create new day record
+                await ctx.db.insert("daily_availability", {
+                    resourceId: original.resourceId,
+                    date,
+                    busySlots: slots,
+                });
+            }
+        }
+        // 9. Trigger booking.rescheduled hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.rescheduled",
+            organizationId: original.organizationId,
+            payload: {
+                originalBookingId: args.bookingId,
+                newBookingId,
+                oldStart: original.start,
+                oldEnd: original.end,
+                newStart: args.newStart,
+                newEnd: args.newEnd,
+                bookerEmail: original.bookerEmail,
+                bookerName: original.bookerName,
+                eventTitle: original.eventTitle,
+                timezone: original.timezone,
+            },
+            resendOptions: args.resendOptions,
+        });
+        // 10. Get and return the new booking
+        const newBooking = await ctx.db.get(newBookingId);
+        return newBooking;
+    },
+});
+export const rescheduleBookingByToken = mutation({
+    args: {
+        uid: v.string(),
+        token: v.string(),
+        newStart: v.number(),
+        newEnd: v.number(),
+        resendOptions: v.optional(v.object({
+            apiKey: v.string(),
+            fromEmail: v.optional(v.string()),
+            baseUrl: v.optional(v.string()),
+        })),
+    },
+    handler: async (ctx, args) => {
+        // 1. Find and verify booking
+        const booking = await ctx.db
+            .query("bookings")
+            .withIndex("by_uid", (q) => q.eq("uid", args.uid))
+            .unique();
+        if (!booking) {
+            throw new Error("Booking not found");
+        }
+        if (booking.managementToken !== args.token) {
+            throw new Error("Invalid token");
+        }
+        // 2. Check if booking can be rescheduled
+        if (!["pending", "confirmed"].includes(booking.status)) {
+            throw new Error(`Cannot reschedule booking with status: ${booking.status}`);
+        }
+        // 3. Check availability for new time slot
+        const available = await isAvailable(ctx, booking.resourceId, args.newStart, args.newEnd);
+        if (!available) {
+            throw new Error("Resource is not available for the requested time range");
+        }
+        // 4. Generate new UID for rescheduled booking
+        const newUid = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        // 5. Determine new booking status
+        const newStatus = booking.status === "pending" ? "pending" : "confirmed";
+        // 6. Create new booking (copy most fields from original)
+        const now = Date.now();
+        const newBookingId = await ctx.db.insert("bookings", {
+            uid: newUid,
+            resourceId: booking.resourceId,
+            organizationId: booking.organizationId,
+            eventTypeId: booking.eventTypeId,
+            eventTitle: booking.eventTitle,
+            eventDescription: booking.eventDescription,
+            bookerName: booking.bookerName,
+            bookerEmail: booking.bookerEmail,
+            bookerPhone: booking.bookerPhone,
+            bookerNotes: booking.bookerNotes,
+            start: args.newStart,
+            end: args.newEnd,
+            timezone: booking.timezone,
+            status: newStatus,
+            rescheduleUid: booking.uid,
+            actorId: booking.actorId,
+            location: booking.location,
+            managementToken: booking.managementToken,
+            createdAt: now,
+            updatedAt: now,
+        });
+        // 7. Cancel original booking
+        await ctx.db.insert("booking_history", {
+            bookingId: booking._id,
+            fromStatus: booking.status,
+            toStatus: "cancelled",
+            changedBy: "system",
+            reason: "Rescheduled to new time",
+            timestamp: now,
+        });
+        await ctx.db.patch(booking._id, {
+            status: "cancelled",
+            cancelledAt: now,
+            cancellationReason: "Rescheduled to new time",
+            updatedAt: now,
+        });
+        // 8. Free up old slots
+        const oldSlotsToFree = getRequiredSlots(booking.start, booking.end);
+        for (const [date, slots] of oldSlotsToFree.entries()) {
+            const availability = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", booking.resourceId).eq("date", date))
+                .unique();
+            if (availability) {
+                const updatedSlots = availability.busySlots.filter((s) => !slots.includes(s));
+                await ctx.db.patch(availability._id, { busySlots: updatedSlots });
+            }
+        }
+        // 9. Mark new slots as busy
+        const newRequiredSlots = getRequiredSlots(args.newStart, args.newEnd);
+        for (const [date, slots] of newRequiredSlots.entries()) {
+            const existing = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", booking.resourceId).eq("date", date))
+                .unique();
+            if (existing) {
+                // Check for conflicts
+                for (const slot of slots) {
+                    if (existing.busySlots.includes(slot)) {
+                        throw new Error(`Conflict detected on ${date} at slot ${slot}`);
+                    }
+                }
+                const updatedSlots = [...existing.busySlots, ...slots].sort((a, b) => a - b);
+                await ctx.db.patch(existing._id, { busySlots: updatedSlots });
+            }
+            else {
+                await ctx.db.insert("daily_availability", {
+                    resourceId: booking.resourceId,
+                    date,
+                    busySlots: slots,
+                });
+            }
+        }
+        // 10. Trigger booking.rescheduled hook
+        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+            eventType: "booking.rescheduled",
+            organizationId: booking.organizationId,
+            payload: {
+                originalBookingId: booking._id,
+                newBookingId,
+                oldStart: booking.start,
+                oldEnd: booking.end,
+                newStart: args.newStart,
+                newEnd: args.newEnd,
+                bookerEmail: booking.bookerEmail,
+                bookerName: booking.bookerName,
+                eventTitle: booking.eventTitle,
+                timezone: booking.timezone,
+            },
+            resendOptions: args.resendOptions,
+        });
+        const newBooking = await ctx.db.get(newBookingId);
+        return newBooking;
+    }
 });
 //# sourceMappingURL=public.js.map

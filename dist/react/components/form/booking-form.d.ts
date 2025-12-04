@@ -35,6 +35,8 @@ interface BookingFormProps {
     isSubmitting: boolean;
     /** Optional: Current logged-in user for prefilling name/email */
     currentUser?: CurrentUser;
+    /** Optional: Show reschedule-specific messaging */
+    isRescheduling?: boolean;
 }
 export declare const BookingForm: React.FC<BookingFormProps>;
 export {};

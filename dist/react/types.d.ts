@@ -30,6 +30,12 @@ export interface Booking {
     };
     createdAt?: number;
     updatedAt?: number;
+    /** Management token for public cancel/reschedule operations */
+    managementToken?: string;
+    /** Cancellation reason if cancelled */
+    cancellationReason?: string;
+    /** Timestamp when cancelled */
+    cancelledAt?: number;
 }
 export interface EventType {
     _id: string;

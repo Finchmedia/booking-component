@@ -190,6 +190,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
     }, {}, {}>;
     bookings: import("convex/server").TableDefinition<import("convex/values").VObject<{
         organizationId?: string | undefined;
+        managementToken?: string | undefined;
         bookerPhone?: string | undefined;
         bookerNotes?: string | undefined;
         eventDescription?: string | undefined;
@@ -205,8 +206,8 @@ declare const _default: import("convex/server").SchemaDefinition<{
         };
         timezone: string;
         resourceId: string;
-        actorId: string;
         uid: string;
+        actorId: string;
         status: string;
         createdAt: number;
         updatedAt: number;
@@ -220,6 +221,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
         end: import("convex/values").VFloat64<number, "required">;
         status: import("convex/values").VString<string, "required">;
         uid: import("convex/values").VString<string, "required">;
+        managementToken: import("convex/values").VString<string | undefined, "optional">;
         eventTypeId: import("convex/values").VString<string, "required">;
         organizationId: import("convex/values").VString<string | undefined, "optional">;
         timezone: import("convex/values").VString<string, "required">;
@@ -241,7 +243,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
         cancelledAt: import("convex/values").VFloat64<number | undefined, "optional">;
         rescheduleUid: import("convex/values").VString<string | undefined, "optional">;
         cancellationReason: import("convex/values").VString<string | undefined, "optional">;
-    }, "required", "organizationId" | "end" | "start" | "eventTypeId" | "location" | "timezone" | "resourceId" | "actorId" | "uid" | "status" | "createdAt" | "updatedAt" | "bookerName" | "bookerEmail" | "bookerPhone" | "bookerNotes" | "eventTitle" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "location.type" | "location.value">, {
+    }, "required", "organizationId" | "end" | "start" | "eventTypeId" | "location" | "timezone" | "resourceId" | "uid" | "actorId" | "status" | "createdAt" | "updatedAt" | "managementToken" | "bookerName" | "bookerEmail" | "bookerPhone" | "bookerNotes" | "eventTitle" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "location.type" | "location.value">, {
         by_resource: ["resourceId", "_creationTime"];
         by_uid: ["uid", "_creationTime"];
         by_email: ["bookerEmail", "_creationTime"];

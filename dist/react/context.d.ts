@@ -17,6 +17,9 @@ export interface PublicBookingAPI {
     createBooking: MutationReference;
     getBooking: QueryReference;
     getBookingByUid: QueryReference;
+    getBookingByToken: QueryReference;
+    cancelBookingByToken: MutationReference;
+    rescheduleBookingByToken: MutationReference;
     getResource: QueryReference;
     listResources: QueryReference;
     getEventTypesForResource: QueryReference;

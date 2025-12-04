@@ -151,6 +151,7 @@ export default defineSchema({
 
     // Unique identifiers
     uid: v.string(), // e.g., "bk_abc123xyz"
+    managementToken: v.optional(v.string()), // Secure random token for unauthenticated access
 
     // References
     eventTypeId: v.string(),

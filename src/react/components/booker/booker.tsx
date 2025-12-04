@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useQuery } from "convex-helpers/react/cache/hooks";
@@ -44,6 +44,18 @@ export interface BookerProps {
   onNavigate?: (path: string) => void;
   /** Callback when authentication is required (user not signed in) */
   onAuthRequired?: (slotData: { slot: string; duration: number; eventTypeId: string }) => void;
+  /**
+   * Reschedule mode: Provide the original booking to modify
+   * When present, the Booker will call rescheduleBookingByToken instead of createBooking
+   */
+  originalBooking?: Booking;
+  /**
+   * Skip the booking form step and reuse original booker info
+   * Only applies when originalBooking is provided
+   * When true: slot selection → immediate reschedule
+   * When false: slot selection → form (with reschedule messaging) → reschedule
+   */
+  reuseBookerInfo?: boolean;
 }
 
 export function Booker({
@@ -59,8 +71,13 @@ export function Booker({
   onEventTypeReset,
   onNavigate,
   onAuthRequired,
+  originalBooking,
+  reuseBookerInfo = false,
 }: BookerProps) {
   const api = useBookingAPI();
+
+  // Detect reschedule mode
+  const isRescheduling = !!originalBooking;
 
   // Step state
   const [bookingStep, setBookingStep] = useState<BookingStep>("event-meta");
@@ -72,15 +89,30 @@ export function Booker({
   // Calendar state (persists across navigation)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
-  const [selectedDuration, setSelectedDuration] = useState<number>(60);
+  // Pre-populate duration from original booking if rescheduling
+  const [selectedDuration, setSelectedDuration] = useState<number>(
+    originalBooking
+      ? Math.round((originalBooking.end - originalBooking.start) / 60000)
+      : 60
+  );
   const [timezone, setTimezone] = useState<string>(
-    Intl.DateTimeFormat().resolvedOptions().timeZone
+    originalBooking?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
   );
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
 
   // Mutations
   const createBooking = useMutation(api.createBooking);
+  // Reschedule mutation (for token-based public reschedule)
+  const rescheduleBookingByToken = api.rescheduleBookingByToken
+    ? useMutation(api.rescheduleBookingByToken)
+    : null;
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Error state for booking/reschedule failures
+  const [bookingError, setBookingError] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
 
   // Fetch event type, resource, and link state from DB
   const eventType = useQuery(api.getEventType, { eventTypeId }) as
@@ -107,6 +139,25 @@ export function Booker({
         )
       : eventType?.lengthInMinutes);
 
+  // Sync selectedDuration with event type's available options when event type loads
+  // This fixes the bug where default duration (60) might not be in the event type's options
+  useEffect(() => {
+    if (!eventType || originalBooking) return; // Skip if loading or rescheduling (has its own default)
+
+    const availableDurations = eventType.lengthInMinutesOptions?.length
+      ? eventType.lengthInMinutesOptions
+      : [eventType.lengthInMinutes];
+
+    // Only update if current selection is not valid
+    if (!availableDurations.includes(selectedDuration)) {
+      // Pick the first available duration (smallest if options exist)
+      const newDuration = eventType.lengthInMinutesOptions?.length
+        ? Math.min(...eventType.lengthInMinutesOptions)
+        : eventType.lengthInMinutes;
+      setSelectedDuration(newDuration);
+    }
+  }, [eventType, originalBooking, selectedDuration]);
+
   // Real-time Hold: Automatically reserve all affected slots (quantum coverage)
   useSlotHold(resourceId, selectedSlot, selectedDuration, eventTypeId);
 
@@ -119,35 +170,94 @@ export function Booker({
     resourceId
   );
 
+  // Reschedule handler: Call rescheduleBookingByToken directly (skips form)
+  const handleReschedule = async (newSlot: string) => {
+    if (!originalBooking || !eventType || !rescheduleBookingByToken || !originalBooking.managementToken) {
+      console.error("Cannot reschedule: missing originalBooking, eventType, mutation, or managementToken");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setBookingError(null);
+
+    try {
+      const newStart = new Date(newSlot).getTime();
+      const newEnd = newStart + selectedDuration * 60 * 1000;
+
+      const newBooking = await rescheduleBookingByToken({
+        uid: originalBooking.uid,
+        token: originalBooking.managementToken,
+        newStart,
+        newEnd,
+      });
+
+      const completedBookingData = newBooking as unknown as Booking;
+      setCompletedBooking(completedBookingData);
+      setBookingStep("success");
+      onBookingComplete?.(completedBookingData);
+    } catch (error) {
+      console.error("Reschedule failed:", error);
+      setBookingError({
+        title: "Reschedule Failed",
+        message: error instanceof Error ? error.message : "Failed to reschedule booking. Please try again.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Step 1: Calendar slot selection (captures BOTH slot AND duration atomically)
   const handleSlotSelect = (data: { slot: string; duration: number }) => {
     setSelectedSlot(data.slot);
     setSelectedDuration(data.duration); // LOCK the duration at slot selection
-    setBookingStep("booking-form");
+
+    // If rescheduling with booker info reuse, skip form and reschedule immediately
+    if (isRescheduling && reuseBookerInfo) {
+      handleReschedule(data.slot);
+    } else {
+      setBookingStep("booking-form");
+    }
   };
 
-  // Step 2: Form submission
+  // Step 2: Form submission (handles both new booking and reschedule via form)
   const handleFormSubmit = async (formData: BookingFormData) => {
     if (!selectedSlot || !eventType) return;
 
     setIsSubmitting(true);
+    setBookingError(null);
 
     try {
       const start = new Date(selectedSlot).getTime();
       const end = start + selectedDuration * 60 * 1000;
 
-      const booking = await createBooking({
-        eventTypeId: eventType.id,
-        resourceId,
-        start,
-        end,
-        timezone,
-        booker: formData,
-        location: {
-          type: "address",
-          value: eventType.locations?.[0]?.address || "Studio A",
-        },
-      });
+      let booking;
+
+      if (isRescheduling && originalBooking && rescheduleBookingByToken && originalBooking.managementToken) {
+        // RESCHEDULE PATH: Call reschedule mutation (form was shown for confirmation)
+        booking = await rescheduleBookingByToken({
+          uid: originalBooking.uid,
+          token: originalBooking.managementToken,
+          newStart: start,
+          newEnd: end,
+        });
+      } else if (isRescheduling) {
+        // Missing required data for reschedule
+        throw new Error("Missing management token for reschedule");
+      } else {
+        // CREATE PATH: Normal booking creation
+        booking = await createBooking({
+          eventTypeId: eventType.id,
+          resourceId,
+          start,
+          end,
+          timezone,
+          booker: formData,
+          location: {
+            type: "address",
+            value: eventType.locations?.[0]?.address || "Studio A",
+          },
+        });
+      }
 
       // Cast the result to Booking type
       const completedBookingData = booking as unknown as Booking;
@@ -157,10 +267,11 @@ export function Booker({
       // Trigger callback if provided
       onBookingComplete?.(completedBookingData);
     } catch (error) {
-      console.error("Booking failed:", error);
+      console.error(isRescheduling ? "Reschedule failed:" : "Booking failed:", error);
 
-      // Check for authentication error
+      // Check for authentication error (only for new bookings)
       if (
+        !isRescheduling &&
         error instanceof ConvexError &&
         (error.data as { code?: string })?.code === "UNAUTHENTICATED"
       ) {
@@ -174,7 +285,10 @@ export function Booker({
         }
       }
 
-      alert("Booking failed. Please try again.");
+      setBookingError({
+        title: isRescheduling ? "Reschedule Failed" : "Booking Failed",
+        message: error instanceof Error ? error.message : "Please try again.",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -281,7 +395,15 @@ export function Booker({
             onSubmit={handleFormSubmit}
             onBack={handleBack}
             isSubmitting={isSubmitting}
-            currentUser={currentUser}
+            currentUser={
+              currentUser ?? (originalBooking
+                ? {
+                    name: originalBooking.bookerName,
+                    email: originalBooking.bookerEmail,
+                  }
+                : undefined)
+            }
+            isRescheduling={isRescheduling}
           />
         </div>
       )}
@@ -293,6 +415,7 @@ export function Booker({
             booking={completedBooking}
             eventType={displayedEventType}
             onBookAnother={handleBookAnother}
+            isRescheduling={isRescheduling}
           />
         </div>
       )}

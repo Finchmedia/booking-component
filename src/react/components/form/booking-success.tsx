@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Calendar, CheckCircle, MapPin, User } from "lucide-react";
+import { Calendar, CheckCircle, Clock, MapPin, User } from "lucide-react";
 import type { Booking } from "../../types";
 import { formatDateTime, formatDuration } from "../../utils/formatting";
 
@@ -15,34 +15,70 @@ interface BookingSuccessProps {
   booking: Booking;
   eventType: EventType;
   onBookAnother: () => void;
+  /** Optional: Show reschedule-specific messaging */
+  isRescheduling?: boolean;
 }
 
 export const BookingSuccess: React.FC<BookingSuccessProps> = ({
   booking,
   eventType,
   onBookAnother,
+  isRescheduling = false,
 }) => {
+  const isPending = booking.status === "pending";
+
   return (
     <div className="max-w-2xl mx-auto p-8">
-      {/* Success Icon */}
+      {/* Status Icon */}
       <div className="flex justify-center mb-6">
-        <div className="h-16 w-16 rounded-full bg-green-500/10 flex items-center justify-center">
-          <CheckCircle className="h-10 w-10 text-green-500" />
-        </div>
+        {isPending ? (
+          <div className="h-16 w-16 rounded-full bg-amber-500/10 flex items-center justify-center">
+            <Clock className="h-10 w-10 text-amber-500" />
+          </div>
+        ) : (
+          <div className="h-16 w-16 rounded-full bg-green-500/10 flex items-center justify-center">
+            <CheckCircle className="h-10 w-10 text-green-500" />
+          </div>
+        )}
       </div>
 
       {/* Heading */}
       <div className="text-center mb-8">
         <h1 className="text-2xl font-bold text-foreground mb-2">
-          You're booked!
+          {isPending
+            ? isRescheduling
+              ? "Reschedule Request Submitted"
+              : "Booking Request Submitted"
+            : isRescheduling
+              ? "Booking Rescheduled!"
+              : "You're booked!"}
         </h1>
         <p className="text-muted-foreground">
-          A confirmation email has been sent to {booking.bookerEmail}
+          {isPending ? (
+            <>
+              Your {isRescheduling ? "rescheduled " : ""}booking is awaiting confirmation from the host.
+              <br />
+              We'll send a confirmation to {booking.bookerEmail} once approved.
+            </>
+          ) : (
+            <>
+              A {isRescheduling ? "reschedule " : ""}confirmation email has been sent to {booking.bookerEmail}
+            </>
+          )}
         </p>
       </div>
 
       {/* Booking Details Card */}
       <div className="bg-muted border border-border rounded-lg p-6 space-y-4 mb-6">
+        {/* Status Badge */}
+        {isPending && (
+          <div className="flex items-center justify-center">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-amber-500/15 text-amber-600 dark:text-amber-400">
+              Awaiting Confirmation
+            </span>
+          </div>
+        )}
+
         <div className="flex items-start gap-3">
           <Calendar className="h-5 w-5 text-muted-foreground mt-0.5" />
           <div>

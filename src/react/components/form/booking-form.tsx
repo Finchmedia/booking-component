@@ -49,6 +49,8 @@ interface BookingFormProps {
   isSubmitting: boolean;
   /** Optional: Current logged-in user for prefilling name/email */
   currentUser?: CurrentUser;
+  /** Optional: Show reschedule-specific messaging */
+  isRescheduling?: boolean;
 }
 
 export const BookingForm: React.FC<BookingFormProps> = ({
@@ -60,6 +62,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   onBack,
   isSubmitting,
   currentUser,
+  isRescheduling = false,
 }) => {
   // Check if user has prefilled data
   const isPrefilled = !!(currentUser?.name || currentUser?.email);
@@ -99,9 +102,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       <div className="flex-1 p-6">
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-foreground">
-            Enter Details
+            {isRescheduling ? "Confirm Reschedule" : "Enter Details"}
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
+            {isRescheduling ? "New time: " : ""}
             {formatDate(selectedSlot, timezone)} at{" "}
             {formatTimeDisplay(selectedSlot, "12h", timezone)}
           </p>
@@ -236,10 +240,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     />
                   </svg>
-                  Confirming...
+                  {isRescheduling ? "Rescheduling..." : "Confirming..."}
                 </span>
               ) : (
-                "Confirm Booking"
+                isRescheduling ? "Confirm Reschedule" : "Confirm Booking"
               )}
             </button>
           </div>

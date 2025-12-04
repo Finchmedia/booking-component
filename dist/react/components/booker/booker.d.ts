@@ -29,6 +29,18 @@ export interface BookerProps {
         duration: number;
         eventTypeId: string;
     }) => void;
+    /**
+     * Reschedule mode: Provide the original booking to modify
+     * When present, the Booker will call rescheduleBookingByToken instead of createBooking
+     */
+    originalBooking?: Booking;
+    /**
+     * Skip the booking form step and reuse original booker info
+     * Only applies when originalBooking is provided
+     * When true: slot selection → immediate reschedule
+     * When false: slot selection → form (with reschedule messaging) → reschedule
+     */
+    reuseBookerInfo?: boolean;
 }
-export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, currentUser, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, }: BookerProps): import("react/jsx-runtime").JSX.Element;
+export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, currentUser, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, originalBooking, reuseBookerInfo, }: BookerProps): import("react/jsx-runtime").JSX.Element;
 //# sourceMappingURL=booker.d.ts.map

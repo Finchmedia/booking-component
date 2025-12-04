@@ -12,6 +12,8 @@ export const HOOK_EVENTS = [
   "booking.confirmed",
   "booking.cancelled",
   "booking.completed",
+  "booking.declined",
+  "booking.rescheduled",
   "presence.timeout",
 ] as const;
 
@@ -126,6 +128,7 @@ export const triggerHooks = internalMutation({
     resendOptions: v.optional(v.object({
       apiKey: v.string(),
       fromEmail: v.optional(v.string()),
+      baseUrl: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {
@@ -135,19 +138,59 @@ export const triggerHooks = internalMutation({
     // BUILT-IN: Send transactional emails
     // ========================================
     if (args.eventType === "booking.created" && payload.bookerEmail) {
-      await ctx.scheduler.runAfter(0, internal.emails.sendBookingConfirmation, {
+      const isPending = payload.status === "pending";
+      if (isPending) {
+        // Send "awaiting confirmation" email for pending bookings
+        await ctx.scheduler.runAfter(0, internal.emails.sendBookingPending, {
+          to: payload.bookerEmail as string,
+          bookerName: (payload.bookerName as string) ?? "Guest",
+          eventTitle: (payload.eventTitle as string) ?? "Your Booking",
+          start: payload.start as number,
+          end: payload.end as number,
+          timezone: (payload.timezone as string) ?? "UTC",
+          bookingUid: payload.uid as string | undefined,
+          managementToken: payload.managementToken as string | undefined,
+          baseUrl: args.resendOptions?.baseUrl,
+          resendApiKey: args.resendOptions?.apiKey,
+          resendFromEmail: args.resendOptions?.fromEmail,
+        });
+      } else {
+        // Send confirmation email for immediately confirmed bookings
+        await ctx.scheduler.runAfter(0, internal.emails.sendBookingConfirmation, {
+          to: payload.bookerEmail as string,
+          bookerName: (payload.bookerName as string) ?? "Guest",
+          eventTitle: (payload.eventTitle as string) ?? "Your Booking",
+          start: payload.start as number,
+          end: payload.end as number,
+          timezone: (payload.timezone as string) ?? "UTC",
+          resourceId: payload.resourceId as string | undefined,
+          bookingUid: payload.uid as string | undefined,
+          managementToken: payload.managementToken as string | undefined,
+          baseUrl: args.resendOptions?.baseUrl,
+          resendApiKey: args.resendOptions?.apiKey,
+          resendFromEmail: args.resendOptions?.fromEmail,
+        });
+      }
+    }
+
+    // Send approval email when admin confirms a pending booking
+    if (args.eventType === "booking.confirmed" && payload.bookerEmail) {
+      await ctx.scheduler.runAfter(0, internal.emails.sendBookingApproved, {
         to: payload.bookerEmail as string,
         bookerName: (payload.bookerName as string) ?? "Guest",
         eventTitle: (payload.eventTitle as string) ?? "Your Booking",
         start: payload.start as number,
         end: payload.end as number,
         timezone: (payload.timezone as string) ?? "UTC",
-        resourceId: payload.resourceId as string | undefined,
+        bookingUid: payload.uid as string | undefined,
+        managementToken: payload.managementToken as string | undefined,
+        baseUrl: args.resendOptions?.baseUrl,
         resendApiKey: args.resendOptions?.apiKey,
         resendFromEmail: args.resendOptions?.fromEmail,
       });
     }
 
+    // Send cancellation email
     if (args.eventType === "booking.cancelled" && payload.bookerEmail) {
       await ctx.scheduler.runAfter(0, internal.emails.sendBookingCancellation, {
         to: payload.bookerEmail as string,
@@ -157,6 +200,40 @@ export const triggerHooks = internalMutation({
         end: payload.end as number,
         timezone: (payload.timezone as string) ?? "UTC",
         reason: payload.reason as string | undefined,
+        resendApiKey: args.resendOptions?.apiKey,
+        resendFromEmail: args.resendOptions?.fromEmail,
+      });
+    }
+
+    // Send declined email when admin rejects a pending booking
+    if (args.eventType === "booking.declined" && payload.bookerEmail) {
+      await ctx.scheduler.runAfter(0, internal.emails.sendBookingDeclined, {
+        to: payload.bookerEmail as string,
+        bookerName: (payload.bookerName as string) ?? "Guest",
+        eventTitle: (payload.eventTitle as string) ?? "Your Booking",
+        start: payload.start as number,
+        end: payload.end as number,
+        timezone: (payload.timezone as string) ?? "UTC",
+        reason: payload.reason as string | undefined,
+        resendApiKey: args.resendOptions?.apiKey,
+        resendFromEmail: args.resendOptions?.fromEmail,
+      });
+    }
+
+    // Send rescheduled email
+    if (args.eventType === "booking.rescheduled" && payload.bookerEmail) {
+      await ctx.scheduler.runAfter(0, internal.emails.sendBookingRescheduled, {
+        to: payload.bookerEmail as string,
+        bookerName: (payload.bookerName as string) ?? "Guest",
+        eventTitle: (payload.eventTitle as string) ?? "Your Booking",
+        oldStart: payload.oldStart as number,
+        oldEnd: payload.oldEnd as number,
+        newStart: payload.newStart as number,
+        newEnd: payload.newEnd as number,
+        timezone: (payload.timezone as string) ?? "UTC",
+        bookingUid: payload.uid as string | undefined,
+        managementToken: payload.managementToken as string | undefined,
+        baseUrl: args.resendOptions?.baseUrl,
         resendApiKey: args.resendOptions?.apiKey,
         resendFromEmail: args.resendOptions?.fromEmail,
       });
@@ -201,10 +278,11 @@ export const triggerHooks = internalMutation({
 // ============================================
 
 const STATE_TRANSITIONS: Record<string, string[]> = {
-  pending: ["confirmed", "cancelled"],
+  pending: ["confirmed", "cancelled", "declined"],
   confirmed: ["cancelled", "completed"],
   cancelled: [], // Terminal state
   completed: [], // Terminal state
+  declined: [], // Terminal state - admin rejected the booking request
 };
 
 export const transitionBookingState = mutation({
@@ -217,6 +295,7 @@ export const transitionBookingState = mutation({
     resendOptions: v.optional(v.object({
       apiKey: v.string(),
       fromEmail: v.optional(v.string()),
+      baseUrl: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {
@@ -270,6 +349,15 @@ export const transitionBookingState = mutation({
           booking: { ...booking, status: args.toStatus },
           previousStatus: currentStatus,
           reason: args.reason,
+          // Fields needed for email templates
+          bookerEmail: booking.bookerEmail,
+          bookerName: booking.bookerName,
+          eventTitle: booking.eventTitle,
+          start: booking.start,
+          end: booking.end,
+          timezone: booking.timezone,
+          uid: booking.uid,
+          managementToken: booking.managementToken,
         },
         resendOptions: args.resendOptions,
       });

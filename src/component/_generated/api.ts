@@ -10,6 +10,16 @@
 
 import type * as availability from "../availability.js";
 import type * as emails from "../emails.js";
+import type * as emails_helpers from "../emails/helpers.js";
+import type * as emails_mutations from "../emails/mutations.js";
+import type * as emails_styles from "../emails/styles.js";
+import type * as emails_templates_approved from "../emails/templates/approved.js";
+import type * as emails_templates_cancelled from "../emails/templates/cancelled.js";
+import type * as emails_templates_confirmation from "../emails/templates/confirmation.js";
+import type * as emails_templates_declined from "../emails/templates/declined.js";
+import type * as emails_templates_index from "../emails/templates/index.js";
+import type * as emails_templates_pending from "../emails/templates/pending.js";
+import type * as emails_templates_rescheduled from "../emails/templates/rescheduled.js";
 import type * as hooks from "../hooks.js";
 import type * as multi_resource from "../multi_resource.js";
 import type * as presence from "../presence.js";
@@ -29,6 +39,16 @@ import { anyApi, componentsGeneric } from "convex/server";
 const fullApi: ApiFromModules<{
   availability: typeof availability;
   emails: typeof emails;
+  "emails/helpers": typeof emails_helpers;
+  "emails/mutations": typeof emails_mutations;
+  "emails/styles": typeof emails_styles;
+  "emails/templates/approved": typeof emails_templates_approved;
+  "emails/templates/cancelled": typeof emails_templates_cancelled;
+  "emails/templates/confirmation": typeof emails_templates_confirmation;
+  "emails/templates/declined": typeof emails_templates_declined;
+  "emails/templates/index": typeof emails_templates_index;
+  "emails/templates/pending": typeof emails_templates_pending;
+  "emails/templates/rescheduled": typeof emails_templates_rescheduled;
   hooks: typeof hooks;
   multi_resource: typeof multi_resource;
   presence: typeof presence;
