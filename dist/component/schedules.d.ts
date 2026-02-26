@@ -1,3 +1,4 @@
+import type { QueryCtx } from "./_generated/server";
 export declare const getSchedule: import("convex/server").RegisteredQuery<"public", {
     id: string;
 }, Promise<{
@@ -149,6 +150,14 @@ export declare const deleteDateOverride: import("convex/server").RegisteredMutat
 }, Promise<{
     success: boolean;
 }>>;
+/**
+ * Plain async helper that computes effective available slots for a scheduleId + date.
+ * Exported so other component files (e.g. public.ts) can call it directly with ctx.db
+ * instead of going through ctx.runQuery.
+ */
+export declare function computeAvailabilityForDate(ctx: QueryCtx, scheduleId: string, date: string): Promise<{
+    availableSlots: number[];
+}>;
 /**
  * Get the effective available slots for a resource on a specific date.
  * This considers the schedule's weekly hours and any date overrides.

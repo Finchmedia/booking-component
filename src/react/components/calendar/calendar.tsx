@@ -33,9 +33,26 @@ interface CalendarProps {
   onTimeFormatChange: (format: "12h" | "24h") => void;
 }
 
-export const Calendar: React.FC<CalendarProps> = ({
+export const Calendar: React.FC<CalendarProps> = (props) => {
+  const api = useBookingAPI();
+
+  // Fetch event type configuration
+  const eventType = useQuery(api.getEventType, { eventTypeId: props.eventTypeId });
+
+  // Show loading state if event type is still loading
+  if (eventType === undefined) {
+    return <CalendarSkeleton />;
+  }
+
+  return <CalendarContent {...props} eventType={eventType} />;
+};
+
+// Inner component: all hooks called unconditionally (no early return before hooks)
+const CalendarContent: React.FC<
+  CalendarProps & { eventType: NonNullable<ReturnType<typeof useQuery>> }
+> = ({
   resourceId,
-  eventTypeId,
+  eventTypeId: _eventTypeId,
   onSlotSelect,
   title,
   description,
@@ -53,19 +70,11 @@ export const Calendar: React.FC<CalendarProps> = ({
   onTimezoneChange,
   timeFormat,
   onTimeFormatChange,
+  // Loaded data
+  eventType,
 }) => {
-  const api = useBookingAPI();
-
-  // Fetch event type configuration
-  const eventType = useQuery(api.getEventType, { eventTypeId });
-
-  // Show loading state if event type is still loading
-  if (eventType === undefined) {
-    return <CalendarSkeleton />;
-  }
-
   // Event type timezone (overrides browser timezone when locked)
-  const eventTimezone = eventType?.timezone || "Europe/Berlin";
+  const _eventTimezone = eventType?.timezone || "Europe/Berlin";
   const isTimezoneLocked = eventType?.lockTimeZoneToggle || false;
 
   // Use controlled duration from props
@@ -78,7 +87,7 @@ export const Calendar: React.FC<CalendarProps> = ({
     : undefined;
 
   // Intersection observer to detect when calendar becomes visible
-  const [calendarRef, isIntersecting, hasIntersected] =
+  const [calendarRef, _isIntersecting, hasIntersected] =
     useIntersectionObserver({
       rootMargin: "500px",
       triggerOnce: true,

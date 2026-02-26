@@ -97,7 +97,8 @@ export declare function areSlotsAvailable(requiredSlots: number[], busySlots: nu
  * @param eventLengthMinutes - Duration in minutes
  * @param busySlots - Array of busy slot indices
  * @param intervalMinutes - Step between slots in minutes (default: 15)
+ * @param availableSlots - Optional schedule-based available slot indices; if provided, used instead of hardcoded 9–17
  * @returns boolean
  */
-export declare function isDayAvailable(eventLengthMinutes: number, busySlots: number[], intervalMinutes?: number): boolean;
+export declare function isDayAvailable(eventLengthMinutes: number, busySlots: number[], intervalMinutes?: number, availableSlots?: number[]): boolean;
 //# sourceMappingURL=utils.d.ts.map

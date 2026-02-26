@@ -9,18 +9,24 @@ import { CalendarSkeleton } from "./calendar-skeleton";
 import { useBookingAPI } from "../../context";
 import { useConvexSlots } from "../../hooks/use-convex-slots";
 import { useIntersectionObserver } from "../../hooks/use-intersection-observer";
-export const Calendar = ({ resourceId, eventTypeId, onSlotSelect, title, description, showHeader, organizerName, organizerAvatar, 
-// Controlled state
-selectedDate, onDateChange, currentMonth, onMonthChange, selectedDuration, onDurationChange, timezone, onTimezoneChange, timeFormat, onTimeFormatChange, }) => {
+export const Calendar = (props) => {
     const api = useBookingAPI();
     // Fetch event type configuration
-    const eventType = useQuery(api.getEventType, { eventTypeId });
+    const eventType = useQuery(api.getEventType, { eventTypeId: props.eventTypeId });
     // Show loading state if event type is still loading
     if (eventType === undefined) {
         return _jsx(CalendarSkeleton, {});
     }
+    return _jsx(CalendarContent, { ...props, eventType: eventType });
+};
+// Inner component: all hooks called unconditionally (no early return before hooks)
+const CalendarContent = ({ resourceId, eventTypeId: _eventTypeId, onSlotSelect, title, description, showHeader, organizerName, organizerAvatar, 
+// Controlled state
+selectedDate, onDateChange, currentMonth, onMonthChange, selectedDuration, onDurationChange, timezone, onTimezoneChange, timeFormat, onTimeFormatChange, 
+// Loaded data
+eventType, }) => {
     // Event type timezone (overrides browser timezone when locked)
-    const eventTimezone = eventType?.timezone || "Europe/Berlin";
+    const _eventTimezone = eventType?.timezone || "Europe/Berlin";
     const isTimezoneLocked = eventType?.lockTimeZoneToggle || false;
     // Use controlled duration from props
     const eventLength = selectedDuration;
@@ -30,7 +36,7 @@ selectedDate, onDateChange, currentMonth, onMonthChange, selectedDuration, onDur
         ? [eventType.lengthInMinutes, ...(eventType.lengthInMinutesOptions || [])]
         : undefined;
     // Intersection observer to detect when calendar becomes visible
-    const [calendarRef, isIntersecting, hasIntersected] = useIntersectionObserver({
+    const [calendarRef, _isIntersecting, hasIntersected] = useIntersectionObserver({
         rootMargin: "500px",
         triggerOnce: true,
     });

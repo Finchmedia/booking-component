@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { getDayOfWeekInTimezone } from "./utils";
 
@@ -326,6 +327,78 @@ function timeToSlot(time: string): number {
 }
 
 /**
+ * Plain async helper that computes effective available slots for a scheduleId + date.
+ * Exported so other component files (e.g. public.ts) can call it directly with ctx.db
+ * instead of going through ctx.runQuery.
+ */
+export async function computeAvailabilityForDate(
+  ctx: QueryCtx,
+  scheduleId: string,
+  date: string
+): Promise<{ availableSlots: number[] }> {
+  const schedule = await ctx.db
+    .query("schedules")
+    .withIndex("by_external_id", (q) => q.eq("id", scheduleId))
+    .unique();
+
+  if (!schedule) {
+    // No schedule = default business hours (9-17)
+    return { availableSlots: Array.from({ length: 32 }, (_, i) => i + 36) };
+  }
+
+  // Check for date override
+  const overrides = await ctx.db
+    .query("date_overrides")
+    .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id))
+    .collect();
+
+  const override = overrides.find((o) => o.date === date);
+
+  if (override) {
+    if (override.type === "unavailable") {
+      return { availableSlots: [] };
+    }
+    if (override.customHours && override.customHours.length > 0) {
+      const slots: number[] = [];
+      for (const range of override.customHours) {
+        const startSlot = timeToSlot(range.startTime);
+        const endSlot = timeToSlot(range.endTime);
+        for (let i = startSlot; i < endSlot; i++) {
+          slots.push(i);
+        }
+      }
+      return { availableSlots: slots };
+    }
+  }
+
+  // Get day of week for the date in the schedule's timezone
+  // This ensures correct day-of-week even when querying from different timezones
+  const dayOfWeek = getDayOfWeekInTimezone(date, schedule.timezone);
+
+  // Find weekly hours for this day
+  const dayEntries = schedule.weeklyHours.filter(
+    (h) => h.dayOfWeek === dayOfWeek
+  );
+
+  if (dayEntries.length === 0) {
+    return { availableSlots: [] };
+  }
+
+  const slots: number[] = [];
+  for (const entry of dayEntries) {
+    const startSlot = timeToSlot(entry.startTime);
+    const endSlot = timeToSlot(entry.endTime);
+    for (let i = startSlot; i < endSlot; i++) {
+      if (!slots.includes(i)) {
+        slots.push(i);
+      }
+    }
+  }
+
+  return { availableSlots: slots.sort((a, b) => a - b) };
+}
+
+/**
  * Get the effective available slots for a resource on a specific date.
  * This considers the schedule's weekly hours and any date overrides.
  */
@@ -334,66 +407,6 @@ export const getEffectiveAvailability = query({
     scheduleId: v.string(),
     date: v.string(),
   },
-  handler: async (ctx, args) => {
-    const schedule = await ctx.db
-      .query("schedules")
-      .withIndex("by_external_id", (q) => q.eq("id", args.scheduleId))
-      .unique();
-
-    if (!schedule) {
-      // No schedule = default business hours (9-17)
-      return { availableSlots: Array.from({ length: 32 }, (_, i) => i + 36) };
-    }
-
-    // Check for date override
-    const overrides = await ctx.db
-      .query("date_overrides")
-      .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id))
-      .collect();
-
-    const override = overrides.find((o) => o.date === args.date);
-
-    if (override) {
-      if (override.type === "unavailable") {
-        return { availableSlots: [] };
-      }
-      if (override.customHours && override.customHours.length > 0) {
-        const slots: number[] = [];
-        for (const range of override.customHours) {
-          const startSlot = timeToSlot(range.startTime);
-          const endSlot = timeToSlot(range.endTime);
-          for (let i = startSlot; i < endSlot; i++) {
-            slots.push(i);
-          }
-        }
-        return { availableSlots: slots };
-      }
-    }
-
-    // Get day of week for the date in the schedule's timezone
-    // This ensures correct day-of-week even when querying from different timezones
-    const dayOfWeek = getDayOfWeekInTimezone(args.date, schedule.timezone);
-
-    // Find weekly hours for this day
-    const dayEntries = schedule.weeklyHours.filter(
-      (h) => h.dayOfWeek === dayOfWeek
-    );
-
-    if (dayEntries.length === 0) {
-      return { availableSlots: [] };
-    }
-
-    const slots: number[] = [];
-    for (const entry of dayEntries) {
-      const startSlot = timeToSlot(entry.startTime);
-      const endSlot = timeToSlot(entry.endTime);
-      for (let i = startSlot; i < endSlot; i++) {
-        if (!slots.includes(i)) {
-          slots.push(i);
-        }
-      }
-    }
-
-    return { availableSlots: slots.sort((a, b) => a - b) };
-  },
+  handler: async (ctx, args) =>
+    computeAvailabilityForDate(ctx, args.scheduleId, args.date),
 });

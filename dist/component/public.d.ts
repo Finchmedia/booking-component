@@ -43,6 +43,7 @@ export declare const getAvailability: import("convex/server").RegisteredQuery<"p
  * - The resourceTimezone parameter (optional) can be used for timezone-aware availability
  */
 export declare const getMonthAvailability: import("convex/server").RegisteredQuery<"public", {
+    scheduleId?: string | undefined;
     slotInterval?: number | undefined;
     resourceTimezone?: string | undefined;
     resourceId: string;

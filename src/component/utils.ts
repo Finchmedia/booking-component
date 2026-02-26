@@ -320,18 +320,36 @@ export function areSlotsAvailable(
  * @param eventLengthMinutes - Duration in minutes
  * @param busySlots - Array of busy slot indices
  * @param intervalMinutes - Step between slots in minutes (default: 15)
+ * @param availableSlots - Optional schedule-based available slot indices; if provided, used instead of hardcoded 9–17
  * @returns boolean
  */
 export function isDayAvailable(
     eventLengthMinutes: number,
     busySlots: number[],
-    intervalMinutes: number = 15
+    intervalMinutes: number = 15,
+    availableSlots?: number[]
 ): boolean {
     const slotsNeeded = Math.ceil(eventLengthMinutes / 15);
     const step = Math.ceil(intervalMinutes / 15);
 
-    // Iterate through potential start times
-    // We use the same loop logic as generateDaySlots but without object creation
+    if (availableSlots && availableSlots.length > 0) {
+        const availableSet = new Set(availableSlots);
+        const minSlot = Math.min(...availableSlots);
+        const maxSlot = Math.max(...availableSlots);
+        for (let s = minSlot; s + slotsNeeded <= maxSlot + 1; s += step) {
+            let free = true;
+            for (let i = 0; i < slotsNeeded; i++) {
+                if (!availableSet.has(s + i) || busySlots.includes(s + i)) {
+                    free = false;
+                    break;
+                }
+            }
+            if (free) return true;
+        }
+        return false;
+    }
+
+    // Legacy: hardcoded 9–17
     for (let slotIndex = BUSINESS_HOURS_START; slotIndex + slotsNeeded <= BUSINESS_HOURS_END; slotIndex += step) {
         // Check if this specific block is free
         let isBlockFree = true;

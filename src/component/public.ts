@@ -10,6 +10,7 @@ import {
     getDateInTimezone,
 } from "./utils";
 import { isAvailable } from "./availability";
+import { computeAvailabilityForDate } from "./schedules";
 
 // Generate a secure random token (64 hex chars = 256 bits)
 function generateSecureToken(): string {
@@ -66,6 +67,7 @@ export const getMonthAvailability = query({
         eventLength: v.number(), // Duration in minutes (e.g., 30)
         slotInterval: v.optional(v.number()), // Slot interval
         resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
+        scheduleId: v.optional(v.string()), // Schedule ID for opening-hours-aware availability
     },
     handler: async (ctx, args) => {
         const { resourceId, dateFrom, dateTo, eventLength } = args;
@@ -94,8 +96,20 @@ export const getMonthAvailability = query({
 
             const busySlots = availabilityDoc?.busySlots || [];
 
+            // If a scheduleId is provided, use it to determine the available slots window
+            let scheduleSlots: number[] | undefined;
+            if (args.scheduleId) {
+                const eff = await computeAvailabilityForDate(ctx, args.scheduleId, dateStr);
+                scheduleSlots = eff.availableSlots;
+            }
+
             // Check if there is ANY availability (optimized check)
-            const hasAvailability = isDayAvailable(eventLength, busySlots);
+            const hasAvailability = isDayAvailable(
+                eventLength,
+                busySlots,
+                args.slotInterval ?? 15,
+                scheduleSlots
+            );
 
             availabilityByDate[dateStr] = hasAvailability;
 
