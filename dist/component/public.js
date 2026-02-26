@@ -65,7 +65,7 @@ export const getMonthAvailability = query({
         // Result object: { "2025-06-17": true, "2025-06-18": false }
         const availabilityByDate = {};
         // Iterate through each day in the range
-        let currentDate = new Date(startDate);
+        const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
             // Extract date string in UTC context
             const dateStr = currentDate.toISOString().split("T")[0];

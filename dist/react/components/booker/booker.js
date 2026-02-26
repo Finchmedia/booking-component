@@ -31,9 +31,8 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
     // Mutations
     const createBooking = useMutation(api.createBooking);
     // Reschedule mutation (for token-based public reschedule)
-    const rescheduleBookingByToken = api.rescheduleBookingByToken
-        ? useMutation(api.rescheduleBookingByToken)
-        : null;
+    const hasRescheduleApi = !!api.rescheduleBookingByToken;
+    const rescheduleBookingByToken = useMutation(api.rescheduleBookingByToken ?? api.createBooking);
     const [isSubmitting, setIsSubmitting] = useState(false);
     // Error state for booking/reschedule failures
     const [bookingError, setBookingError] = useState(null);
@@ -73,7 +72,7 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
     const validation = useBookingValidation(eventType, resource, hasLink, selectedDuration, resourceId);
     // Reschedule handler: Call rescheduleBookingByToken directly (skips form)
     const handleReschedule = async (newSlot) => {
-        if (!originalBooking || !eventType || !rescheduleBookingByToken || !originalBooking.managementToken) {
+        if (!originalBooking || !eventType || !hasRescheduleApi || !originalBooking.managementToken) {
             console.error("Cannot reschedule: missing originalBooking, eventType, mutation, or managementToken");
             return;
         }
@@ -126,7 +125,7 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
             const start = new Date(selectedSlot).getTime();
             const end = start + selectedDuration * 60 * 1000;
             let booking;
-            if (isRescheduling && originalBooking && rescheduleBookingByToken && originalBooking.managementToken) {
+            if (isRescheduling && originalBooking && hasRescheduleApi && originalBooking.managementToken) {
                 // RESCHEDULE PATH: Call reschedule mutation (form was shown for confirmation)
                 booking = await rescheduleBookingByToken({
                     uid: originalBooking.uid,
