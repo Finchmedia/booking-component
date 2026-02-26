@@ -110,7 +110,7 @@ export function Booker({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Error state for booking/reschedule failures
-  const [bookingError, setBookingError] = useState<{
+  const [_bookingError, setBookingError] = useState<{
     title: string;
     message: string;
   } | null>(null);
@@ -130,7 +130,7 @@ export function Booker({
   }) as boolean | null | undefined;
 
   // Calculate effective slot interval (smart defaulting - same logic as useConvexSlots)
-  const slotInterval =
+  const _slotInterval =
     eventType?.slotInterval ??
     (eventType?.lengthInMinutesOptions &&
     eventType.lengthInMinutesOptions.length > 0

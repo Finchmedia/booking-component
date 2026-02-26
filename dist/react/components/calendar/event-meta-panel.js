@@ -3,7 +3,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React from "react";
 import { Clock, MapPin, Globe, User } from "lucide-react";
 import { getTimezoneDisplayName } from "../../utils/timezone-utils";
-export const EventMetaPanel = ({ eventType, selectedDuration, onDurationChange, userTimezone, onTimezoneChange, timezoneLocked, organizerName = "Organizer", organizerAvatar, readOnly = false, }) => {
+export const EventMetaPanel = ({ eventType, selectedDuration, onDurationChange, userTimezone, onTimezoneChange: _onTimezoneChange, timezoneLocked: _timezoneLocked, organizerName = "Organizer", organizerAvatar, readOnly = false, }) => {
     if (!eventType) {
         return (_jsx("div", { className: "w-full p-4 border-b border-border md:w-60 lg:w-72 md:border-b-0 md:border-r", children: _jsxs("div", { className: "space-y-3", children: [_jsx("div", { className: "h-4 w-24 bg-accent animate-pulse rounded" }), _jsx("div", { className: "h-6 w-full bg-accent animate-pulse rounded" }), _jsx("div", { className: "h-16 w-full bg-accent animate-pulse rounded" })] }) }));
     }

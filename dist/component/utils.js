@@ -229,7 +229,7 @@ export function generateDaySlotsWithTimezone(date, eventLengthMinutes, intervalM
             // Convert the local start time to UTC
             const localTime = slotIndexToTime(localSlotIndex);
             const utcTimestamp = wallClockToUTC(date, localTime, timezone);
-            const { date: utcDate, slot: utcStartSlot } = timestampToSlot(utcTimestamp);
+            const { slot: utcStartSlot } = timestampToSlot(utcTimestamp);
             // Generate the UTC slot indices for this booking
             const utcSlots = Array.from({ length: slotsNeeded }, (_, i) => utcStartSlot + i);
             // The start time is the UTC timestamp as ISO string

@@ -7,7 +7,6 @@ import {
     generateDaySlotsWithTimezone,
     areSlotsAvailable,
     isDayAvailable,
-    getDateInTimezone,
 } from "./utils";
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
@@ -658,7 +657,7 @@ export const updateEventType = mutation({
       throw new Error(`Event type "${args.id}" not found`);
     }
 
-    const { id, ...updates } = args;
+    const { id: _id, ...updates } = args;
     const filteredUpdates: Record<string, unknown> = { updatedAt: Date.now() };
 
     for (const [key, value] of Object.entries(updates)) {

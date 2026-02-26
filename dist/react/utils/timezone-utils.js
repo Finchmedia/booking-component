@@ -123,7 +123,7 @@ const sortTimezones = (timezones) => {
         // If same offset, sort alphabetically by city
         return a.label.localeCompare(b.label);
     })
-        .map(({ offsetMinutes, ...tz }) => tz); // Remove the temporary offsetMinutes property
+        .map(({ offsetMinutes: _offsetMinutes, ...tz }) => tz); // Remove the temporary offsetMinutes property
 };
 // Get available timezones dynamically
 export const getAvailableTimezones = () => {

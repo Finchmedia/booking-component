@@ -35,7 +35,7 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
     const rescheduleBookingByToken = useMutation(api.rescheduleBookingByToken ?? api.createBooking);
     const [isSubmitting, setIsSubmitting] = useState(false);
     // Error state for booking/reschedule failures
-    const [bookingError, setBookingError] = useState(null);
+    const [_bookingError, setBookingError] = useState(null);
     // Fetch event type, resource, and link state from DB
     const eventType = useQuery(api.getEventType, { eventTypeId });
     const resource = useQuery(api.getResource, { id: resourceId });
@@ -44,7 +44,7 @@ export function Booker({ eventTypeId, resourceId, title, description, showHeader
         eventTypeId,
     });
     // Calculate effective slot interval (smart defaulting - same logic as useConvexSlots)
-    const slotInterval = eventType?.slotInterval ??
+    const _slotInterval = eventType?.slotInterval ??
         (eventType?.lengthInMinutesOptions &&
             eventType.lengthInMinutesOptions.length > 0
             ? Math.min(...eventType.lengthInMinutesOptions, eventType.lengthInMinutes)

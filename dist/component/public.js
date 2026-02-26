@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, areSlotsAvailable, isDayAvailable, getDateInTimezone, } from "./utils";
+import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, areSlotsAvailable, isDayAvailable, } from "./utils";
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
 // Generate a secure random token (64 hex chars = 256 bits)
@@ -547,7 +547,7 @@ export const updateEventType = mutation({
         if (!eventType) {
             throw new Error(`Event type "${args.id}" not found`);
         }
-        const { id, ...updates } = args;
+        const { id: _id, ...updates } = args;
         const filteredUpdates = { updatedAt: Date.now() };
         for (const [key, value] of Object.entries(updates)) {
             if (value !== undefined) {
