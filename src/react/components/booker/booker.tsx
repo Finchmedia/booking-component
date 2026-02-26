@@ -103,9 +103,10 @@ export function Booker({
   // Mutations
   const createBooking = useMutation(api.createBooking);
   // Reschedule mutation (for token-based public reschedule)
-  const rescheduleBookingByToken = api.rescheduleBookingByToken
-    ? useMutation(api.rescheduleBookingByToken)
-    : null;
+  const hasRescheduleApi = !!api.rescheduleBookingByToken;
+  const rescheduleBookingByToken = useMutation(
+    api.rescheduleBookingByToken ?? api.createBooking
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Error state for booking/reschedule failures
@@ -172,7 +173,7 @@ export function Booker({
 
   // Reschedule handler: Call rescheduleBookingByToken directly (skips form)
   const handleReschedule = async (newSlot: string) => {
-    if (!originalBooking || !eventType || !rescheduleBookingByToken || !originalBooking.managementToken) {
+    if (!originalBooking || !eventType || !hasRescheduleApi || !originalBooking.managementToken) {
       console.error("Cannot reschedule: missing originalBooking, eventType, mutation, or managementToken");
       return;
     }
@@ -232,7 +233,7 @@ export function Booker({
 
       let booking;
 
-      if (isRescheduling && originalBooking && rescheduleBookingByToken && originalBooking.managementToken) {
+      if (isRescheduling && originalBooking && hasRescheduleApi && originalBooking.managementToken) {
         // RESCHEDULE PATH: Call reschedule mutation (form was shown for confirmation)
         booking = await rescheduleBookingByToken({
           uid: originalBooking.uid,

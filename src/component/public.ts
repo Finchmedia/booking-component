@@ -81,7 +81,7 @@ export const getMonthAvailability = query({
         const availabilityByDate: Record<string, boolean> = {};
 
         // Iterate through each day in the range
-        let currentDate = new Date(startDate);
+        const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
             // Extract date string in UTC context
             const dateStr = currentDate.toISOString().split("T")[0];

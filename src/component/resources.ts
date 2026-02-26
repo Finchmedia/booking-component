@@ -29,7 +29,7 @@ export const listResources = query({
     activeOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    let query = ctx.db
+    const query = ctx.db
       .query("resources")
       .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId));
 
