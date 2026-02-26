@@ -36,44 +36,24 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
     ].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
   }, [availableSlots, reservedSlots]);
 
-  // Format selected date for clear display
+  // Format selected date using browser locale (e.g. "Freitag, 20. März")
   const formatSelectedDate = (date: Date | null) => {
     if (!date) return "Select a date";
 
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-
-    // Check if it's today or tomorrow for friendly labels
-    if (date.toDateString() === today.toDateString()) {
-      return `Today, ${date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-      })}`;
-    }
-
-    if (date.toDateString() === tomorrow.toDateString()) {
-      return `Tomorrow, ${date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-      })}`;
-    }
-
-    // For other dates, show: "Fri, Jun 27" (includes day, month, date)
-    return date.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
+    return date.toLocaleDateString(undefined, {
+      weekday: "long",
       day: "numeric",
+      month: "long",
     });
   };
 
   return (
     <div className="w-full border-t border-border md:w-60 lg:w-72 md:border-t-0 md:border-l">
-      <div className="p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">
-            {formatSelectedDate(selectedDate)}
-          </h3>
+      <div className="p-4 pb-2">
+        <h3 className="mb-2 text-sm font-semibold text-foreground">
+          {formatSelectedDate(selectedDate)}
+        </h3>
+        <div className="mb-3 flex justify-center">
           <div className="flex overflow-hidden rounded-md border border-border bg-muted">
             <button
               onClick={() => onTimeFormatChange("12h")}
