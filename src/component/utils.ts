@@ -89,22 +89,36 @@ function getTimePartsInTimezone(timestamp: number, timezone: string): { hours: n
  */
 export function wallClockToUTC(dateStr: string, time: string, timezone: string): number {
     const [hours, minutes] = time.split(":").map(Number);
+    const [year, month, day] = dateStr.split("-").map(Number);
 
-    // Strategy: Start with an estimate and refine
-    // Create a date at the specified wall-clock time assuming it's UTC
-    const utcEstimate = new Date(`${dateStr}T${time}:00.000Z`).getTime();
+    // Create a naive UTC timestamp at the wall-clock time
+    const naiveUtcMs = Date.UTC(year, month - 1, day, hours, minutes, 0, 0);
 
-    // Check what time that actually is in the target timezone
-    const { hours: actualHours, minutes: actualMinutes } = getTimePartsInTimezone(utcEstimate, timezone);
+    // Calculate the timezone offset using Intl.DateTimeFormat
+    const fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
+    const parts = fmt.formatToParts(new Date(naiveUtcMs));
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+    const localMs = Date.UTC(
+        get("year"),
+        get("month") - 1,
+        get("day"),
+        get("hour") === 24 ? 0 : get("hour"),
+        get("minute"),
+        get("second")
+    );
+    const offsetMs = localMs - naiveUtcMs;
 
-    // Calculate the difference and adjust
-    const targetMinutes = hours * 60 + minutes;
-    const actualMinutes_total = actualHours * 60 + actualMinutes;
-    const diffMinutes = targetMinutes - actualMinutes_total;
-
-    // The UTC timestamp we need is the estimate adjusted by the difference
-    // This accounts for the timezone offset including DST
-    return utcEstimate + diffMinutes * 60 * 1000;
+    // Subtract offset to convert wall-clock → UTC
+    return naiveUtcMs - offsetMs;
 }
 
 /**
