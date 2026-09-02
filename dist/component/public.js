@@ -1,9 +1,10 @@
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, areSlotsAvailable, isDayAvailable, } from "./utils";
+import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, isCandidateAvailable, isDayAvailable, assertValidRange, } from "./utils";
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
+import { releaseBookingSlots } from "./slot_helpers";
 // Generate a secure random token (64 hex chars = 256 bits)
 function generateSecureToken() {
     const segments = [];
@@ -11,6 +12,80 @@ function generateSecureToken() {
         segments.push(Math.random().toString(36).substring(2));
     }
     return segments.join('') + Date.now().toString(36);
+}
+/**
+ * Resolves the busy slots currently held by ONE specific booking so that the
+ * availability queries can treat them as free. Reschedule flow: a booking's own
+ * slots must not make its overlapping new candidate times read as unavailable
+ * (e.g. moving 09:00 → 09:30 with a 60-minute event).
+ *
+ * Returns the booking's slot map (dateStr → slot indices) or null when there is
+ * nothing to exclude. Guards:
+ * - unknown uid / different resource → null (never touch other resources)
+ * - only statuses that actually hold slots (pending/confirmed/provisional):
+ *   a cancelled booking already released its slots — excluding its indices
+ *   again would free OTHER bookings occupying the same slots by now.
+ *
+ * Only valid for NON-fungible resources (busySlots bitmap, one holder per
+ * slot) — pooled resources track quantity_availability, which this exclusion
+ * does not touch.
+ */
+async function getExcludedSlotsForBooking(ctx, resourceId, excludeBookingUid) {
+    if (!excludeBookingUid)
+        return null;
+    const booking = await ctx.db
+        .query("bookings")
+        .withIndex("by_uid", (q) => q.eq("uid", excludeBookingUid))
+        .unique();
+    if (!booking)
+        return null;
+    if (booking.resourceId !== resourceId)
+        return null;
+    if (!["pending", "confirmed", "provisional"].includes(booking.status)) {
+        return null;
+    }
+    return getRequiredSlots(booking.start, booking.end);
+}
+/**
+ * Busy slot indices of ONE UTC date, minus the excluded booking's own slots
+ * on that date.
+ */
+async function loadBusySlots(ctx, resourceId, date, excludedByDate) {
+    const availabilityDoc = await ctx.db
+        .query("daily_availability")
+        .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
+        .unique();
+    const excludedSlots = excludedByDate?.get(date) ?? [];
+    return (availabilityDoc?.busySlots ?? []).filter((slot) => !excludedSlots.includes(slot));
+}
+/**
+ * Ensures `busyByDate` holds the busy slots of every UTC date in `dates`,
+ * loading each date at most once.
+ *
+ * The availability queries take a LOCAL date, but daily_availability is keyed
+ * by UTC date (that is how getRequiredSlots writes it). A local business day
+ * whose hours cross UTC midnight — Pacific/Auckland 09:00 is 21:00Z of the
+ * previous day, America/New_York 19:00 is 00:00Z of the next — puts its
+ * candidates on the neighbouring UTC rows, so every candidate must be checked
+ * against the rows of the dates its own `slotsByDate` names, never against
+ * the single row of the requested local date.
+ */
+async function loadBusySlotsForDates(ctx, resourceId, dates, excludedByDate, busyByDate) {
+    for (const date of dates) {
+        if (!busyByDate.has(date)) {
+            busyByDate.set(date, await loadBusySlots(ctx, resourceId, date, excludedByDate));
+        }
+    }
+}
+/** The distinct UTC dates a list of candidates touches. */
+function candidateDates(candidates) {
+    const dates = new Set();
+    for (const candidate of candidates) {
+        for (const date of candidate.slotsByDate.keys()) {
+            dates.add(date);
+        }
+    }
+    return dates;
 }
 export const getEventType = query({
     args: {
@@ -55,6 +130,7 @@ export const getMonthAvailability = query({
         slotInterval: v.optional(v.number()), // Slot interval
         resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
         scheduleId: v.optional(v.string()), // Schedule ID for opening-hours-aware availability
+        excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
     },
     handler: async (ctx, args) => {
         const { resourceId, dateFrom, dateTo, eventLength } = args;
@@ -62,27 +138,60 @@ export const getMonthAvailability = query({
         // Adding T00:00:00.000Z ensures we get UTC midnight, not local midnight
         const startDate = new Date(dateFrom + "T00:00:00.000Z");
         const endDate = new Date(dateTo + "T00:00:00.000Z");
+        // Slots held by the excluded booking (resolved once for the range).
+        const excludedByDate = await getExcludedSlotsForBooking(ctx, resourceId, args.excludeBookingUid);
         // Result object: { "2025-06-17": true, "2025-06-18": false }
         const availabilityByDate = {};
+        // Busy slots per UTC date, shared across the whole range so that each
+        // daily_availability row is read at most once even though a local
+        // day's candidates may touch the neighbouring UTC rows (see
+        // loadBusySlotsForDates).
+        const busyByDate = new Map();
         // Iterate through each day in the range
         const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
             // Extract date string in UTC context
             const dateStr = currentDate.toISOString().split("T")[0];
-            // Fetch availability data for this day
-            const availabilityDoc = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceId).eq("date", dateStr))
-                .unique();
-            const busySlots = availabilityDoc?.busySlots || [];
             // If a scheduleId is provided, use it to determine the available slots window
             let scheduleSlots;
             if (args.scheduleId) {
                 const eff = await computeAvailabilityForDate(ctx, args.scheduleId, dateStr);
                 scheduleSlots = eff.availableSlots;
             }
-            // Check if there is ANY availability (optimized check)
-            const hasAvailability = isDayAvailable(eventLength, busySlots, args.slotInterval ?? 15, scheduleSlots);
+            // Decide availability via the SAME slot-generation path as
+            // getDaySlots, so month- and day-view always agree.
+            // Previously isDayAvailable() compared the schedule's LOCAL
+            // (wall-clock) slot indices directly against UTC busySlots,
+            // skipping the wall-clock→UTC conversion that
+            // generateDaySlotsWithTimezone performs. For any non-UTC timezone
+            // that made days read as free regardless of bookings (and could
+            // produce false negatives with edge blockers).
+            // In the schedule-aware path an EMPTY effective window (weekend
+            // without weeklyHours, "unavailable" override) means the day is
+            // NOT available — it must not fall through to the legacy
+            // 9–17-UTC branch, which made weekends/vacation days read as
+            // bookable in the month view. The legacy branch remains only for
+            // schedule-less setups.
+            let hasAvailability;
+            if (args.resourceTimezone && scheduleSlots) {
+                if (scheduleSlots.length === 0) {
+                    hasAvailability = false;
+                }
+                else {
+                    const possibleSlots = generateDaySlotsWithTimezone(dateStr, eventLength, args.slotInterval ?? 15, scheduleSlots, args.resourceTimezone);
+                    // Each candidate is checked against the row(s) of ITS
+                    // OWN UTC date(s) — the same keying getRequiredSlots
+                    // uses when a booking is written.
+                    await loadBusySlotsForDates(ctx, resourceId, candidateDates(possibleSlots), excludedByDate, busyByDate);
+                    hasAvailability = possibleSlots.some((slot) => isCandidateAvailable(slot, busyByDate));
+                }
+            }
+            else {
+                // Legacy / no-timezone path: hardcoded UTC business hours,
+                // all slots on `dateStr` itself.
+                await loadBusySlotsForDates(ctx, resourceId, [dateStr], excludedByDate, busyByDate);
+                hasAvailability = isDayAvailable(eventLength, busyByDate.get(dateStr) ?? [], args.slotInterval ?? 15, scheduleSlots);
+            }
             availabilityByDate[dateStr] = hasAvailability;
             // Move to next day (using UTC methods to avoid DST issues)
             currentDate.setUTCDate(currentDate.getUTCDate() + 1);
@@ -107,28 +216,37 @@ export const getDaySlots = query({
         slotInterval: v.optional(v.number()), // Step between slots (default: 15)
         resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
         availableSlots: v.optional(v.array(v.number())), // Schedule-based available slot indices (in resource's local timezone)
+        excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
     },
     handler: async (ctx, args) => {
         const { resourceId, date, eventLength, slotInterval, resourceTimezone, availableSlots } = args;
         // Generate all possible slots for this day
         let possibleSlots;
-        if (resourceTimezone && availableSlots && availableSlots.length > 0) {
-            // Use timezone-aware slot generation with schedule-based hours
+        if (resourceTimezone && availableSlots) {
+            // Use timezone-aware slot generation with schedule-based hours.
+            // An explicitly EMPTY schedule window means the day has no slots —
+            // do not fall through to the legacy 9–17-UTC business hours
+            // (consistency with getMonthAvailability; generateDaySlotsWithTimezone
+            // returns [] for an empty window). The legacy branch remains only
+            // for schedule-less setups.
             possibleSlots = generateDaySlotsWithTimezone(date, eventLength, slotInterval ?? 15, availableSlots, resourceTimezone);
         }
         else {
             // Fallback to legacy hardcoded business hours (UTC-based)
             possibleSlots = generateDaySlots(date, eventLength, slotInterval);
         }
-        // Fetch availability data for this day
-        const availabilityDoc = await ctx.db
-            .query("daily_availability")
-            .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
-            .unique();
-        const busySlots = availabilityDoc?.busySlots || [];
+        // The excluded booking's own slots do not count as busy.
+        const excludedByDate = await getExcludedSlotsForBooking(ctx, resourceId, args.excludeBookingUid);
+        // Busy slots of every UTC date the candidates touch — not just the
+        // row of the requested local `date`: for a resource whose business
+        // day crosses UTC midnight the morning candidates live on the
+        // previous UTC row and the evening ones on the next (see
+        // loadBusySlotsForDates).
+        const busyByDate = new Map();
+        await loadBusySlotsForDates(ctx, resourceId, candidateDates(possibleSlots), excludedByDate, busyByDate);
         // Filter to only available slots
         const available = possibleSlots
-            .filter((slot) => areSlotsAvailable(slot.slots, busySlots))
+            .filter((slot) => isCandidateAvailable(slot, busyByDate))
             .map((slot) => ({ time: slot.start }));
         return available;
     },
@@ -148,6 +266,8 @@ export const createReservation = mutation({
     },
     handler: async (ctx, args) => {
         const { resourceId, start, end, actorId } = args;
+        // 0. Range guard — shared with every other write path.
+        assertValidRange(start, end);
         // 1. Check availability first (read-before-write pattern)
         // Note: We re-check inside the transaction to ensure atomicity
         const available = await isAvailable(ctx, resourceId, start, end);
@@ -246,6 +366,9 @@ export const createBooking = mutation({
         })),
     },
     handler: async (ctx, args) => {
+        // 0. Basic range validation (shared guard): NaN/Infinity and end <= start
+        // would otherwise silently reserve zero slots.
+        assertValidRange(args.start, args.end);
         // 1. Fetch event type (for snapshot)
         const eventType = await ctx.db
             .query("event_types")
@@ -267,28 +390,36 @@ export const createBooking = mutation({
         if (resource.isActive === false) {
             throw new Error("Resource is no longer active");
         }
+        // A single-resource booking books the resource on its own — not allowed
+        // for add-ons (isStandalone: false); use createMultiResourceBooking with a
+        // standalone resource instead.
+        if (resource.isStandalone === false) {
+            throw new Error(`Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`);
+        }
         // 3. Validate resource is linked to event type
         const link = await ctx.db
             .query("resource_event_types")
-            .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
-            .filter((q) => q.eq(q.field("eventTypeId"), args.eventTypeId))
+            .withIndex("by_resource_event_type", (q) => q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId))
             .unique();
         if (!link) {
             throw new Error("Resource is not available for this event type");
         }
-        // 4. Check availability (reuse existing logic from createReservation)
-        const startChunk = Math.floor((args.start % 86400000) / 900000);
-        const endChunk = Math.floor((args.end % 86400000) / 900000);
-        const dateStr = new Date(args.start).toISOString().split("T")[0];
-        const dayAvailability = await ctx.db
-            .query("daily_availability")
-            .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", dateStr))
-            .first();
-        // Check if slots are available (not busy)
-        if (dayAvailability) {
-            for (let chunk = startChunk; chunk < endChunk; chunk++) {
-                if (dayAvailability.busySlots.includes(chunk)) {
-                    throw new Error("Time slot no longer available");
+        // 4. Check availability per calendar day.
+        // Uses getRequiredSlots so a range spanning UTC midnight blocks the
+        // correct slots on each day. The previous `start % 86400000` chunk math
+        // produced endChunk < startChunk across midnight, so the conflict loop
+        // never ran and zero slots were reserved (double bookings possible).
+        const requiredSlots = getRequiredSlots(args.start, args.end);
+        for (const [date, slots] of requiredSlots.entries()) {
+            const dayAvailability = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
+                .unique();
+            if (dayAvailability) {
+                for (const slot of slots) {
+                    if (dayAvailability.busySlots.includes(slot)) {
+                        throw new Error("Time slot no longer available");
+                    }
                 }
             }
         }
@@ -306,6 +437,10 @@ export const createBooking = mutation({
             resourceId: args.resourceId,
             actorId: args.booker.email, // Use email as actorId
             eventTypeId: args.eventTypeId,
+            // Scope the booking to the event type's organization so that
+            // listBookings({ organizationId }) (index by_org) finds it — the same
+            // scope the booking hooks receive.
+            organizationId: eventType.organizationId,
             start: args.start,
             end: args.end,
             timezone: args.timezone,
@@ -329,19 +464,24 @@ export const createBooking = mutation({
             reason: "Booking created",
             timestamp: now,
         });
-        // 10. Mark slots as busy in daily_availability
-        const busyChunks = Array.from({ length: endChunk - startChunk }, (_, i) => startChunk + i);
-        if (dayAvailability) {
-            await ctx.db.patch(dayAvailability._id, {
-                busySlots: [...dayAvailability.busySlots, ...busyChunks].sort((a, b) => a - b),
-            });
-        }
-        else {
-            await ctx.db.insert("daily_availability", {
-                resourceId: args.resourceId,
-                date: dateStr,
-                busySlots: busyChunks,
-            });
+        // 10. Mark slots as busy in daily_availability (per calendar day).
+        for (const [date, slots] of requiredSlots.entries()) {
+            const existing = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
+                .unique();
+            if (existing) {
+                await ctx.db.patch(existing._id, {
+                    busySlots: [...existing.busySlots, ...slots].sort((a, b) => a - b),
+                });
+            }
+            else {
+                await ctx.db.insert("daily_availability", {
+                    resourceId: args.resourceId,
+                    date,
+                    busySlots: slots,
+                });
+            }
         }
         // 11. Trigger booking.created hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
@@ -364,6 +504,125 @@ export const createBooking = mutation({
             resendOptions: args.resendOptions,
         });
         // 12. Return full booking object
+        return await ctx.db.get(bookingId);
+    },
+});
+export const createProvisionalBooking = mutation({
+    args: {
+        eventTypeId: v.string(),
+        resourceId: v.string(),
+        start: v.number(),
+        end: v.number(),
+        timezone: v.string(),
+        booker: v.object({
+            name: v.string(),
+            email: v.string(),
+            phone: v.optional(v.string()),
+            notes: v.optional(v.string()),
+        }),
+        location: v.object({
+            type: v.string(),
+            value: v.optional(v.string()),
+        }),
+    },
+    handler: async (ctx, args) => {
+        // Basic range validation — parallel to createBooking.
+        assertValidRange(args.start, args.end);
+        const eventType = await ctx.db
+            .query("event_types")
+            .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
+            .first();
+        if (!eventType)
+            throw new Error("Event type not found");
+        if (eventType.isActive === false) {
+            throw new Error("Event type is no longer active");
+        }
+        const resource = await ctx.db
+            .query("resources")
+            .withIndex("by_external_id", (q) => q.eq("id", args.resourceId))
+            .unique();
+        if (!resource)
+            throw new Error("Resource not found");
+        if (resource.isActive === false) {
+            throw new Error("Resource is no longer active");
+        }
+        // Parallel to createBooking: an add-on cannot be held on its own.
+        if (resource.isStandalone === false) {
+            throw new Error(`Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`);
+        }
+        const link = await ctx.db
+            .query("resource_event_types")
+            .withIndex("by_resource_event_type", (q) => q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId))
+            .unique();
+        if (!link) {
+            throw new Error("Resource is not available for this event type");
+        }
+        // Check availability per calendar day (spans UTC midnight correctly) —
+        // parallel to createBooking.
+        const requiredSlots = getRequiredSlots(args.start, args.end);
+        for (const [date, slots] of requiredSlots.entries()) {
+            const dayAvailability = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
+                .unique();
+            if (dayAvailability) {
+                for (const slot of slots) {
+                    if (dayAvailability.busySlots.includes(slot)) {
+                        throw new Error("Time slot no longer available");
+                    }
+                }
+            }
+        }
+        const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const managementToken = generateSecureToken();
+        const now = Date.now();
+        const bookingId = await ctx.db.insert("bookings", {
+            uid,
+            managementToken,
+            resourceId: args.resourceId,
+            actorId: args.booker.email,
+            eventTypeId: args.eventTypeId,
+            start: args.start,
+            end: args.end,
+            timezone: args.timezone,
+            status: "provisional",
+            bookerName: args.booker.name,
+            bookerEmail: args.booker.email,
+            bookerPhone: args.booker.phone,
+            bookerNotes: args.booker.notes,
+            eventTitle: eventType.title,
+            eventDescription: eventType.description,
+            location: args.location,
+            organizationId: eventType.organizationId,
+            createdAt: now,
+            updatedAt: now,
+        });
+        await ctx.db.insert("booking_history", {
+            bookingId,
+            fromStatus: "",
+            toStatus: "provisional",
+            changedBy: "system",
+            reason: "Provisional booking created",
+            timestamp: now,
+        });
+        for (const [date, slots] of requiredSlots.entries()) {
+            const existing = await ctx.db
+                .query("daily_availability")
+                .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
+                .unique();
+            if (existing) {
+                await ctx.db.patch(existing._id, {
+                    busySlots: [...existing.busySlots, ...slots].sort((a, b) => a - b),
+                });
+            }
+            else {
+                await ctx.db.insert("daily_availability", {
+                    resourceId: args.resourceId,
+                    date,
+                    busySlots: slots,
+                });
+            }
+        }
         return await ctx.db.get(bookingId);
     },
 });
@@ -425,6 +684,41 @@ export const cancelReservation = mutation({
             },
             resendOptions: args.resendOptions,
         });
+    },
+});
+export const expireProvisionalBooking = mutation({
+    args: {
+        bookingId: v.id("bookings"),
+        reason: v.optional(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const booking = await ctx.db.get(args.bookingId);
+        if (!booking) {
+            throw new Error("Booking not found");
+        }
+        if (booking.status === "cancelled") {
+            return { success: true };
+        }
+        if (booking.status !== "provisional") {
+            return { success: false, reason: `Booking is ${booking.status}` };
+        }
+        const now = Date.now();
+        await ctx.db.insert("booking_history", {
+            bookingId: args.bookingId,
+            fromStatus: "provisional",
+            toStatus: "cancelled",
+            changedBy: "system",
+            reason: args.reason ?? "Provisional booking expired",
+            timestamp: now,
+        });
+        await releaseBookingSlots(ctx, booking.resourceId, booking.start, booking.end);
+        await ctx.db.patch(args.bookingId, {
+            status: "cancelled",
+            cancelledAt: now,
+            cancellationReason: args.reason ?? "Provisional booking expired",
+            updatedAt: now,
+        });
+        return { success: true };
     },
 });
 export const createEventType = mutation({
@@ -661,7 +955,22 @@ export const listBookings = query({
         else {
             bookings = await ctx.db.query("bookings").collect();
         }
-        // Apply filters
+        // The ids that did not pick the index still narrow the result — a caller
+        // asking for one resource's bookings of one event type must not get that
+        // resource's bookings of every event type. (Redundant for the indexed id.)
+        if (args.organizationId) {
+            bookings = bookings.filter((b) => b.organizationId === args.organizationId);
+        }
+        if (args.resourceId) {
+            bookings = bookings.filter((b) => b.resourceId === args.resourceId);
+        }
+        if (args.eventTypeId) {
+            bookings = bookings.filter((b) => b.eventTypeId === args.eventTypeId);
+        }
+        // Hide provisional reservations from regular booking lists unless explicitly requested.
+        if (!args.status) {
+            bookings = bookings.filter((b) => b.status !== "provisional");
+        }
         if (args.status) {
             bookings = bookings.filter((b) => b.status === args.status);
         }
@@ -789,6 +1098,10 @@ export const rescheduleBooking = mutation({
         })),
     },
     handler: async (ctx, args) => {
+        // 0. Range guard. Without it an inverted/NaN range maps to zero slots:
+        // the old slots would be released and none reserved, leaving a live
+        // "confirmed" booking that holds nothing.
+        assertValidRange(args.newStart, args.newEnd);
         // 1. Get original booking
         const original = await ctx.db.get(args.bookingId);
         if (!original) {
@@ -917,6 +1230,8 @@ export const rescheduleBookingByToken = mutation({
         })),
     },
     handler: async (ctx, args) => {
+        // 0. Range guard — see rescheduleBooking.
+        assertValidRange(args.newStart, args.newEnd);
         // 1. Find and verify booking
         const booking = await ctx.db
             .query("bookings")
@@ -932,8 +1247,15 @@ export const rescheduleBookingByToken = mutation({
         if (!["pending", "confirmed"].includes(booking.status)) {
             throw new Error(`Cannot reschedule booking with status: ${booking.status}`);
         }
-        // 3. Check availability for new time slot
-        const available = await isAvailable(ctx, booking.resourceId, args.newStart, args.newEnd);
+        // 3. Check availability for new time slot.
+        // The booking's OWN slots are still marked busy at this point (they are
+        // released in step 8), so they are excluded from the conflict check —
+        // otherwise a move to an overlapping range (09:00 → 09:30 with a 60-minute
+        // event) would be wrongly rejected. Only this booking's slots are excluded;
+        // the per-day conflict check in step 9 runs after the release and remains
+        // as a second guard.
+        const ownSlots = getRequiredSlots(booking.start, booking.end);
+        const available = await isAvailable(ctx, booking.resourceId, args.newStart, args.newEnd, ownSlots);
         if (!available) {
             throw new Error("Resource is not available for the requested time range");
         }

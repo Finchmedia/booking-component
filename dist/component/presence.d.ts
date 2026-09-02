@@ -2,6 +2,10 @@
  * signals that a user is present in one or more slots (time slots).
  * Updates their timestamp and ensures a cleanup job is scheduled for each slot.
  * Accepts an array of slots to batch multiple heartbeats into a single transaction.
+ *
+ * A hold is identified by (user, slot, resourceId): the same user can hold
+ * the same ISO slot on several resources at once (room + equipment), and
+ * heartbeat/leave/cleanup for one resource must never touch the others'.
  */
 export declare const heartbeat: import("convex/server").RegisteredMutation<"public", {
     eventTypeId?: string | undefined;
@@ -46,8 +50,8 @@ export declare const list: import("convex/server").RegisteredQuery<"public", {
  * @returns Array of active presence records for that resource+date
  */
 export declare const getDatePresence: import("convex/server").RegisteredQuery<"public", {
-    resourceId: string;
     date: string;
+    resourceId: string;
 }, Promise<{
     slot: string;
     user: string;
@@ -62,8 +66,8 @@ export declare const getDatePresence: import("convex/server").RegisteredQuery<"p
  * @returns Object with count and array of unique user IDs
  */
 export declare const getActivePresenceCount: import("convex/server").RegisteredQuery<"public", {
-    eventTypeId?: string | undefined;
     resourceId?: string | undefined;
+    eventTypeId?: string | undefined;
 }, Promise<{
     count: number;
     users: string[];

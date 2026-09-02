@@ -9,7 +9,7 @@
   "bugs": {
     "url": "https://github.com/Finchmedia/booking-component/issues"
   },
-  "version": "0.2.5",
+  "version": "0.3.0",
   "license": "Apache-2.0",
   "keywords": [
     "convex",
@@ -40,7 +40,8 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "!src/**/*.test.ts"
   ],
   "exports": {
     "./package.json": "./package.json",

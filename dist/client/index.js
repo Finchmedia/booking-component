@@ -125,6 +125,9 @@ export function makeBookingAPI(component) {
                 dateTo: v.string(),
                 eventLength: v.number(),
                 slotInterval: v.optional(v.number()),
+                resourceTimezone: v.optional(v.string()),
+                scheduleId: v.optional(v.string()),
+                excludeBookingUid: v.optional(v.string()),
             },
             handler: async (ctx, args) => {
                 return await ctx.runQuery(component.public.getMonthAvailability, args);
@@ -136,6 +139,9 @@ export function makeBookingAPI(component) {
                 date: v.string(),
                 eventLength: v.number(),
                 slotInterval: v.optional(v.number()),
+                resourceTimezone: v.optional(v.string()),
+                availableSlots: v.optional(v.array(v.number())),
+                excludeBookingUid: v.optional(v.string()),
             },
             handler: async (ctx, args) => {
                 return await ctx.runQuery(component.public.getDaySlots, args);
@@ -185,6 +191,28 @@ export function makeBookingAPI(component) {
                 return await ctx.runMutation(component.public.createBooking, args);
             },
         }),
+        createProvisionalBooking: mutationGeneric({
+            args: {
+                eventTypeId: v.string(),
+                resourceId: v.string(),
+                start: v.number(),
+                end: v.number(),
+                timezone: v.string(),
+                booker: v.object({
+                    name: v.string(),
+                    email: v.string(),
+                    phone: v.optional(v.string()),
+                    notes: v.optional(v.string()),
+                }),
+                location: v.object({
+                    type: v.string(),
+                    value: v.optional(v.string()),
+                }),
+            },
+            handler: async (ctx, args) => {
+                return await ctx.runMutation(component.public.createProvisionalBooking, args);
+            },
+        }),
         getBooking: queryGeneric({
             args: { bookingId: v.string() },
             handler: async (ctx, args) => {
@@ -228,6 +256,18 @@ export function makeBookingAPI(component) {
                 });
             },
         }),
+        expireProvisionalBooking: mutationGeneric({
+            args: {
+                bookingId: v.string(),
+                reason: v.optional(v.string()),
+            },
+            handler: async (ctx, args) => {
+                return await ctx.runMutation(component.public.expireProvisionalBooking, {
+                    bookingId: args.bookingId,
+                    reason: args.reason,
+                });
+            },
+        }),
         // ============================================
         // RESOURCES
         // ============================================
@@ -259,6 +299,7 @@ export function makeBookingAPI(component) {
                 isFungible: v.optional(v.boolean()),
                 isStandalone: v.optional(v.boolean()),
                 isActive: v.optional(v.boolean()),
+                metadata: v.optional(v.record(v.string(), v.string())),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.resources.createResource, args);
@@ -275,6 +316,7 @@ export function makeBookingAPI(component) {
                 isFungible: v.optional(v.boolean()),
                 isStandalone: v.optional(v.boolean()),
                 isActive: v.optional(v.boolean()),
+                metadata: v.optional(v.record(v.string(), v.string())),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.resources.updateResource, args);
@@ -645,6 +687,32 @@ export function makeBookingAPI(component) {
             },
             handler: async (ctx, args) => {
                 return await ctx.runQuery(component.presence.getActivePresenceCount, args);
+            },
+        }),
+        // ============================================
+        // MAINTENANCE (Sandbox resets / debugging)
+        // These are unauthenticated at the component boundary — only expose them
+        // behind an admin-only mutation in the host app.
+        // ============================================
+        wipeAllBookingData: mutationGeneric({
+            args: {},
+            handler: async (ctx) => {
+                return await ctx.runMutation(component.maintenance.wipeAllBookingData, {});
+            },
+        }),
+        wipeAllData: mutationGeneric({
+            args: {},
+            handler: async (ctx) => {
+                return await ctx.runMutation(component.maintenance.wipeAllData, {});
+            },
+        }),
+        getDailyAvailability: queryGeneric({
+            args: {
+                resourceId: v.string(),
+                date: v.string(),
+            },
+            handler: async (ctx, args) => {
+                return await ctx.runQuery(component.maintenance.getDailyAvailability, args);
             },
         }),
     };

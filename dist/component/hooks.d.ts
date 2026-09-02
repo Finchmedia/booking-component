@@ -1,4 +1,4 @@
-export declare const HOOK_EVENTS: readonly ["booking.created", "booking.confirmed", "booking.cancelled", "booking.completed", "booking.declined", "booking.rescheduled", "presence.timeout"];
+export declare const HOOK_EVENTS: readonly ["booking.created", "booking.pending", "booking.confirmed", "booking.cancelled", "booking.completed", "booking.declined", "booking.rescheduled", "presence.timeout"];
 export type HookEventType = (typeof HOOK_EVENTS)[number];
 export declare const listHooks: import("convex/server").RegisteredQuery<"public", {
     eventType?: string | undefined;

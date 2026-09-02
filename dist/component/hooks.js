@@ -1,11 +1,13 @@
 import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { releaseAllSlotsForBooking } from "./slot_helpers";
 // ============================================
 // HOOK EVENT TYPES
 // ============================================
 export const HOOK_EVENTS = [
     "booking.created",
+    "booking.pending",
     "booking.confirmed",
     "booking.cancelled",
     "booking.completed",
@@ -112,8 +114,9 @@ export const triggerHooks = internalMutation({
         // ========================================
         // BUILT-IN: Send transactional emails
         // ========================================
-        if (args.eventType === "booking.created" && payload.bookerEmail) {
-            const isPending = payload.status === "pending";
+        if ((args.eventType === "booking.created" || args.eventType === "booking.pending") &&
+            payload.bookerEmail) {
+            const isPending = args.eventType === "booking.pending" || payload.status === "pending";
             if (isPending) {
                 // Send "awaiting confirmation" email for pending bookings
                 await ctx.scheduler.runAfter(0, internal.emails.sendBookingPending, {
@@ -148,21 +151,40 @@ export const triggerHooks = internalMutation({
                 });
             }
         }
-        // Send approval email when admin confirms a pending booking
+        // Send confirmation/approval email when a booking becomes confirmed.
         if (args.eventType === "booking.confirmed" && payload.bookerEmail) {
-            await ctx.scheduler.runAfter(0, internal.emails.sendBookingApproved, {
-                to: payload.bookerEmail,
-                bookerName: payload.bookerName ?? "Guest",
-                eventTitle: payload.eventTitle ?? "Your Booking",
-                start: payload.start,
-                end: payload.end,
-                timezone: payload.timezone ?? "UTC",
-                bookingUid: payload.uid,
-                managementToken: payload.managementToken,
-                baseUrl: args.resendOptions?.baseUrl,
-                resendApiKey: args.resendOptions?.apiKey,
-                resendFromEmail: args.resendOptions?.fromEmail,
-            });
+            const emailFunction = payload.previousStatus === "provisional"
+                ? internal.emails.sendBookingConfirmation
+                : internal.emails.sendBookingApproved;
+            const emailPayload = payload.previousStatus === "provisional"
+                ? {
+                    to: payload.bookerEmail,
+                    bookerName: payload.bookerName ?? "Guest",
+                    eventTitle: payload.eventTitle ?? "Your Booking",
+                    start: payload.start,
+                    end: payload.end,
+                    timezone: payload.timezone ?? "UTC",
+                    resourceId: payload.resourceId,
+                    bookingUid: payload.uid,
+                    managementToken: payload.managementToken,
+                    baseUrl: args.resendOptions?.baseUrl,
+                    resendApiKey: args.resendOptions?.apiKey,
+                    resendFromEmail: args.resendOptions?.fromEmail,
+                }
+                : {
+                    to: payload.bookerEmail,
+                    bookerName: payload.bookerName ?? "Guest",
+                    eventTitle: payload.eventTitle ?? "Your Booking",
+                    start: payload.start,
+                    end: payload.end,
+                    timezone: payload.timezone ?? "UTC",
+                    bookingUid: payload.uid,
+                    managementToken: payload.managementToken,
+                    baseUrl: args.resendOptions?.baseUrl,
+                    resendApiKey: args.resendOptions?.apiKey,
+                    resendFromEmail: args.resendOptions?.fromEmail,
+                };
+            await ctx.scheduler.runAfter(0, emailFunction, emailPayload);
         }
         // Send cancellation email
         if (args.eventType === "booking.cancelled" && payload.bookerEmail) {
@@ -245,6 +267,7 @@ export const triggerHooks = internalMutation({
 // BOOKING STATE TRANSITIONS
 // ============================================
 const STATE_TRANSITIONS = {
+    provisional: ["pending", "confirmed", "cancelled"],
     pending: ["confirmed", "cancelled", "declined"],
     confirmed: ["cancelled", "completed"],
     cancelled: [], // Terminal state
@@ -289,11 +312,22 @@ export const transitionBookingState = mutation({
             status: args.toStatus,
             updatedAt: now,
         };
-        if (args.toStatus === "cancelled") {
+        // Both "cancelled" and "declined" end the booking: stamp the cancellation
+        // fields and give the held slots back. Previously a declined booking (and
+        // a cancellation through this state machine) kept its slots busy forever,
+        // so the time could never be rebooked.
+        const releasesSlots = args.toStatus === "cancelled" || args.toStatus === "declined";
+        if (releasesSlots) {
             updates.cancelledAt = now;
             updates.cancellationReason = args.reason;
         }
         await ctx.db.patch(args.bookingId, updates);
+        if (releasesSlots) {
+            // Single-resource bookings: daily_availability of booking.resourceId.
+            // Multi-resource bookings: per booking_item (quantity_availability for
+            // pooled resources) — the same logic as cancelMultiResourceBooking.
+            await releaseAllSlotsForBooking(ctx, booking);
+        }
         // Trigger hooks for the transition
         const hookEventType = `booking.${args.toStatus}`;
         if (HOOK_EVENTS.includes(hookEventType)) {

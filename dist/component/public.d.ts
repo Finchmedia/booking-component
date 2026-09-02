@@ -29,9 +29,9 @@ export declare const getEventType: import("convex/server").RegisteredQuery<"publ
     title: string;
 }>>;
 export declare const getAvailability: import("convex/server").RegisteredQuery<"public", {
+    resourceId: string;
     end: number;
     start: number;
-    resourceId: string;
 }, Promise<boolean>>;
 /**
  * Gets availability status for a date range
@@ -45,6 +45,7 @@ export declare const getAvailability: import("convex/server").RegisteredQuery<"p
 export declare const getMonthAvailability: import("convex/server").RegisteredQuery<"public", {
     scheduleId?: string | undefined;
     slotInterval?: number | undefined;
+    excludeBookingUid?: string | undefined;
     resourceTimezone?: string | undefined;
     resourceId: string;
     eventLength: number;
@@ -63,9 +64,10 @@ export declare const getMonthAvailability: import("convex/server").RegisteredQue
 export declare const getDaySlots: import("convex/server").RegisteredQuery<"public", {
     slotInterval?: number | undefined;
     availableSlots?: number[] | undefined;
+    excludeBookingUid?: string | undefined;
     resourceTimezone?: string | undefined;
-    resourceId: string;
     date: string;
+    resourceId: string;
     eventLength: number;
 }, Promise<{
     time: string;
@@ -76,9 +78,9 @@ export declare const createReservation: import("convex/server").RegisteredMutati
         baseUrl?: string | undefined;
         apiKey: string;
     } | undefined;
+    resourceId: string;
     end: number;
     start: number;
-    resourceId: string;
     actorId: string;
 }, Promise<import("convex/values").GenericId<"bookings">>>;
 export declare const createBooking: import("convex/server").RegisteredMutation<"public", {
@@ -87,6 +89,7 @@ export declare const createBooking: import("convex/server").RegisteredMutation<"
         baseUrl?: string | undefined;
         apiKey: string;
     } | undefined;
+    resourceId: string;
     end: number;
     start: number;
     booker: {
@@ -101,7 +104,6 @@ export declare const createBooking: import("convex/server").RegisteredMutation<"
         type: string;
     };
     timezone: string;
-    resourceId: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"bookings">;
     _creationTime: number;
@@ -113,6 +115,7 @@ export declare const createBooking: import("convex/server").RegisteredMutation<"
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -121,7 +124,51 @@ export declare const createBooking: import("convex/server").RegisteredMutation<"
         type: string;
     };
     timezone: string;
+    uid: string;
+    actorId: string;
+    status: string;
+    createdAt: number;
+    updatedAt: number;
+    bookerName: string;
+    bookerEmail: string;
+    eventTitle: string;
+} | null>>;
+export declare const createProvisionalBooking: import("convex/server").RegisteredMutation<"public", {
     resourceId: string;
+    end: number;
+    start: number;
+    booker: {
+        phone?: string | undefined;
+        notes?: string | undefined;
+        name: string;
+        email: string;
+    };
+    eventTypeId: string;
+    location: {
+        value?: string | undefined;
+        type: string;
+    };
+    timezone: string;
+}, Promise<{
+    _id: import("convex/values").GenericId<"bookings">;
+    _creationTime: number;
+    organizationId?: string | undefined;
+    managementToken?: string | undefined;
+    bookerPhone?: string | undefined;
+    bookerNotes?: string | undefined;
+    eventDescription?: string | undefined;
+    cancelledAt?: number | undefined;
+    rescheduleUid?: string | undefined;
+    cancellationReason?: string | undefined;
+    resourceId: string;
+    end: number;
+    start: number;
+    eventTypeId: string;
+    location: {
+        value?: string | undefined;
+        type: string;
+    };
+    timezone: string;
     uid: string;
     actorId: string;
     status: string;
@@ -144,6 +191,7 @@ export declare const getBooking: import("convex/server").RegisteredQuery<"public
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -152,7 +200,6 @@ export declare const getBooking: import("convex/server").RegisteredQuery<"public
         type: string;
     };
     timezone: string;
-    resourceId: string;
     uid: string;
     actorId: string;
     status: string;
@@ -170,6 +217,16 @@ export declare const cancelReservation: import("convex/server").RegisteredMutati
     } | undefined;
     reservationId: import("convex/values").GenericId<"bookings">;
 }, Promise<void>>;
+export declare const expireProvisionalBooking: import("convex/server").RegisteredMutation<"public", {
+    reason?: string | undefined;
+    bookingId: import("convex/values").GenericId<"bookings">;
+}, Promise<{
+    success: boolean;
+    reason?: undefined;
+} | {
+    success: boolean;
+    reason: string;
+}>>;
 export declare const createEventType: import("convex/server").RegisteredMutation<"public", {
     organizationId?: string | undefined;
     bufferAfter?: number | undefined;
@@ -304,6 +361,7 @@ export declare const getBookingByUid: import("convex/server").RegisteredQuery<"p
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -312,7 +370,6 @@ export declare const getBookingByUid: import("convex/server").RegisteredQuery<"p
         type: string;
     };
     timezone: string;
-    resourceId: string;
     uid: string;
     actorId: string;
     status: string;
@@ -324,8 +381,8 @@ export declare const getBookingByUid: import("convex/server").RegisteredQuery<"p
 } | null>>;
 export declare const listBookings: import("convex/server").RegisteredQuery<"public", {
     organizationId?: string | undefined;
-    eventTypeId?: string | undefined;
     resourceId?: string | undefined;
+    eventTypeId?: string | undefined;
     dateFrom?: number | undefined;
     dateTo?: number | undefined;
     limit?: number | undefined;
@@ -341,6 +398,7 @@ export declare const listBookings: import("convex/server").RegisteredQuery<"publ
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -349,7 +407,6 @@ export declare const listBookings: import("convex/server").RegisteredQuery<"publ
         type: string;
     };
     timezone: string;
-    resourceId: string;
     uid: string;
     actorId: string;
     status: string;
@@ -373,6 +430,7 @@ export declare const getBookingByToken: import("convex/server").RegisteredQuery<
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -381,7 +439,6 @@ export declare const getBookingByToken: import("convex/server").RegisteredQuery<
         type: string;
     };
     timezone: string;
-    resourceId: string;
     uid: string;
     actorId: string;
     status: string;
@@ -424,6 +481,7 @@ export declare const rescheduleBooking: import("convex/server").RegisteredMutati
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -432,7 +490,6 @@ export declare const rescheduleBooking: import("convex/server").RegisteredMutati
         type: string;
     };
     timezone: string;
-    resourceId: string;
     uid: string;
     actorId: string;
     status: string;
@@ -463,6 +520,7 @@ export declare const rescheduleBookingByToken: import("convex/server").Registere
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -471,7 +529,6 @@ export declare const rescheduleBookingByToken: import("convex/server").Registere
         type: string;
     };
     timezone: string;
-    resourceId: string;
     uid: string;
     actorId: string;
     status: string;

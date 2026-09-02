@@ -44,6 +44,7 @@ export declare const getResourcesForEventType: import("convex/server").Registere
     description?: string | undefined;
     isFungible?: boolean | undefined;
     isStandalone?: boolean | undefined;
+    metadata?: Record<string, string> | undefined;
     quantity?: number | undefined;
     organizationId: string;
     timezone: string;
@@ -58,8 +59,8 @@ export declare const getResourcesForEventType: import("convex/server").Registere
  * Check if a specific resource-event type link exists
  */
 export declare const hasResourceEventTypeLink: import("convex/server").RegisteredQuery<"public", {
-    eventTypeId: string;
     resourceId: string;
+    eventTypeId: string;
 }, Promise<boolean>>;
 /**
  * Get all resource IDs linked to an event type (lightweight)
@@ -78,15 +79,15 @@ export declare const getEventTypeIdsForResource: import("convex/server").Registe
  * Link a resource to an event type
  */
 export declare const linkResourceToEventType: import("convex/server").RegisteredMutation<"public", {
-    eventTypeId: string;
     resourceId: string;
+    eventTypeId: string;
 }, Promise<import("convex/values").GenericId<"resource_event_types">>>;
 /**
  * Unlink a resource from an event type
  */
 export declare const unlinkResourceFromEventType: import("convex/server").RegisteredMutation<"public", {
-    eventTypeId: string;
     resourceId: string;
+    eventTypeId: string;
 }, Promise<{
     success: boolean;
     existed: boolean;

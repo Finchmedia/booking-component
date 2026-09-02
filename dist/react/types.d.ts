@@ -17,7 +17,7 @@ export interface Booking {
     start: number;
     end: number;
     timezone: string;
-    status: "pending" | "confirmed" | "cancelled" | "completed" | "rescheduled";
+    status: "provisional" | "pending" | "confirmed" | "cancelled" | "completed" | "declined" | "rescheduled";
     bookerName: string;
     bookerEmail: string;
     bookerPhone?: string;

@@ -1,7 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { getRequiredSlots } from "./utils";
+import { getRequiredSlots, assertValidRange } from "./utils";
+import { releaseAllSlotsForBooking } from "./slot_helpers";
 // Generate a secure random token (64 hex chars = 256 bits)
 function generateSecureToken() {
     const segments = [];
@@ -119,6 +120,13 @@ export const createMultiResourceBooking = mutation({
         })),
     },
     handler: async (ctx, args) => {
+        // 0. Range guard — shared with every other write path (an inverted or
+        // NaN range maps to zero slots and would create a booking that holds
+        // nothing).
+        assertValidRange(args.start, args.end);
+        if (args.resources.length === 0) {
+            throw new Error("At least one resource is required");
+        }
         // 1. Get event type for metadata
         const eventType = await ctx.db
             .query("event_types")
@@ -129,6 +137,10 @@ export const createMultiResourceBooking = mutation({
         }
         // 2. Check ALL resources are available (fail-fast)
         const requiredSlots = getRequiredSlots(args.start, args.end);
+        // `isStandalone: false` marks an add-on (e.g. rental equipment) that can
+        // only be booked together with a standalone resource. Unknown resources
+        // (no document) count as standalone.
+        let hasStandaloneResource = false;
         for (const resourceReq of args.resources) {
             const requestedQty = resourceReq.quantity ?? 1;
             // Get resource
@@ -138,6 +150,9 @@ export const createMultiResourceBooking = mutation({
                 .unique();
             const totalQuantity = resource?.quantity ?? 1;
             const isFungible = resource?.isFungible ?? false;
+            if (resource?.isStandalone !== false) {
+                hasStandaloneResource = true;
+            }
             for (const [date, slots] of requiredSlots.entries()) {
                 if (isFungible && totalQuantity > 1) {
                     // Quantity-based
@@ -167,6 +182,10 @@ export const createMultiResourceBooking = mutation({
                     }
                 }
             }
+        }
+        if (!hasStandaloneResource) {
+            const ids = args.resources.map((r) => `"${r.resourceId}"`).join(", ");
+            throw new Error(`Resource ${ids} cannot be booked alone (isStandalone: false): add a standalone resource to the booking`);
         }
         // 3. Create main booking record (use first resource as primary)
         const primaryResourceId = args.resources[0].resourceId;
@@ -351,52 +370,10 @@ export const cancelMultiResourceBooking = mutation({
         if (booking.status === "cancelled") {
             throw new Error("Booking is already cancelled");
         }
-        // Get all booking items
-        const items = await ctx.db
-            .query("booking_items")
-            .withIndex("by_booking", (q) => q.eq("bookingId", args.bookingId))
-            .collect();
-        const requiredSlots = getRequiredSlots(booking.start, booking.end);
-        // Release slots for each resource
-        for (const item of items) {
-            const resource = await ctx.db
-                .query("resources")
-                .withIndex("by_external_id", (q) => q.eq("id", item.resourceId))
-                .unique();
-            const totalQuantity = resource?.quantity ?? 1;
-            const isFungible = resource?.isFungible ?? false;
-            for (const [date, slots] of requiredSlots.entries()) {
-                if (isFungible && totalQuantity > 1) {
-                    // Release quantity
-                    const quantityDoc = await ctx.db
-                        .query("quantity_availability")
-                        .withIndex("by_resource_date", (q) => q.eq("resourceId", item.resourceId).eq("date", date))
-                        .unique();
-                    if (quantityDoc) {
-                        const bookedQuantities = {
-                            ...quantityDoc.slotQuantities,
-                        };
-                        for (const slot of slots) {
-                            bookedQuantities[slot.toString()] = Math.max(0, (bookedQuantities[slot.toString()] ?? 0) - item.quantity);
-                        }
-                        await ctx.db.patch(quantityDoc._id, {
-                            slotQuantities: bookedQuantities,
-                        });
-                    }
-                }
-                else {
-                    // Release regular slots
-                    const availability = await ctx.db
-                        .query("daily_availability")
-                        .withIndex("by_resource_date", (q) => q.eq("resourceId", item.resourceId).eq("date", date))
-                        .unique();
-                    if (availability) {
-                        const newBusySlots = availability.busySlots.filter((s) => !slots.includes(s));
-                        await ctx.db.patch(availability._id, { busySlots: newBusySlots });
-                    }
-                }
-            }
-        }
+        // Release slots for each booked resource (quantity_availability for pooled
+        // resources, daily_availability otherwise). Shared with the state-machine
+        // cancel/decline path so both leave the availability tables identical.
+        await releaseAllSlotsForBooking(ctx, booking);
         // Update booking status
         const now = Date.now();
         await ctx.db.patch(args.bookingId, {

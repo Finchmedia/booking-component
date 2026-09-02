@@ -64,8 +64,7 @@ export const hasResourceEventTypeLink = query({
     handler: async (ctx, args) => {
         const mapping = await ctx.db
             .query("resource_event_types")
-            .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
-            .filter((q) => q.eq(q.field("eventTypeId"), args.eventTypeId))
+            .withIndex("by_resource_event_type", (q) => q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId))
             .unique();
         return mapping !== null;
     },
@@ -128,8 +127,7 @@ export const linkResourceToEventType = mutation({
         // Check if link already exists
         const existing = await ctx.db
             .query("resource_event_types")
-            .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
-            .filter((q) => q.eq(q.field("eventTypeId"), args.eventTypeId))
+            .withIndex("by_resource_event_type", (q) => q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId))
             .unique();
         if (existing) {
             // Link already exists, return existing ID
@@ -153,8 +151,7 @@ export const unlinkResourceFromEventType = mutation({
     handler: async (ctx, args) => {
         const mapping = await ctx.db
             .query("resource_event_types")
-            .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
-            .filter((q) => q.eq(q.field("eventTypeId"), args.eventTypeId))
+            .withIndex("by_resource_event_type", (q) => q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId))
             .unique();
         if (!mapping) {
             // No link exists, nothing to do

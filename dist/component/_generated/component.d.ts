@@ -55,6 +55,32 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             hookId: string;
         }, any, Name>;
     };
+    maintenance: {
+        getDailyAvailability: FunctionReference<"query", "internal", {
+            date: string;
+            resourceId: string;
+        }, null | Array<number>, Name>;
+        wipeAllBookingData: FunctionReference<"mutation", "internal", {}, {
+            bookingHistory: number;
+            bookingItems: number;
+            bookings: number;
+            dailyAvailability: number;
+            quantityAvailability: number;
+        }, Name>;
+        wipeAllData: FunctionReference<"mutation", "internal", {}, {
+            bookingHistory: number;
+            bookingItems: number;
+            bookings: number;
+            dailyAvailability: number;
+            dateOverrides: number;
+            eventTypes: number;
+            hooks: number;
+            quantityAvailability: number;
+            resourceEventTypes: number;
+            resources: number;
+            schedules: number;
+        }, Name>;
+    };
     multi_resource: {
         cancelMultiResourceBooking: FunctionReference<"mutation", "internal", {
             bookingId: string;
@@ -195,6 +221,23 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             timezone: string;
             title: string;
         }, any, Name>;
+        createProvisionalBooking: FunctionReference<"mutation", "internal", {
+            booker: {
+                email: string;
+                name: string;
+                notes?: string;
+                phone?: string;
+            };
+            end: number;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            resourceId: string;
+            start: number;
+            timezone: string;
+        }, any, Name>;
         createReservation: FunctionReference<"mutation", "internal", {
             actorId: string;
             end: number;
@@ -208,6 +251,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }, any, Name>;
         deleteEventType: FunctionReference<"mutation", "internal", {
             id: string;
+        }, any, Name>;
+        expireProvisionalBooking: FunctionReference<"mutation", "internal", {
+            bookingId: string;
+            reason?: string;
         }, any, Name>;
         getAvailability: FunctionReference<"query", "internal", {
             end: number;
@@ -228,6 +275,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             availableSlots?: Array<number>;
             date: string;
             eventLength: number;
+            excludeBookingUid?: string;
             resourceId: string;
             resourceTimezone?: string;
             slotInterval?: number;
@@ -243,8 +291,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             dateFrom: string;
             dateTo: string;
             eventLength: number;
+            excludeBookingUid?: string;
             resourceId: string;
             resourceTimezone?: string;
+            scheduleId?: string;
             slotInterval?: number;
         }, any, Name>;
         listBookings: FunctionReference<"query", "internal", {
@@ -357,6 +407,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             isActive?: boolean;
             isFungible?: boolean;
             isStandalone?: boolean;
+            metadata?: Record<string, string>;
             name: string;
             organizationId: string;
             quantity?: number;
@@ -399,6 +450,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             isActive?: boolean;
             isFungible?: boolean;
             isStandalone?: boolean;
+            metadata?: Record<string, string>;
             name?: string;
             quantity?: number;
             timezone?: string;

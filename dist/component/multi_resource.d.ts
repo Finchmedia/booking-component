@@ -51,6 +51,7 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -59,7 +60,6 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
         type: string;
     };
     timezone: string;
-    resourceId: string;
     uid: string;
     actorId: string;
     status: string;
@@ -79,6 +79,7 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
             description?: string | undefined;
             isFungible?: boolean | undefined;
             isStandalone?: boolean | undefined;
+            metadata?: Record<string, string> | undefined;
             quantity?: number | undefined;
             organizationId: string;
             timezone: string;
@@ -105,6 +106,7 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
+    resourceId: string;
     end: number;
     start: number;
     eventTypeId: string;
@@ -113,7 +115,6 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
         type: string;
     };
     timezone: string;
-    resourceId: string;
     uid: string;
     actorId: string;
     status: string;
