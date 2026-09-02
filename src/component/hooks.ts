@@ -9,6 +9,7 @@ import type { FunctionHandle } from "convex/server";
 
 export const HOOK_EVENTS = [
   "booking.created",
+  "booking.pending",
   "booking.confirmed",
   "booking.cancelled",
   "booking.completed",
@@ -137,8 +138,12 @@ export const triggerHooks = internalMutation({
     // ========================================
     // BUILT-IN: Send transactional emails
     // ========================================
-    if (args.eventType === "booking.created" && payload.bookerEmail) {
-      const isPending = payload.status === "pending";
+    if (
+      (args.eventType === "booking.created" || args.eventType === "booking.pending") &&
+      payload.bookerEmail
+    ) {
+      const isPending =
+        args.eventType === "booking.pending" || payload.status === "pending";
       if (isPending) {
         // Send "awaiting confirmation" email for pending bookings
         await ctx.scheduler.runAfter(0, internal.emails.sendBookingPending, {
@@ -173,21 +178,42 @@ export const triggerHooks = internalMutation({
       }
     }
 
-    // Send approval email when admin confirms a pending booking
+    // Send confirmation/approval email when a booking becomes confirmed.
     if (args.eventType === "booking.confirmed" && payload.bookerEmail) {
-      await ctx.scheduler.runAfter(0, internal.emails.sendBookingApproved, {
-        to: payload.bookerEmail as string,
-        bookerName: (payload.bookerName as string) ?? "Guest",
-        eventTitle: (payload.eventTitle as string) ?? "Your Booking",
-        start: payload.start as number,
-        end: payload.end as number,
-        timezone: (payload.timezone as string) ?? "UTC",
-        bookingUid: payload.uid as string | undefined,
-        managementToken: payload.managementToken as string | undefined,
-        baseUrl: args.resendOptions?.baseUrl,
-        resendApiKey: args.resendOptions?.apiKey,
-        resendFromEmail: args.resendOptions?.fromEmail,
-      });
+      const emailFunction =
+        payload.previousStatus === "provisional"
+          ? internal.emails.sendBookingConfirmation
+          : internal.emails.sendBookingApproved;
+      const emailPayload =
+        payload.previousStatus === "provisional"
+          ? {
+              to: payload.bookerEmail as string,
+              bookerName: (payload.bookerName as string) ?? "Guest",
+              eventTitle: (payload.eventTitle as string) ?? "Your Booking",
+              start: payload.start as number,
+              end: payload.end as number,
+              timezone: (payload.timezone as string) ?? "UTC",
+              resourceId: payload.resourceId as string | undefined,
+              bookingUid: payload.uid as string | undefined,
+              managementToken: payload.managementToken as string | undefined,
+              baseUrl: args.resendOptions?.baseUrl,
+              resendApiKey: args.resendOptions?.apiKey,
+              resendFromEmail: args.resendOptions?.fromEmail,
+            }
+          : {
+              to: payload.bookerEmail as string,
+              bookerName: (payload.bookerName as string) ?? "Guest",
+              eventTitle: (payload.eventTitle as string) ?? "Your Booking",
+              start: payload.start as number,
+              end: payload.end as number,
+              timezone: (payload.timezone as string) ?? "UTC",
+              bookingUid: payload.uid as string | undefined,
+              managementToken: payload.managementToken as string | undefined,
+              baseUrl: args.resendOptions?.baseUrl,
+              resendApiKey: args.resendOptions?.apiKey,
+              resendFromEmail: args.resendOptions?.fromEmail,
+            };
+      await ctx.scheduler.runAfter(0, emailFunction, emailPayload);
     }
 
     // Send cancellation email
@@ -278,6 +304,7 @@ export const triggerHooks = internalMutation({
 // ============================================
 
 const STATE_TRANSITIONS: Record<string, string[]> = {
+  provisional: ["pending", "confirmed", "cancelled"],
   pending: ["confirmed", "cancelled", "declined"],
   confirmed: ["cancelled", "completed"],
   cancelled: [], // Terminal state

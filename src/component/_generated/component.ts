@@ -275,6 +275,26 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         any,
         Name
       >;
+      createProvisionalBooking: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          booker: {
+            email: string;
+            name: string;
+            notes?: string;
+            phone?: string;
+          };
+          end: number;
+          eventTypeId: string;
+          location: { type: string; value?: string };
+          resourceId: string;
+          start: number;
+          timezone: string;
+        },
+        any,
+        Name
+      >;
       createReservation: FunctionReference<
         "mutation",
         "internal",
@@ -296,6 +316,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         { id: string },
+        any,
+        Name
+      >;
+      expireProvisionalBooking: FunctionReference<
+        "mutation",
+        "internal",
+        { bookingId: string; reason?: string },
         any,
         Name
       >;
@@ -364,6 +391,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           eventLength: number;
           resourceId: string;
           resourceTimezone?: string;
+          scheduleId?: string;
           slotInterval?: number;
         },
         any,

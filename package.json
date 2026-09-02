@@ -1,12 +1,15 @@
 {
   "name": "@mrfinch/booking",
   "description": "A booking component for Convex.",
-  "repository": "github:Finchmedia/booking-component",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Finchmedia/booking-component.git"
+  },
   "homepage": "https://github.com/Finchmedia/booking-component#readme",
   "bugs": {
     "url": "https://github.com/Finchmedia/booking-component/issues"
   },
-  "version": "0.2.4",
+  "version": "0.2.5",
   "license": "Apache-2.0",
   "keywords": [
     "convex",

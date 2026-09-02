@@ -205,6 +205,29 @@ export function makeBookingAPI(component: ComponentApi) {
       },
     }),
 
+    createProvisionalBooking: mutationGeneric({
+      args: {
+        eventTypeId: v.string(),
+        resourceId: v.string(),
+        start: v.number(),
+        end: v.number(),
+        timezone: v.string(),
+        booker: v.object({
+          name: v.string(),
+          email: v.string(),
+          phone: v.optional(v.string()),
+          notes: v.optional(v.string()),
+        }),
+        location: v.object({
+          type: v.string(),
+          value: v.optional(v.string()),
+        }),
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runMutation(component.public.createProvisionalBooking, args);
+      },
+    }),
+
     getBooking: queryGeneric({
       args: { bookingId: v.string() },
       handler: async (ctx, args) => {
@@ -248,6 +271,19 @@ export function makeBookingAPI(component: ComponentApi) {
         return await ctx.runMutation(component.public.cancelReservation, {
           reservationId: args.reservationId as any,
           resendOptions: args.resendOptions,
+        });
+      },
+    }),
+
+    expireProvisionalBooking: mutationGeneric({
+      args: {
+        bookingId: v.string(),
+        reason: v.optional(v.string()),
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runMutation(component.public.expireProvisionalBooking, {
+          bookingId: args.bookingId as any,
+          reason: args.reason,
         });
       },
     }),

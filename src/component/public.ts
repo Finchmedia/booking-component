@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import {
@@ -18,6 +18,30 @@ function generateSecureToken(): string {
     segments.push(Math.random().toString(36).substring(2));
   }
   return segments.join('') + Date.now().toString(36);
+}
+
+async function releaseBookingSlots(
+  ctx: MutationCtx,
+  resourceId: string,
+  start: number,
+  end: number,
+) {
+  const slotsToFree = getRequiredSlots(start, end);
+  for (const [date, slots] of slotsToFree.entries()) {
+    const availability = await ctx.db
+      .query("daily_availability")
+      .withIndex("by_resource_date", (q) =>
+        q.eq("resourceId", resourceId).eq("date", date)
+      )
+      .unique();
+
+    if (availability) {
+      const updatedSlots = availability.busySlots.filter(
+        (slot: number) => !slots.includes(slot)
+      );
+      await ctx.db.patch(availability._id, { busySlots: updatedSlots });
+    }
+  }
 }
 
 export const getEventType = query({
@@ -448,6 +472,130 @@ export const createBooking = mutation({
   },
 });
 
+export const createProvisionalBooking = mutation({
+  args: {
+    eventTypeId: v.string(),
+    resourceId: v.string(),
+    start: v.number(),
+    end: v.number(),
+    timezone: v.string(),
+    booker: v.object({
+      name: v.string(),
+      email: v.string(),
+      phone: v.optional(v.string()),
+      notes: v.optional(v.string()),
+    }),
+    location: v.object({
+      type: v.string(),
+      value: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const eventType = await ctx.db
+      .query("event_types")
+      .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
+      .first();
+
+    if (!eventType) throw new Error("Event type not found");
+    if (eventType.isActive === false) {
+      throw new Error("Event type is no longer active");
+    }
+
+    const resource = await ctx.db
+      .query("resources")
+      .withIndex("by_external_id", (q) => q.eq("id", args.resourceId))
+      .unique();
+
+    if (!resource) throw new Error("Resource not found");
+    if (resource.isActive === false) {
+      throw new Error("Resource is no longer active");
+    }
+
+    const link = await ctx.db
+      .query("resource_event_types")
+      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+      .filter((q) => q.eq(q.field("eventTypeId"), args.eventTypeId))
+      .unique();
+
+    if (!link) {
+      throw new Error("Resource is not available for this event type");
+    }
+
+    const startChunk = Math.floor((args.start % 86400000) / 900000);
+    const endChunk = Math.floor((args.end % 86400000) / 900000);
+    const dateStr = new Date(args.start).toISOString().split("T")[0];
+
+    const dayAvailability = await ctx.db
+      .query("daily_availability")
+      .withIndex("by_resource_date", (q) =>
+        q.eq("resourceId", args.resourceId).eq("date", dateStr)
+      )
+      .first();
+
+    if (dayAvailability) {
+      for (let chunk = startChunk; chunk < endChunk; chunk++) {
+        if (dayAvailability.busySlots.includes(chunk)) {
+          throw new Error("Time slot no longer available");
+        }
+      }
+    }
+
+    const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const managementToken = generateSecureToken();
+    const now = Date.now();
+
+    const bookingId = await ctx.db.insert("bookings", {
+      uid,
+      managementToken,
+      resourceId: args.resourceId,
+      actorId: args.booker.email,
+      eventTypeId: args.eventTypeId,
+      start: args.start,
+      end: args.end,
+      timezone: args.timezone,
+      status: "provisional",
+      bookerName: args.booker.name,
+      bookerEmail: args.booker.email,
+      bookerPhone: args.booker.phone,
+      bookerNotes: args.booker.notes,
+      eventTitle: eventType.title,
+      eventDescription: eventType.description,
+      location: args.location,
+      organizationId: eventType.organizationId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("booking_history", {
+      bookingId,
+      fromStatus: "",
+      toStatus: "provisional",
+      changedBy: "system",
+      reason: "Provisional booking created",
+      timestamp: now,
+    });
+
+    const busyChunks = Array.from(
+      { length: endChunk - startChunk },
+      (_, i) => startChunk + i
+    );
+
+    if (dayAvailability) {
+      await ctx.db.patch(dayAvailability._id, {
+        busySlots: [...dayAvailability.busySlots, ...busyChunks].sort((a, b) => a - b),
+      });
+    } else {
+      await ctx.db.insert("daily_availability", {
+        resourceId: args.resourceId,
+        date: dateStr,
+        busySlots: busyChunks,
+      });
+    }
+
+    return await ctx.db.get(bookingId);
+  },
+});
+
 export const getBooking = query({
   args: { bookingId: v.id("bookings") },
   handler: async (ctx, args) => {
@@ -518,6 +666,49 @@ export const cancelReservation = mutation({
             resendOptions: args.resendOptions,
         });
     },
+});
+
+export const expireProvisionalBooking = mutation({
+  args: {
+    bookingId: v.id("bookings"),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) {
+      throw new Error("Booking not found");
+    }
+
+    if (booking.status === "cancelled") {
+      return { success: true };
+    }
+
+    if (booking.status !== "provisional") {
+      return { success: false, reason: `Booking is ${booking.status}` };
+    }
+
+    const now = Date.now();
+
+    await ctx.db.insert("booking_history", {
+      bookingId: args.bookingId,
+      fromStatus: "provisional",
+      toStatus: "cancelled",
+      changedBy: "system",
+      reason: args.reason ?? "Provisional booking expired",
+      timestamp: now,
+    });
+
+    await releaseBookingSlots(ctx, booking.resourceId, booking.start, booking.end);
+
+    await ctx.db.patch(args.bookingId, {
+      status: "cancelled",
+      cancelledAt: now,
+      cancellationReason: args.reason ?? "Provisional booking expired",
+      updatedAt: now,
+    });
+
+    return { success: true };
+  },
 });
 
 export const createEventType = mutation({
@@ -795,7 +986,11 @@ export const listBookings = query({
       bookings = await ctx.db.query("bookings").collect();
     }
 
-    // Apply filters
+    // Hide provisional reservations from regular booking lists unless explicitly requested.
+    if (!args.status) {
+      bookings = bookings.filter((b) => b.status !== "provisional");
+    }
+
     if (args.status) {
       bookings = bookings.filter((b) => b.status === args.status);
     }
