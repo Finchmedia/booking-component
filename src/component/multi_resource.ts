@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots } from "./utils";
+import { releaseAllSlotsForBooking } from "./slot_helpers";
 
 // Generate a secure random token (64 hex chars = 256 bits)
 function generateSecureToken(): string {
@@ -430,66 +431,10 @@ export const cancelMultiResourceBooking = mutation({
       throw new Error("Booking is already cancelled");
     }
 
-    // Get all booking items
-    const items = await ctx.db
-      .query("booking_items")
-      .withIndex("by_booking", (q) => q.eq("bookingId", args.bookingId))
-      .collect();
-
-    const requiredSlots = getRequiredSlots(booking.start, booking.end);
-
-    // Release slots for each resource
-    for (const item of items) {
-      const resource = await ctx.db
-        .query("resources")
-        .withIndex("by_external_id", (q) => q.eq("id", item.resourceId))
-        .unique();
-
-      const totalQuantity = resource?.quantity ?? 1;
-      const isFungible = resource?.isFungible ?? false;
-
-      for (const [date, slots] of requiredSlots.entries()) {
-        if (isFungible && totalQuantity > 1) {
-          // Release quantity
-          const quantityDoc = await ctx.db
-            .query("quantity_availability")
-            .withIndex("by_resource_date", (q) =>
-              q.eq("resourceId", item.resourceId).eq("date", date)
-            )
-            .unique();
-
-          if (quantityDoc) {
-            const bookedQuantities = {
-              ...(quantityDoc.slotQuantities as Record<string, number>),
-            };
-            for (const slot of slots) {
-              bookedQuantities[slot.toString()] = Math.max(
-                0,
-                (bookedQuantities[slot.toString()] ?? 0) - item.quantity
-              );
-            }
-            await ctx.db.patch(quantityDoc._id, {
-              slotQuantities: bookedQuantities,
-            });
-          }
-        } else {
-          // Release regular slots
-          const availability = await ctx.db
-            .query("daily_availability")
-            .withIndex("by_resource_date", (q) =>
-              q.eq("resourceId", item.resourceId).eq("date", date)
-            )
-            .unique();
-
-          if (availability) {
-            const newBusySlots = availability.busySlots.filter(
-              (s) => !slots.includes(s)
-            );
-            await ctx.db.patch(availability._id, { busySlots: newBusySlots });
-          }
-        }
-      }
-    }
+    // Release slots for each booked resource (quantity_availability for pooled
+    // resources, daily_availability otherwise). Shared with the state-machine
+    // cancel/decline path so both leave the availability tables identical.
+    await releaseAllSlotsForBooking(ctx, booking);
 
     // Update booking status
     const now = Date.now();

@@ -84,6 +84,47 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    maintenance: {
+      getDailyAvailability: FunctionReference<
+        "query",
+        "internal",
+        { date: string; resourceId: string },
+        null | Array<number>,
+        Name
+      >;
+      wipeAllBookingData: FunctionReference<
+        "mutation",
+        "internal",
+        {},
+        {
+          bookingHistory: number;
+          bookingItems: number;
+          bookings: number;
+          dailyAvailability: number;
+          quantityAvailability: number;
+        },
+        Name
+      >;
+      wipeAllData: FunctionReference<
+        "mutation",
+        "internal",
+        {},
+        {
+          bookingHistory: number;
+          bookingItems: number;
+          bookings: number;
+          dailyAvailability: number;
+          dateOverrides: number;
+          eventTypes: number;
+          hooks: number;
+          quantityAvailability: number;
+          resourceEventTypes: number;
+          resources: number;
+          schedules: number;
+        },
+        Name
+      >;
+    };
     multi_resource: {
       cancelMultiResourceBooking: FunctionReference<
         "mutation",
@@ -361,6 +402,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           availableSlots?: Array<number>;
           date: string;
           eventLength: number;
+          excludeBookingUid?: string;
           resourceId: string;
           resourceTimezone?: string;
           slotInterval?: number;
@@ -389,6 +431,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           dateFrom: string;
           dateTo: string;
           eventLength: number;
+          excludeBookingUid?: string;
           resourceId: string;
           resourceTimezone?: string;
           scheduleId?: string;
@@ -579,6 +622,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           isActive?: boolean;
           isFungible?: boolean;
           isStandalone?: boolean;
+          metadata?: Record<string, string>;
           name: string;
           organizationId: string;
           quantity?: number;
@@ -653,6 +697,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           isActive?: boolean;
           isFungible?: boolean;
           isStandalone?: boolean;
+          metadata?: Record<string, string>;
           name?: string;
           quantity?: number;
           timezone?: string;

@@ -4,6 +4,97 @@ import { v } from "convex/values";
 import { getDayOfWeekInTimezone } from "./utils";
 
 // ============================================
+// TIME WINDOW VALIDATION
+// ============================================
+// Schedule/override writes used to accept any strings — `timeToSlot("garbage")`
+// yields NaN and the day silently reads as an empty window; inverted windows
+// (start >= end), dayOfWeek outside 0–6 and overlapping windows per day were
+// stored without complaint. Validate at the component boundary instead.
+
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** Parses "HH:MM" (00:00–23:59, minutes on the 15-minute grid) to minutes since midnight. */
+function parseTimeStrict(time: string, field: string): number {
+  const match = TIME_RE.exec(time);
+  if (!match) {
+    throw new Error(
+      `Invalid ${field} "${time}": expected "HH:MM" between 00:00 and 23:59`
+    );
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  // The component works on a 15-minute slot grid; finer times would silently
+  // be rounded down to the containing slot.
+  if (minutes % 15 !== 0) {
+    throw new Error(
+      `Invalid ${field} "${time}": minutes must be on the 15-minute grid (00, 15, 30, 45)`
+    );
+  }
+  return hours * 60 + minutes;
+}
+
+/**
+ * Validates a set of time windows belonging to ONE day: each window must be
+ * well-formed with startTime < endTime, and windows must not overlap
+ * (adjacent windows sharing a boundary, e.g. …–12:00 + 12:00–…, are fine).
+ */
+function assertNonOverlappingWindows(
+  windows: Array<{ startTime: string; endTime: string }>,
+  label: string
+): void {
+  const parsed = windows.map((window, index) => ({
+    start: parseTimeStrict(window.startTime, `${label} startTime`),
+    end: parseTimeStrict(window.endTime, `${label} endTime`),
+    index,
+  }));
+  for (const window of parsed) {
+    if (window.start >= window.end) {
+      const raw = windows[window.index];
+      throw new Error(
+        `Invalid ${label} window: startTime "${raw.startTime}" must be before endTime "${raw.endTime}"`
+      );
+    }
+  }
+  const sorted = [...parsed].sort((a, b) => a.start - b.start);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].start < sorted[i - 1].end) {
+      const a = windows[sorted[i - 1].index];
+      const b = windows[sorted[i].index];
+      throw new Error(
+        `Overlapping ${label} windows: ${a.startTime}–${a.endTime} and ${b.startTime}–${b.endTime}`
+      );
+    }
+  }
+}
+
+/** Validates weeklyHours entries: dayOfWeek 0–6, valid non-overlapping windows per day. */
+function assertValidWeeklyHours(
+  weeklyHours: Array<{ dayOfWeek: number; startTime: string; endTime: string }>
+): void {
+  const byDay = new Map<number, Array<{ startTime: string; endTime: string }>>();
+  for (const entry of weeklyHours) {
+    if (!Number.isInteger(entry.dayOfWeek) || entry.dayOfWeek < 0 || entry.dayOfWeek > 6) {
+      throw new Error(
+        `Invalid weeklyHours dayOfWeek ${entry.dayOfWeek}: expected an integer between 0 (Sunday) and 6 (Saturday)`
+      );
+    }
+    const windows = byDay.get(entry.dayOfWeek) ?? [];
+    windows.push({ startTime: entry.startTime, endTime: entry.endTime });
+    byDay.set(entry.dayOfWeek, windows);
+  }
+  for (const [dayOfWeek, windows] of byDay.entries()) {
+    assertNonOverlappingWindows(windows, `weeklyHours (dayOfWeek ${dayOfWeek})`);
+  }
+}
+
+/** Validates a date override's customHours: valid non-overlapping windows. */
+function assertValidCustomHours(
+  customHours: Array<{ startTime: string; endTime: string }>
+): void {
+  assertNonOverlappingWindows(customHours, "customHours");
+}
+
+// ============================================
 // SCHEDULE QUERIES
 // ============================================
 
@@ -66,6 +157,8 @@ export const createSchedule = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    assertValidWeeklyHours(args.weeklyHours);
+
     // Check for existing ID
     const existing = await ctx.db
       .query("schedules")
@@ -121,6 +214,10 @@ export const updateSchedule = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    if (args.weeklyHours !== undefined) {
+      assertValidWeeklyHours(args.weeklyHours);
+    }
+
     const schedule = await ctx.db
       .query("schedules")
       .withIndex("by_external_id", (q) => q.eq("id", args.id))
@@ -248,6 +345,10 @@ export const createDateOverride = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    if (args.customHours !== undefined) {
+      assertValidCustomHours(args.customHours);
+    }
+
     // Check for existing override on this date
     const overrides = await ctx.db
       .query("date_overrides")
@@ -287,6 +388,10 @@ export const updateDateOverride = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    if (args.customHours !== undefined) {
+      assertValidCustomHours(args.customHours);
+    }
+
     const override = await ctx.db.get(args.overrideId);
     if (!override) {
       throw new Error("Date override not found");

@@ -80,6 +80,8 @@ export const createResource = mutation({
     isFungible: v.optional(v.boolean()),
     isStandalone: v.optional(v.boolean()),
     isActive: v.optional(v.boolean()),
+    // Free-form host-app metadata (see schema.ts)
+    metadata: v.optional(v.record(v.string(), v.string())),
   },
   handler: async (ctx, args) => {
     // Check for existing ID
@@ -103,6 +105,7 @@ export const createResource = mutation({
       quantity: args.quantity,
       isFungible: args.isFungible,
       isStandalone: args.isStandalone,
+      metadata: args.metadata,
       isActive: args.isActive ?? true,
       createdAt: now,
       updatedAt: now,
@@ -121,6 +124,10 @@ export const updateResource = mutation({
     isFungible: v.optional(v.boolean()),
     isStandalone: v.optional(v.boolean()),
     isActive: v.optional(v.boolean()),
+    // Replaces the stored map as a whole when provided (callers merge
+    // beforehand). Omitting it keeps the stored map; there is no clear form —
+    // remove individual keys by passing the map without them.
+    metadata: v.optional(v.record(v.string(), v.string())),
   },
   handler: async (ctx, args) => {
     const resource = await ctx.db
@@ -142,6 +149,7 @@ export const updateResource = mutation({
     if (args.isFungible !== undefined) updates.isFungible = args.isFungible;
     if (args.isStandalone !== undefined) updates.isStandalone = args.isStandalone;
     if (args.isActive !== undefined) updates.isActive = args.isActive;
+    if (args.metadata !== undefined) updates.metadata = args.metadata;
 
     await ctx.db.patch(resource._id, updates);
     return resource._id;

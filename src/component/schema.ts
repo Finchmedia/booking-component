@@ -20,6 +20,11 @@ export default defineSchema({
     // Booking constraint
     isStandalone: v.optional(v.boolean()), // false = can't be booked alone (e.g., rental equipment)
 
+    // Free-form string metadata so the host app can attach its own per-resource
+    // data (e.g. role, email, external user id) without a parallel table.
+    // Optional/additive; updateResource replaces the map as a whole.
+    metadata: v.optional(v.record(v.string(), v.string())),
+
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -120,7 +125,11 @@ export default defineSchema({
     eventTypeId: v.string(),
   })
     .index("by_resource", ["resourceId"]) // Resource → Event Types
-    .index("by_event_type", ["eventTypeId"]), // Event Type → Resources
+    .index("by_event_type", ["eventTypeId"]) // Event Type → Resources
+    // Compound index for the exact (resourceId, eventTypeId) link lookup —
+    // replaces the withIndex("by_resource") + .filter(eventTypeId) scans that
+    // loaded every link of a resource and filtered in JS.
+    .index("by_resource_event_type", ["resourceId", "eventTypeId"]),
 
   // ============================================
   // AVAILABILITY (Bitmap Pattern)

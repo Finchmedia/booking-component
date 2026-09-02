@@ -35,6 +35,11 @@ export const sendBookingConfirmation = internalMutation({
         resendApiKey: v.optional(v.string()),
         resendFromEmail: v.optional(v.string()),
     },
+    returns: v.object({
+        success: v.boolean(),
+        emailId: v.optional(v.string()),
+        error: v.optional(v.string()),
+    }),
     handler: async (ctx, args) => {
         // Skip if no API key provided
         if (!args.resendApiKey) {
@@ -99,6 +104,11 @@ export const sendBookingPending = internalMutation({
         resendApiKey: v.optional(v.string()),
         resendFromEmail: v.optional(v.string()),
     },
+    returns: v.object({
+        success: v.boolean(),
+        emailId: v.optional(v.string()),
+        error: v.optional(v.string()),
+    }),
     handler: async (ctx, args) => {
         // Skip if no API key provided
         if (!args.resendApiKey) {
@@ -162,6 +172,11 @@ export const sendBookingApproved = internalMutation({
         resendApiKey: v.optional(v.string()),
         resendFromEmail: v.optional(v.string()),
     },
+    returns: v.object({
+        success: v.boolean(),
+        emailId: v.optional(v.string()),
+        error: v.optional(v.string()),
+    }),
     handler: async (ctx, args) => {
         // Skip if no API key provided
         if (!args.resendApiKey) {
@@ -223,6 +238,11 @@ export const sendBookingDeclined = internalMutation({
         resendApiKey: v.optional(v.string()),
         resendFromEmail: v.optional(v.string()),
     },
+    returns: v.object({
+        success: v.boolean(),
+        emailId: v.optional(v.string()),
+        error: v.optional(v.string()),
+    }),
     handler: async (ctx, args) => {
         // Skip if no API key provided
         if (!args.resendApiKey) {
@@ -282,6 +302,11 @@ export const sendBookingCancellation = internalMutation({
         resendApiKey: v.optional(v.string()),
         resendFromEmail: v.optional(v.string()),
     },
+    returns: v.object({
+        success: v.boolean(),
+        emailId: v.optional(v.string()),
+        error: v.optional(v.string()),
+    }),
     handler: async (ctx, args) => {
         // Skip if no API key provided
         if (!args.resendApiKey) {
@@ -345,6 +370,11 @@ export const sendBookingRescheduled = internalMutation({
         resendApiKey: v.optional(v.string()),
         resendFromEmail: v.optional(v.string()),
     },
+    returns: v.object({
+        success: v.boolean(),
+        emailId: v.optional(v.string()),
+        error: v.optional(v.string()),
+    }),
     handler: async (ctx, args) => {
         // Skip if no API key provided
         if (!args.resendApiKey) {

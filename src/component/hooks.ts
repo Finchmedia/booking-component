@@ -2,6 +2,7 @@ import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { FunctionHandle } from "convex/server";
+import { releaseAllSlotsForBooking } from "./slot_helpers";
 
 // ============================================
 // HOOK EVENT TYPES
@@ -358,12 +359,26 @@ export const transitionBookingState = mutation({
       updatedAt: now,
     };
 
-    if (args.toStatus === "cancelled") {
+    // Both "cancelled" and "declined" end the booking: stamp the cancellation
+    // fields and give the held slots back. Previously a declined booking (and
+    // a cancellation through this state machine) kept its slots busy forever,
+    // so the time could never be rebooked.
+    const releasesSlots =
+      args.toStatus === "cancelled" || args.toStatus === "declined";
+
+    if (releasesSlots) {
       updates.cancelledAt = now;
       updates.cancellationReason = args.reason;
     }
 
     await ctx.db.patch(args.bookingId, updates);
+
+    if (releasesSlots) {
+      // Single-resource bookings: daily_availability of booking.resourceId.
+      // Multi-resource bookings: per booking_item (quantity_availability for
+      // pooled resources) — the same logic as cancelMultiResourceBooking.
+      await releaseAllSlotsForBooking(ctx, booking);
+    }
 
     // Trigger hooks for the transition
     const hookEventType = `booking.${args.toStatus}` as string;

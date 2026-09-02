@@ -258,6 +258,11 @@ export function generateDaySlots(
  * Generates time slots for a day using schedule-based availability hours
  * Timezone-aware: converts resource's local business hours to UTC slots
  *
+ * Candidate starts are anchored PER contiguous run of available slots
+ * (split-shift support): each availability window offers starts from its own
+ * beginning in `intervalMinutes` steps. For a single contiguous window this
+ * yields the exact same candidate list as a single global grid.
+ *
  * @param date - ISO date string (e.g., "2025-12-03") in resource's timezone context
  * @param eventLengthMinutes - Event duration in minutes
  * @param intervalMinutes - Step between slots in minutes
@@ -280,26 +285,27 @@ export function generateDaySlotsWithTimezone(
     const step = Math.ceil(intervalMinutes / 15);
     const possibleSlots: Array<{ start: string; slots: number[] }> = [];
 
-    // Sort available slots to find contiguous blocks
-    const sortedSlots = [...availableSlots].sort((a, b) => a - b);
-    const minSlot = sortedSlots[0];
-    const maxSlot = sortedSlots[sortedSlots.length - 1];
-
-    // Create a Set for O(1) availability lookup
-    const availableSet = new Set(availableSlots);
-
-    // Iterate through potential start times within available range
-    for (let localSlotIndex = minSlot; localSlotIndex + slotsNeeded <= maxSlot + 1; localSlotIndex += step) {
-        // Check if all required slots are available in local time
-        let allAvailable = true;
-        for (let i = 0; i < slotsNeeded; i++) {
-            if (!availableSet.has(localSlotIndex + i)) {
-                allAvailable = false;
-                break;
-            }
+    // Sort + dedupe, then decompose into contiguous runs [start, end]
+    // (inclusive). A schedule with split shifts (e.g. 08:00–12:00 +
+    // 14:00–17:30) produces multiple runs; iterating one global grid from the
+    // earliest slot would miss later window starts whenever the gap is not a
+    // multiple of the interval (e.g. 14:00 lost for 120 min / 150 min grid).
+    const sortedSlots = [...new Set(availableSlots)].sort((a, b) => a - b);
+    const runs: Array<{ start: number; end: number }> = [];
+    for (const slot of sortedSlots) {
+        const lastRun = runs[runs.length - 1];
+        if (lastRun && slot === lastRun.end + 1) {
+            lastRun.end = slot;
+        } else {
+            runs.push({ start: slot, end: slot });
         }
+    }
 
-        if (allAvailable) {
+    // Iterate potential start times per run, anchored at the run's start.
+    // Slots within a run are contiguous by construction, so every candidate
+    // that fits the run is fully available — no per-slot membership check.
+    for (const run of runs) {
+        for (let localSlotIndex = run.start; localSlotIndex + slotsNeeded <= run.end + 1; localSlotIndex += step) {
             // Convert the local start time to UTC
             const localTime = slotIndexToTime(localSlotIndex);
             const utcTimestamp = wallClockToUTC(date, localTime, timezone);
@@ -331,10 +337,20 @@ export function areSlotsAvailable(
 /**
  * Checks if a day has any available slots for a given event length
  * Optimized to exit early and avoid object generation
+ *
+ * WARNING: `availableSlots` and `busySlots` MUST be in the SAME coordinate
+ * system. This function does NO timezone conversion. If you pass a schedule's
+ * LOCAL wall-clock slot indices (e.g. from computeAvailabilityForDate) while
+ * `busySlots` are UTC indices, the comparison is meaningless (e.g. Europe/Berlin
+ * days read as free regardless of bookings). For any timezone-aware schedule,
+ * use generateDaySlotsWithTimezone + areSlotsAvailable instead — that is how
+ * getMonthAvailability / getDaySlots decide availability. This function is only
+ * used by the legacy (schedule-less, hardcoded 9–17 UTC) path.
+ *
  * @param eventLengthMinutes - Duration in minutes
  * @param busySlots - Array of busy slot indices
  * @param intervalMinutes - Step between slots in minutes (default: 15)
- * @param availableSlots - Optional schedule-based available slot indices; if provided, used instead of hardcoded 9–17
+ * @param availableSlots - Optional available slot indices in the SAME coordinate system as busySlots; if provided, used instead of hardcoded 9–17
  * @returns boolean
  */
 export function isDayAvailable(
