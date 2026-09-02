@@ -1,84 +1,44 @@
 /// <reference types="vite/client" />
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { convexTest, type TestConvex } from "convex-test";
-import schema from "./schema.js";
+import { beforeEach, describe, expect, test } from "vitest";
 import { api, internal } from "./_generated/api.js";
 import { generateDaySlotsWithTimezone } from "./utils.js";
+import {
+  BOOKER as booker,
+  LOCATION as location,
+  ORG,
+  TZ,
+  book as createBooking,
+  getBusySlots,
+  range,
+  seedResource,
+  setup,
+  utc,
+  type SeedResourceOpts,
+  type T,
+} from "./setup.test.js";
 
-// The component is tested as the root app: its own schema + modules.
-const modules = import.meta.glob("./**/*.ts");
-
-type T = TestConvex<typeof schema>;
-
-const ORG = "org-1";
 const RESOURCE = "res-1";
 const EVENT = "et-1";
 const SCHEDULE = "sch-1";
-const TZ = "Europe/Berlin";
-
-const booker = { name: "Ada", email: "ada@example.com" };
-const location = { type: "address", value: "Room 1" };
+const target = { resourceId: RESOURCE, eventTypeId: EVENT, timezone: TZ };
 
 // 2027-03-09 is a Tuesday; Europe/Berlin is UTC+1 (DST starts 2027-03-28).
-const utc = (y: number, m: number, d: number, h: number, min = 0) =>
-  Date.UTC(y, m - 1, d, h, min);
 
-const range = (from: number, to: number) =>
-  Array.from({ length: to - from }, (_, i) => from + i);
+// Resource + event type + link WITHOUT a schedule: availability queries that
+// omit `availableSlots` fall back to the legacy 09:00–17:00 UTC window.
+const seed = (t: T, opts: SeedResourceOpts = {}) =>
+  seedResource(t, { resourceId: RESOURCE, eventTypeId: EVENT, ...opts });
 
-async function seed(t: T, opts: { requiresConfirmation?: boolean } = {}) {
-  await t.mutation(api.resources.createResource, {
-    id: RESOURCE,
-    organizationId: ORG,
-    name: "Room",
-    type: "room",
-    timezone: TZ,
-  });
-  await t.mutation(api.public.createEventType, {
-    id: EVENT,
-    slug: EVENT,
-    title: "Consultation",
-    lengthInMinutes: 60,
-    timezone: TZ,
-    lockTimeZoneToggle: false,
-    locations: [],
-    organizationId: ORG,
-    requiresConfirmation: opts.requiresConfirmation,
-  });
-  await t.mutation(api.resource_event_types.linkResourceToEventType, {
-    resourceId: RESOURCE,
-    eventTypeId: EVENT,
-  });
-}
+const book = (t: T, start: number, end: number) => createBooking(t, target, start, end);
 
-function book(t: T, start: number, end: number) {
-  return t.mutation(api.public.createBooking, {
-    eventTypeId: EVENT,
-    resourceId: RESOURCE,
-    start,
-    end,
-    timezone: TZ,
-    booker,
-    location,
-  });
-}
-
-function busy(t: T, date: string, resourceId = RESOURCE) {
-  return t.query(api.maintenance.getDailyAvailability, { resourceId, date });
-}
+const busy = (t: T, date: string, resourceId = RESOURCE) => getBusySlots(t, resourceId, date);
 
 let t: T;
 
 beforeEach(() => {
-  // Scheduled hooks (booking.created → emails) run on timers; keep them
-  // deterministic and drain them at the end of every test.
-  vi.useFakeTimers();
-  t = convexTest(schema, modules);
-});
-
-afterEach(async () => {
-  await t.finishAllScheduledFunctions(vi.runAllTimers);
-  vi.useRealTimers();
+  // Fresh backend + frozen clock per test; setup() drains the scheduled hooks
+  // (booking.created → emails) when each test finishes.
+  ({ t } = setup());
 });
 
 // ============================================
@@ -88,23 +48,23 @@ afterEach(async () => {
 describe("createBooking slot bookkeeping", () => {
   test("a range across UTC midnight reserves slots on both days", async () => {
     await seed(t);
-    await book(t, utc(2027, 3, 9, 23, 30), utc(2027, 3, 10, 0, 30));
+    await book(t, utc("2027-03-09", "23:30"), utc("2027-03-10", "00:30"));
 
     expect(await busy(t, "2027-03-09")).toEqual([94, 95]);
     expect(await busy(t, "2027-03-10")).toEqual([0, 1]);
 
     await expect(
-      book(t, utc(2027, 3, 10, 0, 0), utc(2027, 3, 10, 1, 0))
+      book(t, utc("2027-03-10", "00:00"), utc("2027-03-10", "01:00"))
     ).rejects.toThrow("Time slot no longer available");
   });
 
   test("rejects inverted or empty ranges", async () => {
     await seed(t);
     await expect(
-      book(t, utc(2027, 3, 9, 10), utc(2027, 3, 9, 9))
+      book(t, utc("2027-03-09", "10:00"), utc("2027-03-09", "09:00"))
     ).rejects.toThrow("Invalid time range");
     await expect(
-      book(t, utc(2027, 3, 9, 10), utc(2027, 3, 9, 10))
+      book(t, utc("2027-03-09", "10:00"), utc("2027-03-09", "10:00"))
     ).rejects.toThrow("Invalid time range");
     expect(await busy(t, "2027-03-09")).toBeNull();
   });
@@ -114,8 +74,8 @@ describe("createBooking slot bookkeeping", () => {
     const provisional = await t.mutation(api.public.createProvisionalBooking, {
       eventTypeId: EVENT,
       resourceId: RESOURCE,
-      start: utc(2027, 3, 9, 23, 30),
-      end: utc(2027, 3, 10, 0, 30),
+      start: utc("2027-03-09", "23:30"),
+      end: utc("2027-03-10", "00:30"),
       timezone: TZ,
       booker,
       location,
@@ -128,8 +88,8 @@ describe("createBooking slot bookkeeping", () => {
       t.mutation(api.public.createProvisionalBooking, {
         eventTypeId: EVENT,
         resourceId: RESOURCE,
-        start: utc(2027, 3, 9, 10),
-        end: utc(2027, 3, 9, 10),
+        start: utc("2027-03-09", "10:00"),
+        end: utc("2027-03-09", "10:00"),
         timezone: TZ,
         booker,
         location,
@@ -164,7 +124,7 @@ describe("schedule-aware availability", () => {
     });
 
     // Tue 09:00–11:00 Berlin == 08:00–10:00 UTC → the whole window is taken.
-    await book(t, utc(2027, 3, 9, 8), utc(2027, 3, 9, 10));
+    await book(t, utc("2027-03-09", "08:00"), utc("2027-03-09", "10:00"));
 
     const month = await t.query(api.public.getMonthAvailability, {
       resourceId: RESOURCE,
@@ -341,8 +301,8 @@ describe("schedule time window validation", () => {
 describe("reschedule flow", () => {
   test("excludeBookingUid frees only the booking's own slots in day and month view", async () => {
     await seed(t);
-    const own = await book(t, utc(2027, 3, 9, 9), utc(2027, 3, 9, 10));
-    await book(t, utc(2027, 3, 9, 10), utc(2027, 3, 9, 11)); // someone else
+    const own = await book(t, utc("2027-03-09", "09:00"), utc("2027-03-09", "10:00"));
+    await book(t, utc("2027-03-09", "10:00"), utc("2027-03-09", "11:00")); // someone else
 
     const dayArgs = {
       resourceId: RESOURCE,
@@ -369,10 +329,10 @@ describe("reschedule flow", () => {
       dateTo: "2027-03-10",
       eventLength: 480,
     };
-    await book(t, utc(2027, 3, 10, 9), utc(2027, 3, 10, 10));
+    await book(t, utc("2027-03-10", "09:00"), utc("2027-03-10", "10:00"));
     const blocker = await t.query(api.public.getBookingByUid, {
       uid: (await t.query(api.public.listBookings, { resourceId: RESOURCE }))
-        .find((b) => b.start === utc(2027, 3, 10, 9))!.uid,
+        .find((b) => b.start === utc("2027-03-10", "09:00"))!.uid,
     });
     expect(await t.query(api.public.getMonthAvailability, monthArgs)).toEqual({
       "2027-03-10": false,
@@ -389,7 +349,7 @@ describe("reschedule flow", () => {
       uid: blocker!.uid,
       token: blocker!.managementToken!,
     });
-    await book(t, utc(2027, 3, 10, 9), utc(2027, 3, 10, 10)); // new holder of the same slots
+    await book(t, utc("2027-03-10", "09:00"), utc("2027-03-10", "10:00")); // new holder of the same slots
     expect(
       await t.query(api.public.getMonthAvailability, {
         ...monthArgs,
@@ -400,16 +360,16 @@ describe("reschedule flow", () => {
 
   test("moving a booking to an overlapping time is allowed (token and id paths)", async () => {
     await seed(t);
-    const original = await book(t, utc(2027, 3, 9, 9), utc(2027, 3, 9, 10));
-    await book(t, utc(2027, 3, 9, 10, 30), utc(2027, 3, 9, 11, 30)); // 42..45 foreign
+    const original = await book(t, utc("2027-03-09", "09:00"), utc("2027-03-09", "10:00"));
+    await book(t, utc("2027-03-09", "10:30"), utc("2027-03-09", "11:30")); // 42..45 foreign
 
     const moved = await t.mutation(api.public.rescheduleBookingByToken, {
       uid: original!.uid,
       token: original!.managementToken!,
-      newStart: utc(2027, 3, 9, 9, 30),
-      newEnd: utc(2027, 3, 9, 10, 30),
+      newStart: utc("2027-03-09", "09:30"),
+      newEnd: utc("2027-03-09", "10:30"),
     });
-    expect(moved?.start).toBe(utc(2027, 3, 9, 9, 30));
+    expect(moved?.start).toBe(utc("2027-03-09", "09:30"));
     expect(await busy(t, "2027-03-09")).toEqual([38, 39, 40, 41, 42, 43, 44, 45]);
 
     // Foreign slots still block.
@@ -417,16 +377,16 @@ describe("reschedule flow", () => {
       t.mutation(api.public.rescheduleBookingByToken, {
         uid: moved!.uid,
         token: moved!.managementToken!,
-        newStart: utc(2027, 3, 9, 10),
-        newEnd: utc(2027, 3, 9, 11),
+        newStart: utc("2027-03-09", "10:00"),
+        newEnd: utc("2027-03-09", "11:00"),
       })
     ).rejects.toThrow("not available");
     expect(await busy(t, "2027-03-09")).toEqual([38, 39, 40, 41, 42, 43, 44, 45]);
 
     const movedAgain = await t.mutation(api.public.rescheduleBooking, {
       bookingId: moved!._id,
-      newStart: utc(2027, 3, 9, 9),
-      newEnd: utc(2027, 3, 9, 10),
+      newStart: utc("2027-03-09", "09:00"),
+      newEnd: utc("2027-03-09", "10:00"),
     });
     expect(movedAgain?.rescheduleUid).toBe(moved!.uid);
     expect(await busy(t, "2027-03-09")).toEqual([36, 37, 38, 39, 42, 43, 44, 45]);
@@ -440,7 +400,7 @@ describe("reschedule flow", () => {
 describe("transitionBookingState", () => {
   test("declined and cancelled release the booking's slots", async () => {
     await seed(t, { requiresConfirmation: true });
-    const pending = await book(t, utc(2027, 3, 9, 9), utc(2027, 3, 9, 10));
+    const pending = await book(t, utc("2027-03-09", "09:00"), utc("2027-03-09", "10:00"));
     expect(pending?.status).toBe("pending");
     expect(await busy(t, "2027-03-09")).toEqual([36, 37, 38, 39]);
 
@@ -455,7 +415,7 @@ describe("transitionBookingState", () => {
     expect(declined?.cancellationReason).toBe("double booked");
     expect(await busy(t, "2027-03-09")).toEqual([]);
 
-    const again = await book(t, utc(2027, 3, 9, 9), utc(2027, 3, 9, 10));
+    const again = await book(t, utc("2027-03-09", "09:00"), utc("2027-03-09", "10:00"));
     await t.mutation(api.hooks.transitionBookingState, {
       bookingId: again!._id,
       toStatus: "cancelled",
@@ -463,7 +423,7 @@ describe("transitionBookingState", () => {
     expect(await busy(t, "2027-03-09")).toEqual([]);
 
     // completed keeps its slots (nothing to give back).
-    const done = await book(t, utc(2027, 3, 9, 9), utc(2027, 3, 9, 10));
+    const done = await book(t, utc("2027-03-09", "09:00"), utc("2027-03-09", "10:00"));
     await t.mutation(api.hooks.transitionBookingState, {
       bookingId: done!._id,
       toStatus: "confirmed",
@@ -490,16 +450,16 @@ describe("transitionBookingState", () => {
     const multi = await t.mutation(api.multi_resource.createMultiResourceBooking, {
       eventTypeId: EVENT,
       resources: [{ resourceId: RESOURCE }, { resourceId: "pool", quantity: 2 }],
-      start: utc(2027, 3, 9, 9),
-      end: utc(2027, 3, 9, 10),
+      start: utc("2027-03-09", "09:00"),
+      end: utc("2027-03-09", "10:00"),
       timezone: "UTC",
       booker,
     });
     const check = () =>
       t.query(api.multi_resource.checkMultiResourceAvailability, {
         resources: [{ resourceId: RESOURCE }, { resourceId: "pool", quantity: 2 }],
-        start: utc(2027, 3, 9, 9),
-        end: utc(2027, 3, 9, 10),
+        start: utc("2027-03-09", "09:00"),
+        end: utc("2027-03-09", "10:00"),
       });
 
     expect(await busy(t, "2027-03-09")).toEqual([36, 37, 38, 39]);
@@ -572,7 +532,7 @@ describe("resources", () => {
       success: true,
       existed: true,
     });
-    await expect(book(t, utc(2027, 3, 9, 9), utc(2027, 3, 9, 10))).rejects.toThrow(
+    await expect(book(t, utc("2027-03-09", "09:00"), utc("2027-03-09", "10:00"))).rejects.toThrow(
       "not available for this event type"
     );
   });
@@ -601,7 +561,7 @@ describe("maintenance", () => {
       eventType: "booking.created",
       functionHandle: "function://placeholder",
     });
-    await book(t, utc(2027, 3, 9, 9), utc(2027, 3, 9, 10));
+    await book(t, utc("2027-03-09", "09:00"), utc("2027-03-09", "10:00"));
 
     expect(await t.mutation(api.maintenance.wipeAllBookingData, {})).toEqual({
       bookings: 1,
@@ -644,8 +604,8 @@ describe("email mutations", () => {
       to: "ada@example.com",
       bookerName: "Ada",
       eventTitle: "Consultation",
-      start: utc(2027, 3, 9, 9),
-      end: utc(2027, 3, 9, 10),
+      start: utc("2027-03-09", "09:00"),
+      end: utc("2027-03-09", "10:00"),
       timezone: TZ,
     };
     const expected = { success: false, error: "No API key provided" };
