@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { getRequiredSlots } from "./utils";
+import { getRequiredSlots, assertValidRange } from "./utils";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
 
 // Generate a secure random token (64 hex chars = 256 bits)
@@ -157,6 +157,14 @@ export const createMultiResourceBooking = mutation({
     })),
   },
   handler: async (ctx, args) => {
+    // 0. Range guard — shared with every other write path (an inverted or
+    // NaN range maps to zero slots and would create a booking that holds
+    // nothing).
+    assertValidRange(args.start, args.end);
+    if (args.resources.length === 0) {
+      throw new Error("At least one resource is required");
+    }
+
     // 1. Get event type for metadata
     const eventType = await ctx.db
       .query("event_types")
@@ -170,6 +178,11 @@ export const createMultiResourceBooking = mutation({
     // 2. Check ALL resources are available (fail-fast)
     const requiredSlots = getRequiredSlots(args.start, args.end);
 
+    // `isStandalone: false` marks an add-on (e.g. rental equipment) that can
+    // only be booked together with a standalone resource. Unknown resources
+    // (no document) count as standalone.
+    let hasStandaloneResource = false;
+
     for (const resourceReq of args.resources) {
       const requestedQty = resourceReq.quantity ?? 1;
 
@@ -181,6 +194,9 @@ export const createMultiResourceBooking = mutation({
 
       const totalQuantity = resource?.quantity ?? 1;
       const isFungible = resource?.isFungible ?? false;
+      if (resource?.isStandalone !== false) {
+        hasStandaloneResource = true;
+      }
 
       for (const [date, slots] of requiredSlots.entries()) {
         if (isFungible && totalQuantity > 1) {
@@ -225,6 +241,13 @@ export const createMultiResourceBooking = mutation({
           }
         }
       }
+    }
+
+    if (!hasStandaloneResource) {
+      const ids = args.resources.map((r) => `"${r.resourceId}"`).join(", ");
+      throw new Error(
+        `Resource ${ids} cannot be booked alone (isStandalone: false): add a standalone resource to the booking`
+      );
     }
 
     // 3. Create main booking record (use first resource as primary)

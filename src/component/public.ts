@@ -5,8 +5,10 @@ import {
     getRequiredSlots,
     generateDaySlots,
     generateDaySlotsWithTimezone,
-    areSlotsAvailable,
+    isCandidateAvailable,
     isDayAvailable,
+    assertValidRange,
+    type SlotCandidate,
 } from "./utils";
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
@@ -54,6 +56,65 @@ async function getExcludedSlotsForBooking(
     return null;
   }
   return getRequiredSlots(booking.start, booking.end);
+}
+
+/**
+ * Busy slot indices of ONE UTC date, minus the excluded booking's own slots
+ * on that date.
+ */
+async function loadBusySlots(
+  ctx: QueryCtx,
+  resourceId: string,
+  date: string,
+  excludedByDate: Map<string, number[]> | null,
+): Promise<number[]> {
+  const availabilityDoc = await ctx.db
+    .query("daily_availability")
+    .withIndex("by_resource_date", (q) =>
+      q.eq("resourceId", resourceId).eq("date", date)
+    )
+    .unique();
+  const excludedSlots = excludedByDate?.get(date) ?? [];
+  return (availabilityDoc?.busySlots ?? []).filter(
+    (slot) => !excludedSlots.includes(slot)
+  );
+}
+
+/**
+ * Ensures `busyByDate` holds the busy slots of every UTC date in `dates`,
+ * loading each date at most once.
+ *
+ * The availability queries take a LOCAL date, but daily_availability is keyed
+ * by UTC date (that is how getRequiredSlots writes it). A local business day
+ * whose hours cross UTC midnight — Pacific/Auckland 09:00 is 21:00Z of the
+ * previous day, America/New_York 19:00 is 00:00Z of the next — puts its
+ * candidates on the neighbouring UTC rows, so every candidate must be checked
+ * against the rows of the dates its own `slotsByDate` names, never against
+ * the single row of the requested local date.
+ */
+async function loadBusySlotsForDates(
+  ctx: QueryCtx,
+  resourceId: string,
+  dates: Iterable<string>,
+  excludedByDate: Map<string, number[]> | null,
+  busyByDate: Map<string, number[]>,
+): Promise<void> {
+  for (const date of dates) {
+    if (!busyByDate.has(date)) {
+      busyByDate.set(date, await loadBusySlots(ctx, resourceId, date, excludedByDate));
+    }
+  }
+}
+
+/** The distinct UTC dates a list of candidates touches. */
+function candidateDates(candidates: SlotCandidate[]): Set<string> {
+  const dates = new Set<string>();
+  for (const candidate of candidates) {
+    for (const date of candidate.slotsByDate.keys()) {
+      dates.add(date);
+    }
+  }
+  return dates;
 }
 
 export const getEventType = query({
@@ -123,24 +184,17 @@ export const getMonthAvailability = query({
         // Result object: { "2025-06-17": true, "2025-06-18": false }
         const availabilityByDate: Record<string, boolean> = {};
 
+        // Busy slots per UTC date, shared across the whole range so that each
+        // daily_availability row is read at most once even though a local
+        // day's candidates may touch the neighbouring UTC rows (see
+        // loadBusySlotsForDates).
+        const busyByDate = new Map<string, number[]>();
+
         // Iterate through each day in the range
         const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
             // Extract date string in UTC context
             const dateStr = currentDate.toISOString().split("T")[0];
-
-            // Fetch availability data for this day
-            const availabilityDoc = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) =>
-                    q.eq("resourceId", resourceId).eq("date", dateStr)
-                )
-                .unique();
-
-            const excludedSlots = excludedByDate?.get(dateStr) ?? [];
-            const busySlots = (availabilityDoc?.busySlots || []).filter(
-                (slot) => !excludedSlots.includes(slot)
-            );
 
             // If a scheduleId is provided, use it to determine the available slots window
             let scheduleSlots: number[] | undefined;
@@ -175,15 +229,33 @@ export const getMonthAvailability = query({
                         scheduleSlots,
                         args.resourceTimezone
                     );
+                    // Each candidate is checked against the row(s) of ITS
+                    // OWN UTC date(s) — the same keying getRequiredSlots
+                    // uses when a booking is written.
+                    await loadBusySlotsForDates(
+                        ctx,
+                        resourceId,
+                        candidateDates(possibleSlots),
+                        excludedByDate,
+                        busyByDate
+                    );
                     hasAvailability = possibleSlots.some((slot) =>
-                        areSlotsAvailable(slot.slots, busySlots)
+                        isCandidateAvailable(slot, busyByDate)
                     );
                 }
             } else {
-                // Legacy / no-timezone path: hardcoded UTC business hours.
+                // Legacy / no-timezone path: hardcoded UTC business hours,
+                // all slots on `dateStr` itself.
+                await loadBusySlotsForDates(
+                    ctx,
+                    resourceId,
+                    [dateStr],
+                    excludedByDate,
+                    busyByDate
+                );
                 hasAvailability = isDayAvailable(
                     eventLength,
-                    busySlots,
+                    busyByDate.get(dateStr) ?? [],
                     args.slotInterval ?? 15,
                     scheduleSlots
                 );
@@ -243,28 +315,30 @@ export const getDaySlots = query({
             possibleSlots = generateDaySlots(date, eventLength, slotInterval);
         }
 
-        // Fetch availability data for this day
-        const availabilityDoc = await ctx.db
-            .query("daily_availability")
-            .withIndex("by_resource_date", (q) =>
-                q.eq("resourceId", resourceId).eq("date", date)
-            )
-            .unique();
-
         // The excluded booking's own slots do not count as busy.
         const excludedByDate = await getExcludedSlotsForBooking(
             ctx,
             resourceId,
             args.excludeBookingUid
         );
-        const excludedSlots = excludedByDate?.get(date) ?? [];
-        const busySlots = (availabilityDoc?.busySlots || []).filter(
-            (slot) => !excludedSlots.includes(slot)
+
+        // Busy slots of every UTC date the candidates touch — not just the
+        // row of the requested local `date`: for a resource whose business
+        // day crosses UTC midnight the morning candidates live on the
+        // previous UTC row and the evening ones on the next (see
+        // loadBusySlotsForDates).
+        const busyByDate = new Map<string, number[]>();
+        await loadBusySlotsForDates(
+            ctx,
+            resourceId,
+            candidateDates(possibleSlots),
+            excludedByDate,
+            busyByDate
         );
 
         // Filter to only available slots
         const available = possibleSlots
-            .filter((slot) => areSlotsAvailable(slot.slots, busySlots))
+            .filter((slot) => isCandidateAvailable(slot, busyByDate))
             .map((slot) => ({ time: slot.start }));
 
         return available;
@@ -286,6 +360,9 @@ export const createReservation = mutation({
     },
     handler: async (ctx, args) => {
         const { resourceId, start, end, actorId } = args;
+
+        // 0. Range guard — shared with every other write path.
+        assertValidRange(start, end);
 
         // 1. Check availability first (read-before-write pattern)
         // Note: We re-check inside the transaction to ensure atomicity
@@ -399,16 +476,9 @@ export const createBooking = mutation({
   },
 
   handler: async (ctx, args) => {
-    // 0. Basic range validation: guard NaN/Infinity and require start < end,
-    // so a malformed range can't silently reserve zero slots. Past-/notice-
-    // window checks stay the caller's responsibility by design.
-    if (
-      !Number.isFinite(args.start) ||
-      !Number.isFinite(args.end) ||
-      args.end <= args.start
-    ) {
-      throw new Error("Invalid time range: end must be after start");
-    }
+    // 0. Basic range validation (shared guard): NaN/Infinity and end <= start
+    // would otherwise silently reserve zero slots.
+    assertValidRange(args.start, args.end);
 
     // 1. Fetch event type (for snapshot)
     const eventType = await ctx.db
@@ -433,6 +503,15 @@ export const createBooking = mutation({
 
     if (resource.isActive === false) {
       throw new Error("Resource is no longer active");
+    }
+
+    // A single-resource booking books the resource on its own — not allowed
+    // for add-ons (isStandalone: false); use createMultiResourceBooking with a
+    // standalone resource instead.
+    if (resource.isStandalone === false) {
+      throw new Error(
+        `Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`
+      );
     }
 
     // 3. Validate resource is linked to event type
@@ -487,6 +566,10 @@ export const createBooking = mutation({
       resourceId: args.resourceId,
       actorId: args.booker.email, // Use email as actorId
       eventTypeId: args.eventTypeId,
+      // Scope the booking to the event type's organization so that
+      // listBookings({ organizationId }) (index by_org) finds it — the same
+      // scope the booking hooks receive.
+      organizationId: eventType.organizationId,
       start: args.start,
       end: args.end,
       timezone: args.timezone,
@@ -580,13 +663,7 @@ export const createProvisionalBooking = mutation({
   },
   handler: async (ctx, args) => {
     // Basic range validation — parallel to createBooking.
-    if (
-      !Number.isFinite(args.start) ||
-      !Number.isFinite(args.end) ||
-      args.end <= args.start
-    ) {
-      throw new Error("Invalid time range: end must be after start");
-    }
+    assertValidRange(args.start, args.end);
 
     const eventType = await ctx.db
       .query("event_types")
@@ -606,6 +683,12 @@ export const createProvisionalBooking = mutation({
     if (!resource) throw new Error("Resource not found");
     if (resource.isActive === false) {
       throw new Error("Resource is no longer active");
+    }
+    // Parallel to createBooking: an add-on cannot be held on its own.
+    if (resource.isStandalone === false) {
+      throw new Error(
+        `Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`
+      );
     }
 
     const link = await ctx.db
@@ -1089,6 +1172,19 @@ export const listBookings = query({
       bookings = await ctx.db.query("bookings").collect();
     }
 
+    // The ids that did not pick the index still narrow the result — a caller
+    // asking for one resource's bookings of one event type must not get that
+    // resource's bookings of every event type. (Redundant for the indexed id.)
+    if (args.organizationId) {
+      bookings = bookings.filter((b) => b.organizationId === args.organizationId);
+    }
+    if (args.resourceId) {
+      bookings = bookings.filter((b) => b.resourceId === args.resourceId);
+    }
+    if (args.eventTypeId) {
+      bookings = bookings.filter((b) => b.eventTypeId === args.eventTypeId);
+    }
+
     // Hide provisional reservations from regular booking lists unless explicitly requested.
     if (!args.status) {
       bookings = bookings.filter((b) => b.status !== "provisional");
@@ -1246,6 +1342,11 @@ export const rescheduleBooking = mutation({
     })),
   },
   handler: async (ctx, args) => {
+    // 0. Range guard. Without it an inverted/NaN range maps to zero slots:
+    // the old slots would be released and none reserved, leaving a live
+    // "confirmed" booking that holds nothing.
+    assertValidRange(args.newStart, args.newEnd);
+
     // 1. Get original booking
     const original = await ctx.db.get(args.bookingId);
     if (!original) {
@@ -1393,6 +1494,9 @@ export const rescheduleBookingByToken = mutation({
     })),
   },
   handler: async (ctx, args) => {
+    // 0. Range guard — see rescheduleBooking.
+    assertValidRange(args.newStart, args.newEnd);
+
     // 1. Find and verify booking
     const booking = await ctx.db
       .query("bookings")

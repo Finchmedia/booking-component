@@ -273,8 +273,9 @@ describe("listBookings", () => {
     ).toEqual([late!.uid]);
   });
 
-  // BUG(port-review): createBooking never persists organizationId, so listBookings({organizationId}) returns nothing for real bookings.
-  test.skip("scopes bookings to an organization", async () => {
+  // createBooking stamps the event type's organizationId on the booking (the
+  // same scope the hooks receive) so the by_org index finds it.
+  test("scopes bookings to an organization", async () => {
     const seed = await seedResource(t);
     const booking = await book(t, seed, AT("09:00"), AT("10:00"));
 
@@ -284,16 +285,29 @@ describe("listBookings", () => {
     expect(booking!.organizationId).toBe(ORG);
   });
 
-  // BUG(port-review): listBookings only picks an index from resourceId/eventTypeId/organizationId — the other ids are never applied as filters.
-  test.skip("combines the resource and event type filters", async () => {
+  // One id picks the index, the others still narrow the result.
+  test("combines the resource and event type filters", async () => {
     const one = await seedResource(t);
-    await seedResource(t, { resourceId: "res-2", eventTypeId: "et-2" });
-    await book(t, one, AT("09:00"), AT("10:00"));
+    const two = await seedResource(t, { resourceId: "res-2", eventTypeId: "et-2" });
+    const first = await book(t, one, AT("09:00"), AT("10:00"));
+    await book(t, two, AT("09:00"), AT("10:00"));
 
     // res-1 has no et-2 booking, so the intersection must be empty.
     expect(
       await t.query(api.public.listBookings, { resourceId: RESOURCE, eventTypeId: "et-2" })
     ).toEqual([]);
+    expect(
+      (
+        await t.query(api.public.listBookings, { resourceId: RESOURCE, eventTypeId: EVENT })
+      ).map((b) => b.uid)
+    ).toEqual([first!.uid]);
+    // The org index is the most specific one; the resource filter still applies.
+    expect(
+      (await t.query(api.public.listBookings, { organizationId: ORG, resourceId: "res-2" })).map(
+        (b) => b.resourceId
+      )
+    ).toEqual(["res-2"]);
+    expect(await t.query(api.public.listBookings, { organizationId: ORG })).toHaveLength(2);
   });
 });
 
@@ -549,8 +563,9 @@ describe("rescheduleBookingByToken", () => {
     expect(await t.query(api.public.listBookings, { resourceId: RESOURCE })).toHaveLength(2);
   });
 
-  // BUG(port-review): rescheduleBookingByToken has no range guard — an inverted range releases the old slots and reserves none.
-  test.skip("refuses an inverted range like createBooking does", async () => {
+  // Both reschedule paths share assertValidRange; without it an inverted range
+  // released the old slots and reserved none (a "confirmed" booking holding nothing).
+  test("refuses an inverted range like createBooking does", async () => {
     const seed = await seedResource(t);
     const booking = await book(t, seed, AT("09:00"), AT("10:00"));
 
@@ -562,7 +577,18 @@ describe("rescheduleBookingByToken", () => {
         newEnd: AT("14:00"),
       })
     ).rejects.toThrow("Invalid time range");
+    await expect(
+      t.mutation(api.public.rescheduleBooking, {
+        bookingId: booking!._id,
+        newStart: AT("15:00"),
+        newEnd: AT("15:00"),
+      })
+    ).rejects.toThrow("Invalid time range");
     expect(await busy()).toEqual(range(36, 40));
+    expect((await t.query(api.public.getBooking, { bookingId: booking!._id }))?.status).toBe(
+      "confirmed"
+    );
+    expect(await t.query(api.public.listBookings, { resourceId: RESOURCE })).toHaveLength(1);
   });
 
   test("a pending booking stays pending across a token reschedule", async () => {

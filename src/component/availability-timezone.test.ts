@@ -410,25 +410,16 @@ describe("DST-aware conversion of the schedule window", () => {
 });
 
 describe("resource timezones whose business day crosses UTC midnight", () => {
-  // BUG(port-review): getDaySlots reads only the daily_availability row of the LOCAL date, while generateDaySlotsWithTimezone throws away the UTC date of a converted slot — for UTC+12 the morning candidates live on the PREVIOUS UTC row and therefore always read as free.
-  //
   // Pacific/Auckland (UTC+12 in June), Mon–Fri 09:00–17:00 local: the local day
   // 2027-06-08 09:00–17:00 is 2027-06-07T21:00Z … 2027-06-08T05:00Z, so
-  // createBooking (correctly, via getRequiredSlots) stores busy slots on TWO
-  // UTC rows: "2027-06-07" → [84..95] and "2027-06-08" → [0..19].
-  // getDaySlots("2027-06-08") only loads the "2027-06-08" row, so the three
-  // candidates that convert to UTC slots 84/88/92 are compared against the
-  // wrong day's bitmap.
-  // Observed with the whole local day booked:
-  //   getDaySlots  → ["2027-06-07T21:00:00.000Z", "…T22:00:00.000Z", "…T23:00:00.000Z"]
-  //                  (expected [])
-  //   getMonthAvailability["2027-06-08"] → true (expected false)
-  // Re-booking one of those offered starts throws "Time slot no longer
-  // available", i.e. the day view advertises slots the booking mutation
-  // rejects. Fix belongs in public.ts (load the neighbouring UTC day's
-  // busySlots, or key the check by the slot's own UTC date) — utils.ts
-  // generateDaySlotsWithTimezone already computes that date and discards it.
-  test.skip("a fully booked local day is closed in both views (UTC+12)", async () => {
+  // createBooking (via getRequiredSlots) stores busy slots on TWO UTC rows:
+  // "2027-06-07" → [84..95] and "2027-06-08" → [0..19].
+  // Every candidate carries its slots keyed by UTC date (SlotCandidate.slotsByDate)
+  // and getDaySlots/getMonthAvailability check it against the row of THAT date,
+  // so the three candidates converting to UTC slots 84/88/92 on "2027-06-07"
+  // read as busy. Before the fix only the "2027-06-08" row was loaded and they
+  // were offered — and then rejected by createBooking.
+  test("a fully booked local day is closed in both views (UTC+12)", async () => {
     const { t } = setup();
     const AUCKLAND = "Pacific/Auckland";
     const date = "2027-06-08"; // Tuesday; Pacific/Auckland = UTC+12 (NZST)

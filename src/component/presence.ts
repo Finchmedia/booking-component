@@ -8,6 +8,10 @@ const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
  * signals that a user is present in one or more slots (time slots).
  * Updates their timestamp and ensures a cleanup job is scheduled for each slot.
  * Accepts an array of slots to batch multiple heartbeats into a single transaction.
+ *
+ * A hold is identified by (user, slot, resourceId): the same user can hold
+ * the same ISO slot on several resources at once (room + equipment), and
+ * heartbeat/leave/cleanup for one resource must never touch the others'.
  */
 export const heartbeat = mutation({
   args: {
@@ -25,8 +29,8 @@ export const heartbeat = mutation({
       // 1. Update or create the presence record
       const existingPresence = await ctx.db
         .query("presence")
-        .withIndex("by_user_slot", (q) =>
-          q.eq("user", args.user).eq("slot", slot)
+        .withIndex("by_user_slot_resource", (q) =>
+          q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId)
         )
         .first();
 
@@ -50,8 +54,8 @@ export const heartbeat = mutation({
       // 2. Ensure a cleanup job is scheduled
       const existingHeartbeat = await ctx.db
         .query("presence_heartbeats")
-        .withIndex("by_user_slot", (q) =>
-          q.eq("user", args.user).eq("slot", slot)
+        .withIndex("by_user_slot_resource", (q) =>
+          q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId)
         )
         .first();
 
@@ -94,15 +98,15 @@ export const leave = mutation({
     for (const slot of args.slots) {
       const presence = await ctx.db
         .query("presence")
-        .withIndex("by_user_slot", (q) =>
-          q.eq("user", args.user).eq("slot", slot)
+        .withIndex("by_user_slot_resource", (q) =>
+          q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId)
         )
         .first();
 
       const heartbeatDoc = await ctx.db
         .query("presence_heartbeats")
-        .withIndex("by_user_slot", (q) =>
-          q.eq("user", args.user).eq("slot", slot)
+        .withIndex("by_user_slot_resource", (q) =>
+          q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId)
         )
         .first();
 
@@ -254,15 +258,15 @@ export const cleanup = internalMutation({
   handler: async (ctx, args) => {
     const presence = await ctx.db
       .query("presence")
-      .withIndex("by_user_slot", (q) =>
-        q.eq("user", args.user).eq("slot", args.slot)
+      .withIndex("by_user_slot_resource", (q) =>
+        q.eq("user", args.user).eq("slot", args.slot).eq("resourceId", args.resourceId)
       )
       .first();
 
     const heartbeatDoc = await ctx.db
       .query("presence_heartbeats")
-      .withIndex("by_user_slot", (q) =>
-        q.eq("user", args.user).eq("slot", args.slot)
+      .withIndex("by_user_slot_resource", (q) =>
+        q.eq("user", args.user).eq("slot", args.slot).eq("resourceId", args.resourceId)
       )
       .first();
 

@@ -219,6 +219,9 @@ export default defineSchema({
   // ============================================
   // PRESENCE (Real-time Slot Locking)
   // ============================================
+  // A hold is keyed by (user, slot, resourceId) — one user may hold the same
+  // ISO slot on several resources, so the exact-hold lookups include the
+  // resource (a (user, slot) prefix query still lists all of a user's holds).
   presence: defineTable({
     resourceId: v.string(),
     user: v.string(),
@@ -228,7 +231,7 @@ export default defineSchema({
     data: v.optional(v.any()),
   })
     .index("by_resource_slot_updated", ["resourceId", "slot", "updated"])
-    .index("by_user_slot", ["user", "slot"])
+    .index("by_user_slot_resource", ["user", "slot", "resourceId"])
     .index("by_event_type", ["eventTypeId"]),
 
   presence_heartbeats: defineTable({
@@ -236,7 +239,7 @@ export default defineSchema({
     user: v.string(),
     slot: v.string(),
     markAsGone: v.id("_scheduled_functions"),
-  }).index("by_user_slot", ["user", "slot"]),
+  }).index("by_user_slot_resource", ["user", "slot", "resourceId"]),
 
   // ============================================
   // HOOKS (Notification System)

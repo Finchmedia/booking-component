@@ -409,9 +409,10 @@ describe("legacy createReservation across UTC midnight", () => {
     await expect(reserve(utc(D1, "23:30"), utc(D2, "00:30"))).resolves.toBeDefined();
   });
 
-  // BUG(port-review): createReservation has no "Invalid time range" guard — an
-  // inverted or NaN range silently creates a confirmed booking holding zero slots.
-  test.skip("rejects inverted and NaN ranges like the other write paths", async () => {
+  // The legacy path shares assertValidRange with the other write paths; before
+  // that an inverted or NaN range silently created a confirmed booking holding
+  // zero slots (getRequiredSlots maps end <= start to an empty map).
+  test("rejects inverted and NaN ranges like the other write paths", async () => {
     await seed(t);
     await expect(reserve(utc(D1, "23:30"), utc(D1, "23:00"))).rejects.toThrow(EXACT_RANGE_ERROR);
     await expect(reserve(utc(D1, "23:30"), utc(D1, "23:30"))).rejects.toThrow(EXACT_RANGE_ERROR);

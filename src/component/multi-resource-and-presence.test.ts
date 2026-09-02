@@ -3,8 +3,9 @@
 // src/component/presence.ts.
 //
 // Fixture (seedStudio): one room (bitmap resource, also the schedule owner),
-// one fungible microphone pool (quantity 2, isStandalone false) and one
-// non-fungible keyboard, all linked to the same event type. Bookings run on
+// one fungible microphone pool (quantity 2) and one non-fungible keyboard, all
+// linked to the same event type. The standalone-constraint tests seed their
+// own add-on resource (isStandalone: false). Bookings run on
 // Tuesday 2027-03-09; Europe/Berlin is UTC+1 that week, so 10:00–11:00 local
 // is 09:00–10:00 UTC = UTC slot indices 36..39.
 import { describe, expect, test, vi } from "vitest";
@@ -49,8 +50,7 @@ type ResourceRequest = { resourceId: string; quantity?: number };
 
 /**
  * Room (+ schedule + event type, from the harness) plus a pooled microphone
- * (quantity 2, `isStandalone: false`) and a plain keyboard, both linked to the
- * room's event type.
+ * (quantity 2) and a plain keyboard, both linked to the room's event type.
  */
 async function seedStudio(
   t: T,
@@ -66,7 +66,7 @@ async function seedStudio(
     organizationId: seed.organizationId,
     timezone: seed.timezone,
     eventTypeId: seed.eventTypeId,
-    resource: { name: "Microphone", isStandalone: false },
+    resource: { name: "Microphone" },
   });
   await t.mutation(api.resources.createResource, {
     id: KEYBOARD,
@@ -336,7 +336,6 @@ describe("multi-resource: createMultiResourceBooking", () => {
     expect(withItems?.items[1].resource).toMatchObject({
       isFungible: true,
       quantity: 2,
-      isStandalone: false,
     });
 
     // Bitmap resources go to daily_availability, the pool to quantity_availability.
@@ -692,33 +691,81 @@ describe("multi-resource: cancelMultiResourceBooking", () => {
 // ============================================
 
 describe("multi-resource: standalone constraint", () => {
-  // BUG(port-review): `isStandalone: false` ("can't be booked alone", schema.ts:21) is
-  // stored by createResource/updateResource but no code path enforces it — booking the
-  // microphone pool as the only resource of a multi-resource booking resolves to a
-  // confirmed booking instead of rejecting (grep: isStandalone is read nowhere).
-  test.skip("a resource marked isStandalone: false cannot be booked on its own", async () => {
+  const CABLE = "cable-1";
+
+  /** A non-fungible add-on (`isStandalone: false`) linked to the studio's event type. */
+  async function seedCable(t: T, seed: SeededSchedule): Promise<void> {
+    await t.mutation(api.resources.createResource, {
+      id: CABLE,
+      organizationId: seed.organizationId,
+      name: "XLR cable",
+      type: "equipment",
+      timezone: seed.timezone,
+      isStandalone: false,
+    });
+    await t.mutation(api.resource_event_types.linkResourceToEventType, {
+      resourceId: CABLE,
+      eventTypeId: seed.eventTypeId,
+    });
+  }
+
+  // `isStandalone: false` ("can't be booked alone", schema.ts) is an add-on:
+  // a multi-resource booking needs at least one standalone resource next to it,
+  // and the single-resource paths (createBooking / createProvisionalBooking)
+  // refuse it outright.
+  test("a resource marked isStandalone: false cannot be booked on its own", async () => {
     const { t } = setup();
     const seed = await seedStudio(t);
+    await seedCable(t, seed);
 
-    await expect(bookMulti(t, seed, [{ resourceId: MIC }])).rejects.toThrow(
+    await expect(bookMulti(t, seed, [{ resourceId: CABLE }])).rejects.toThrow(
       /standalone|cannot be booked alone/i
     );
-    // Booked together with the room it is fine.
-    await bookMulti(t, seed, [{ resourceId: ROOM }, { resourceId: MIC }]);
+    await expect(
+      book(t, { resourceId: CABLE, eventTypeId: seed.eventTypeId, timezone: seed.timezone }, START, END)
+    ).rejects.toThrow(/cannot be booked alone/i);
+    await expect(
+      t.mutation(api.public.createProvisionalBooking, {
+        eventTypeId: seed.eventTypeId,
+        resourceId: CABLE,
+        start: START,
+        end: END,
+        timezone: seed.timezone,
+        booker: BOOKER,
+        location: LOCATION,
+      })
+    ).rejects.toThrow(/cannot be booked alone/i);
+    // Nothing was reserved by the rejected attempts…
+    expect(await getBusySlots(t, CABLE, TUESDAY)).toBeNull();
+    expect(await t.query(api.public.listBookings, { resourceId: CABLE })).toEqual([]);
+
+    // …booked together with the room (or any standalone resource) it is fine.
+    await bookMulti(t, seed, [{ resourceId: ROOM }, { resourceId: CABLE }]);
+    expect(await getBusySlots(t, CABLE, TUESDAY)).toEqual(range(36, 40));
+    expect(await getBusySlots(t, ROOM, TUESDAY)).toEqual(range(36, 40));
+    await bookMulti(t, seed, [{ resourceId: CABLE }, { resourceId: MIC }], LATER_START, LATER_END);
+    expect(await getBusySlots(t, CABLE, TUESDAY)).toEqual(range(36, 44));
+
+    // An empty resource list is rejected before anything is looked up.
+    await expect(bookMulti(t, seed, [])).rejects.toThrow("At least one resource is required");
   });
 
-  // BUG(port-review): createMultiResourceBooking has no `start < end` guard (public.ts
-  // createBooking/createProvisionalBooking got one in the hardening port), so an
-  // inverted range creates a booking whose getRequiredSlots map is empty and which
-  // therefore reserves nothing. Observed: status "confirmed", start > end, 2
-  // booking_items, daily_availability(room-1) null, quantity_availability(mic-1) null.
-  test.skip("rejects an inverted range like createBooking does", async () => {
+  // createMultiResourceBooking shares assertValidRange with createBooking; before,
+  // an inverted range created a "confirmed" booking whose getRequiredSlots map was
+  // empty and which therefore reserved nothing on any of its resources.
+  test("rejects an inverted range like createBooking does", async () => {
     const { t } = setup();
     const seed = await seedStudio(t);
 
     await expect(
       bookMulti(t, seed, [{ resourceId: ROOM }, { resourceId: MIC }], END, START)
     ).rejects.toThrow("Invalid time range: end must be after start");
+    await expect(
+      bookMulti(t, seed, [{ resourceId: ROOM }, { resourceId: MIC }], START, START)
+    ).rejects.toThrow("Invalid time range: end must be after start");
+    expect(await getBusySlots(t, ROOM, TUESDAY)).toBeNull();
+    expect(await pooled(t, MIC)).toBeNull();
+    expect(await t.query(api.public.listBookings, { resourceId: ROOM })).toEqual([]);
   });
 });
 
@@ -1089,12 +1136,11 @@ describe("presence: scheduled cleanup", () => {
     expect(await presenceRows(t)).toEqual([]);
   });
 
-  // BUG(port-review): presence rows are keyed by (user, slot) only, so a heartbeat for
-  // a second resource patches the first resource's row instead of creating one — the
-  // hold never shows up under the new resourceId (and `leave` on either resource
-  // deletes it). Observed after both heartbeats: exactly one presence row,
-  // ["room-1", "ada", SLOT_A]; getDatePresence(kbd-1, TUESDAY) === [].
-  test.skip("a hold is tracked per resource, not just per user and slot", async () => {
+  // A hold is keyed by (user, slot, resourceId): the same user can hold the same
+  // ISO slot on the room AND the keyboard, and leave/cleanup for one resource
+  // must not touch the other's hold. (Before, the (user, slot) lookup patched
+  // the first resource's row and the second hold never existed.)
+  test("a hold is tracked per resource, not just per user and slot", async () => {
     const { t } = setup();
     await t.mutation(api.presence.heartbeat, {
       resourceId: ROOM,
@@ -1113,5 +1159,18 @@ describe("presence: scheduled cleanup", () => {
     expect(
       await t.query(api.presence.getActivePresenceCount, { resourceId: ROOM })
     ).toEqual({ count: 1, users: ["ada"] });
+    // Two rows, two cleanup jobs — one per resource.
+    expect((await presenceRows(t)).map((row) => row.resourceId).sort()).toEqual([KEYBOARD, ROOM]);
+    expect((await heartbeatRows(t)).map((row) => row.resourceId).sort()).toEqual([KEYBOARD, ROOM]);
+
+    // Leaving the keyboard keeps the room hold.
+    await t.mutation(api.presence.leave, { resourceId: KEYBOARD, slots: [SLOT_A], user: "ada" });
+    expect(
+      await t.query(api.presence.getDatePresence, { resourceId: KEYBOARD, date: TUESDAY })
+    ).toEqual([]);
+    expect(
+      await t.query(api.presence.getDatePresence, { resourceId: ROOM, date: TUESDAY })
+    ).toEqual([{ slot: SLOT_A, user: "ada", updated: FIXED_NOW }]);
+    expect((await heartbeatRows(t)).map((row) => row.resourceId)).toEqual([ROOM]);
   });
 });
