@@ -30,6 +30,11 @@ export type HookEventType = (typeof HOOK_EVENTS)[number];
 // HOOK QUERIES
 // ============================================
 
+/**
+ * Lists registered hooks, optionally narrowed to one event type and/or to
+ * "this organization's or global (no organizationId)" hooks. The result is
+ * always in creation order, whichever branch produced it.
+ */
 export const listHooks = query({
   args: {
     organizationId: v.optional(v.string()),
@@ -52,6 +57,11 @@ export const listHooks = query({
         (h) => h.organizationId === args.organizationId || !h.organizationId
       );
     }
+
+    // `by_event` is [eventType, enabled], so the prefix scan above comes back
+    // grouped by `enabled` (disabled first), not by creation time. Pin the
+    // order so both branches agree; the hooks table is tiny.
+    hooks.sort((a, b) => a._creationTime - b._creationTime);
 
     return hooks;
   },

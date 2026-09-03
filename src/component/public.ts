@@ -579,7 +579,7 @@ export const createBooking = mutation({
       actorId: args.booker.email, // Use email as actorId
       eventTypeId: args.eventTypeId,
       // Scope the booking to the event type's organization so that
-      // listBookings({ organizationId }) (index by_org) finds it — the same
+      // listBookings({ organizationId }) (index by_org_start) finds it — the same
       // scope the booking hooks receive.
       organizationId: eventType.organizationId,
       start: args.start,

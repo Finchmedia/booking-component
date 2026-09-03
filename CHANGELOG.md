@@ -1,5 +1,95 @@
 # Changelog
 
+## 0.3.1
+
+Quality pass. Every component function now declares a return validator, so the
+generated component API (`ComponentApi`) has concrete result types instead of
+`any` (72 of 75 functions were `any` in 0.3.0). Booking behaviour is unchanged,
+but the type surface and the install requirements are not — read _Upgrading_
+before bumping.
+
+### Upgrading
+
+- **Requires `convex >= 1.29.0`** (the peer range was `^1.17.0`). This is a
+  hard runtime floor, not a warning: the shared validators module calls
+  `VObject.extend()` (added in convex 1.29) at module load inside your
+  deployment, so a host on 1.17–1.28 fails to load the component at
+  `convex deploy`.
+- **Return types are now concrete.** Host code that narrowed a previously-`any`
+  result to a local mirror type may stop compiling. The common case is
+  `booking.status`: it stays `string` on the component side (the schema does not
+  constrain it), so a host-side mirror such as
+  `status: "confirmed" | "declined" | …` now errors with
+  `Type 'string' is not assignable to type '"confirmed" | …'`. Widen such fields
+  to `string` (or narrow at the boundary with a type guard), and delete mirror
+  types that only existed to compensate for `any`.
+- **`cancelReservation` returns `{ success: boolean, alreadyCancelled: boolean }`**
+  instead of `null`, matching `cancelBooking` and `cancelMultiResourceBooking`.
+  Cancelling an already-cancelled reservation reports
+  `{ success: true, alreadyCancelled: true }` without releasing slots again; a
+  missing reservation still throws.
+- **Bookings indexes were renamed and trimmed** (6 → 4): `by_org` →
+  `by_org_start` `[organizationId, start]`, `by_resource` → `by_resource_start`
+  `[resourceId, start]`; the unused `by_email` and `by_org_status` are gone.
+  Component indexes are not addressable from the host, so no host code changes;
+  your next `convex deploy` backfills the two new indexes.
+- The React-only peers (`react`, `react-hook-form`, `@hookform/resolvers`,
+  `zod`, `lucide-react`) are marked optional in `peerDependenciesMeta`. Nothing
+  behind the package root imports them, so backend-only installs no longer pull
+  the React stack (or hit `ERESOLVE` against a React 17 / zod 4 host) for the
+  `./react` subpath they never use. Install them yourself when you use
+  `@mrfinch/booking/react`.
+
+### Added
+
+- `src/component/validators.ts`: schema-derived document validators
+  (`bookingDoc`, `eventTypeDoc`, `resourceDoc`, `hookDoc`, …) and shared result
+  validators (`successResult`, `cancelResult`, `successWithAffectedUsers`,
+  `deletedCount`). Every query and mutation in `public`, `resources`,
+  `schedules`, `hooks`, `multi_resource`, `presence` and `resource_event_types`
+  declares `returns:`; void mutations declare `v.null()` and return `null`
+  explicitly.
+- `createBooking`, `createProvisionalBooking`, `rescheduleBooking`,
+  `rescheduleBookingByToken` and `createMultiResourceBooking` are typed as
+  returning the booking document (never `null`); the re-read after the write
+  throws `Booking not found after write` in the impossible case instead of
+  returning `null`.
+- Package export map: `@mrfinch/booking/_generated/component` (extensionless)
+  resolves alongside `…/_generated/component.js`, and both carry a `default`
+  entry, so `import type { ComponentApi } from
+  "@mrfinch/booking/_generated/component"` works under
+  `moduleResolution: "Bundler"` (was `TS2307`).
+
+### Changed
+
+- Read paths use compound indexes instead of scan-and-filter. Result sets and
+  shapes are unchanged:
+  - `listBookings({ organizationId | resourceId, dateFrom?, dateTo? })` pushes
+    the date range onto the `*_start` indexes and reads newest-first from the
+    index. `status`, `eventTypeId` and `provisional` remain post-filters, so
+    `limit` still applies after filtering.
+  - `listBookings({})` with no selector is bounded to the 1000 most recently
+    created bookings (it was an unbounded full-table scan). Pass a selector for
+    an exhaustive listing.
+  - Date overrides (`getDateOverride`, `createDateOverride`,
+    `listDateOverrides` and the per-day lookup behind `getMonthAvailability`)
+    use `by_schedule_date` at full depth.
+  - `presence.list` applies the staleness cutoff as an index range on `updated`
+    instead of a JS post-filter. The returned rows are identical — the query
+    always read `updated` descending, so live rows sorted ahead of stale ones —
+    only the read set shrinks.
+  - `listResources({ type })` uses `by_org_type`; `listHooks({ eventType })`
+    uses `by_event`. `listHooks` returns hooks in creation order from both
+    branches.
+- `src/client/index.ts`: the dead `as any` casts on id arguments are gone.
+
+### Tests
+
+- `validators.test.ts`: every document validator is checked against its table
+  (exact field set, `_id` bound to the right table, `Doc<"t">` ≡
+  `Infer<typeof tDoc>`) and the result validators against representative
+  results. `hardening.test.ts` pins `listHooks` ordering.
+
 ## 0.3.0
 
 Hardening release. The component was run in a production client project for

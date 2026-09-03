@@ -539,6 +539,52 @@ describe("resources", () => {
 });
 
 // ============================================
+// Hooks
+// ============================================
+
+describe("hooks", () => {
+  test("listHooks returns creation order with and without an eventType filter", async () => {
+    // `by_event` is [eventType, enabled]: a bare prefix scan on eventType
+    // comes back grouped by `enabled` (disabled first). listHooks must hide
+    // that and return creation order from both of its branches.
+    const first = await t.mutation(api.hooks.registerHook, {
+      eventType: "booking.created",
+      functionHandle: "function://first",
+    });
+    const second = await t.mutation(api.hooks.registerHook, {
+      eventType: "booking.created",
+      functionHandle: "function://second",
+      organizationId: ORG,
+    });
+    const other = await t.mutation(api.hooks.registerHook, {
+      eventType: "booking.cancelled",
+      functionHandle: "function://other",
+    });
+    const third = await t.mutation(api.hooks.registerHook, {
+      eventType: "booking.created",
+      functionHandle: "function://third",
+      organizationId: "other-org",
+    });
+    // Disable one hook before and one after an enabled sibling so the index
+    // order ([first, third, second]) differs from creation order.
+    await t.mutation(api.hooks.updateHook, { hookId: first, enabled: false });
+    await t.mutation(api.hooks.updateHook, { hookId: third, enabled: false });
+
+    const ids = async (args: { eventType?: string; organizationId?: string }) =>
+      (await t.query(api.hooks.listHooks, args)).map((h) => h._id);
+
+    expect(await ids({})).toEqual([first, second, other, third]);
+    expect(await ids({ eventType: "booking.created" })).toEqual([first, second, third]);
+    // The org filter keeps global hooks plus this org's, in the same order.
+    expect(await ids({ eventType: "booking.created", organizationId: ORG })).toEqual([
+      first,
+      second,
+    ]);
+    expect(await ids({ organizationId: ORG })).toEqual([first, second, other]);
+  });
+});
+
+// ============================================
 // Maintenance
 // ============================================
 

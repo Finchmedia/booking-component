@@ -80,6 +80,23 @@
     "react-hook-form": "^7.50.0",
     "zod": ">=3.22.0"
   },
+  "peerDependenciesMeta": {
+    "@hookform/resolvers": {
+      "optional": true
+    },
+    "lucide-react": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-hook-form": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@convex-dev/eslint-plugin": "^1.0.0",
     "@edge-runtime/vm": "^5.0.0",

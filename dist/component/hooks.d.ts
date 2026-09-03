@@ -1,16 +1,21 @@
 export declare const HOOK_EVENTS: readonly ["booking.created", "booking.pending", "booking.confirmed", "booking.cancelled", "booking.completed", "booking.declined", "booking.rescheduled", "presence.timeout"];
 export type HookEventType = (typeof HOOK_EVENTS)[number];
+/**
+ * Lists registered hooks, optionally narrowed to one event type and/or to
+ * "this organization's or global (no organizationId)" hooks. The result is
+ * always in creation order, whichever branch produced it.
+ */
 export declare const listHooks: import("convex/server").RegisteredQuery<"public", {
-    eventType?: string | undefined;
     organizationId?: string | undefined;
+    eventType?: string | undefined;
 }, Promise<{
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
+    createdAt: number;
     eventType: string;
     functionHandle: string;
     enabled: boolean;
-    createdAt: number;
 }[]>>;
 export declare const getHook: import("convex/server").RegisteredQuery<"public", {
     hookId: import("convex/values").GenericId<"hooks">;
@@ -18,10 +23,10 @@ export declare const getHook: import("convex/server").RegisteredQuery<"public", 
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
+    createdAt: number;
     eventType: string;
     functionHandle: string;
     enabled: boolean;
-    createdAt: number;
 } | null>>;
 export declare const registerHook: import("convex/server").RegisteredMutation<"public", {
     organizationId?: string | undefined;
@@ -72,8 +77,8 @@ export declare const getBookingHistory: import("convex/server").RegisteredQuery<
     changedBy?: string | undefined;
     reason?: string | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
-    toStatus: string;
     fromStatus: string;
+    toStatus: string;
     timestamp: number;
 }[]>>;
 //# sourceMappingURL=hooks.d.ts.map

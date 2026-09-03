@@ -110,9 +110,11 @@ export const leave = mutation({
 });
 /**
  * Returns the (up to 20) most recently active users present in a slot.
- * Stale entries (older than TIMEOUT_MS) are excluded by the index range
- * itself, so rows the cleanup job hasn't removed yet neither show up nor
- * crowd live holds out of the 20.
+ * The staleness cutoff (TIMEOUT_MS) is applied by the index range instead of
+ * a JS post-filter, so stale rows the cleanup job hasn't removed yet are never
+ * read. The returned set is unchanged from the post-filter version: the query
+ * reads `updated` descending, so live rows always sorted ahead of stale ones
+ * and `take(20)` already picked live rows first.
  */
 export const list = query({
     args: {
