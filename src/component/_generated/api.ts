@@ -30,6 +30,7 @@ import type * as resources from "../resources.js";
 import type * as schedules from "../schedules.js";
 import type * as slot_helpers from "../slot_helpers.js";
 import type * as utils from "../utils.js";
+import type * as validators from "../validators.js";
 
 import type {
   ApiFromModules,
@@ -61,6 +62,7 @@ const fullApi: ApiFromModules<{
   schedules: typeof schedules;
   slot_helpers: typeof slot_helpers;
   utils: typeof utils;
+  validators: typeof validators;
 }> = anyApi as any;
 
 /**

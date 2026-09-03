@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { presenceDoc } from "./validators";
 const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
 /**
  * signals that a user is present in one or more slots (time slots).
@@ -19,6 +20,7 @@ export const heartbeat = mutation({
         eventTypeId: v.optional(v.string()),
         data: v.optional(v.any()),
     },
+    returns: v.null(),
     handler: async (ctx, args) => {
         const now = Date.now();
         // Process each slot in the batch
@@ -66,6 +68,7 @@ export const heartbeat = mutation({
                 });
             }
         }
+        return null;
     },
 });
 /**
@@ -79,6 +82,7 @@ export const leave = mutation({
         slots: v.array(v.string()),
         user: v.string(),
     },
+    returns: v.null(),
     handler: async (ctx, args) => {
         // Process each slot in the batch
         for (const slot of args.slots) {
@@ -101,27 +105,33 @@ export const leave = mutation({
                 await ctx.db.delete(heartbeatDoc._id);
             }
         }
+        return null;
     },
 });
 /**
- * Returns a list of users currently present in a slot.
- * filters out stale entries just in case cleanup hasn't run yet.
+ * Returns the (up to 20) most recently active users present in a slot.
+ * Stale entries (older than TIMEOUT_MS) are excluded by the index range
+ * itself, so rows the cleanup job hasn't removed yet neither show up nor
+ * crowd live holds out of the 20.
  */
 export const list = query({
     args: {
         resourceId: v.string(),
         slot: v.string(),
     },
+    returns: v.array(presenceDoc),
     handler: async (ctx, args) => {
-        const presence = await ctx.db
+        // `gte`: exactly TIMEOUT_MS old is still live, matching `markAsGone` and
+        // the other reads (`now - updated <= TIMEOUT_MS`).
+        const now = Date.now();
+        return await ctx.db
             .query("presence")
-            .withIndex("by_resource_slot_updated", (q) => q.eq("resourceId", args.resourceId).eq("slot", args.slot))
+            .withIndex("by_resource_slot_updated", (q) => q
+            .eq("resourceId", args.resourceId)
+            .eq("slot", args.slot)
+            .gte("updated", now - TIMEOUT_MS))
             .order("desc") // Most recently active first
             .take(20);
-        // Filter out stale users (older than timeout) immediately for snappy UI
-        // even if the backend job hasn't cleaned them up yet.
-        const now = Date.now();
-        return presence.filter((p) => now - p.updated <= TIMEOUT_MS);
     },
 });
 /**
@@ -137,6 +147,11 @@ export const getDatePresence = query({
         resourceId: v.string(),
         date: v.string(),
     },
+    returns: v.array(v.object({
+        slot: v.string(),
+        user: v.string(),
+        updated: v.number(),
+    })),
     handler: async (ctx, args) => {
         const now = Date.now();
         // Range query on compound index: efficiently fetch all slots starting with date prefix
@@ -172,10 +187,16 @@ export const getActivePresenceCount = query({
         resourceId: v.optional(v.string()),
         eventTypeId: v.optional(v.string()),
     },
+    returns: v.object({
+        count: v.number(),
+        users: v.array(v.string()),
+    }),
     handler: async (ctx, args) => {
         const now = Date.now();
         let presenceRecords;
-        // Query based on what's provided
+        // Query based on what's provided. Deliberately no [resourceId, updated]
+        // index: `updated` is rewritten on every heartbeat, and this is a rare
+        // admin read — the JS staleness filter below is the cheaper trade.
         if (args.resourceId) {
             // Get all presence for this resource
             presenceRecords = await ctx.db
@@ -215,6 +236,7 @@ export const cleanup = internalMutation({
         slot: v.string(),
         user: v.string(),
     },
+    returns: v.null(),
     handler: async (ctx, args) => {
         const presence = await ctx.db
             .query("presence")
@@ -230,7 +252,7 @@ export const cleanup = internalMutation({
                 await ctx.db.delete(presence._id);
             if (heartbeatDoc)
                 await ctx.db.delete(heartbeatDoc._id);
-            return;
+            return null;
         }
         const now = Date.now();
         if (now - presence.updated > TIMEOUT_MS) {
@@ -244,6 +266,7 @@ export const cleanup = internalMutation({
             const scheduledId = await ctx.scheduler.runAfter(TIMEOUT_MS, internal.presence.cleanup, args);
             await ctx.db.patch(heartbeatDoc._id, { markAsGone: scheduledId });
         }
+        return null;
     },
 });
 //# sourceMappingURL=presence.js.map

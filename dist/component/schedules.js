@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getDayOfWeekInTimezone } from "./utils";
+import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 // ============================================
 // TIME WINDOW VALIDATION
 // ============================================
@@ -74,6 +75,7 @@ function assertValidCustomHours(customHours) {
 // ============================================
 export const getSchedule = query({
     args: { id: v.string() },
+    returns: v.union(scheduleDoc, v.null()),
     handler: async (ctx, args) => {
         return await ctx.db
             .query("schedules")
@@ -83,12 +85,14 @@ export const getSchedule = query({
 });
 export const getScheduleById = query({
     args: { scheduleId: v.id("schedules") },
+    returns: v.union(scheduleDoc, v.null()),
     handler: async (ctx, args) => {
         return await ctx.db.get(args.scheduleId);
     },
 });
 export const listSchedules = query({
     args: { organizationId: v.string() },
+    returns: v.array(scheduleDoc),
     handler: async (ctx, args) => {
         return await ctx.db
             .query("schedules")
@@ -98,6 +102,7 @@ export const listSchedules = query({
 });
 export const getDefaultSchedule = query({
     args: { organizationId: v.string() },
+    returns: v.union(scheduleDoc, v.null()),
     handler: async (ctx, args) => {
         const schedules = await ctx.db
             .query("schedules")
@@ -122,6 +127,7 @@ export const createSchedule = mutation({
             endTime: v.string(),
         })),
     },
+    returns: v.id("schedules"),
     handler: async (ctx, args) => {
         assertValidWeeklyHours(args.weeklyHours);
         // Check for existing ID
@@ -169,6 +175,7 @@ export const updateSchedule = mutation({
             endTime: v.string(),
         }))),
     },
+    returns: v.id("schedules"),
     handler: async (ctx, args) => {
         if (args.weeklyHours !== undefined) {
             assertValidWeeklyHours(args.weeklyHours);
@@ -207,6 +214,7 @@ export const updateSchedule = mutation({
 });
 export const deleteSchedule = mutation({
     args: { id: v.string() },
+    returns: successResult,
     handler: async (ctx, args) => {
         const schedule = await ctx.db
             .query("schedules")
@@ -236,20 +244,20 @@ export const listDateOverrides = query({
         dateFrom: v.optional(v.string()),
         dateTo: v.optional(v.string()),
     },
+    returns: v.array(dateOverrideDoc),
     handler: async (ctx, args) => {
-        const overrides = await ctx.db
+        // The index is [scheduleId, date] and ISO dates sort lexicographically ==
+        // chronologically, so both the range and the ascending date order come
+        // straight from the index.
+        const { dateFrom, dateTo } = args;
+        return await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId))
+            .withIndex("by_schedule_date", (q) => {
+            const bySchedule = q.eq("scheduleId", args.scheduleId);
+            const from = dateFrom !== undefined ? bySchedule.gte("date", dateFrom) : bySchedule;
+            return dateTo !== undefined ? from.lte("date", dateTo) : from;
+        })
             .collect();
-        // Filter by date range if specified
-        let filtered = overrides;
-        if (args.dateFrom) {
-            filtered = filtered.filter((o) => o.date >= args.dateFrom);
-        }
-        if (args.dateTo) {
-            filtered = filtered.filter((o) => o.date <= args.dateTo);
-        }
-        return filtered.sort((a, b) => a.date.localeCompare(b.date));
     },
 });
 export const getDateOverride = query({
@@ -257,12 +265,14 @@ export const getDateOverride = query({
         scheduleId: v.id("schedules"),
         date: v.string(),
     },
+    returns: v.union(dateOverrideDoc, v.null()),
     handler: async (ctx, args) => {
-        const overrides = await ctx.db
+        // Full-depth lookup. .first() keeps first-match semantics should a legacy
+        // duplicate (scheduleId, date) row exist; .unique() would throw on it.
+        return await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId))
-            .collect();
-        return overrides.find((o) => o.date === args.date) ?? null;
+            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", args.date))
+            .first();
     },
 });
 // ============================================
@@ -278,16 +288,16 @@ export const createDateOverride = mutation({
             endTime: v.string(),
         }))),
     },
+    returns: v.id("date_overrides"),
     handler: async (ctx, args) => {
         if (args.customHours !== undefined) {
             assertValidCustomHours(args.customHours);
         }
         // Check for existing override on this date
-        const overrides = await ctx.db
+        const existing = await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId))
-            .collect();
-        const existing = overrides.find((o) => o.date === args.date);
+            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", args.date))
+            .first();
         if (existing) {
             // Update existing
             await ctx.db.patch(existing._id, {
@@ -313,6 +323,7 @@ export const updateDateOverride = mutation({
             endTime: v.string(),
         }))),
     },
+    returns: v.id("date_overrides"),
     handler: async (ctx, args) => {
         if (args.customHours !== undefined) {
             assertValidCustomHours(args.customHours);
@@ -332,6 +343,7 @@ export const updateDateOverride = mutation({
 });
 export const deleteDateOverride = mutation({
     args: { overrideId: v.id("date_overrides") },
+    returns: successResult,
     handler: async (ctx, args) => {
         const override = await ctx.db.get(args.overrideId);
         if (!override) {
@@ -366,11 +378,10 @@ export async function computeAvailabilityForDate(ctx, scheduleId, date) {
         return { availableSlots: Array.from({ length: 32 }, (_, i) => i + 36) };
     }
     // Check for date override
-    const overrides = await ctx.db
+    const override = await ctx.db
         .query("date_overrides")
-        .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id))
-        .collect();
-    const override = overrides.find((o) => o.date === date);
+        .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id).eq("date", date))
+        .first();
     if (override) {
         if (override.type === "unavailable") {
             return { availableSlots: [] };
@@ -416,6 +427,7 @@ export const getEffectiveAvailability = query({
         scheduleId: v.string(),
         date: v.string(),
     },
+    returns: v.object({ availableSlots: v.array(v.number()) }),
     handler: async (ctx, args) => computeAvailabilityForDate(ctx, args.scheduleId, args.date),
 });
 //# sourceMappingURL=schedules.js.map

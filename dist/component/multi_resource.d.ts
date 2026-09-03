@@ -68,7 +68,7 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;
-} | null>>;
+}>>;
 export declare const getBookingWithItems: import("convex/server").RegisteredQuery<"public", {
     bookingId: import("convex/values").GenericId<"bookings">;
 }, Promise<{

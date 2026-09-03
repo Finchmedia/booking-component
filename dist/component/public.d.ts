@@ -132,7 +132,7 @@ export declare const createBooking: import("convex/server").RegisteredMutation<"
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;
-} | null>>;
+}>>;
 export declare const createProvisionalBooking: import("convex/server").RegisteredMutation<"public", {
     resourceId: string;
     end: number;
@@ -177,7 +177,7 @@ export declare const createProvisionalBooking: import("convex/server").Registere
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;
-} | null>>;
+}>>;
 export declare const getBooking: import("convex/server").RegisteredQuery<"public", {
     bookingId: import("convex/values").GenericId<"bookings">;
 }, Promise<{
@@ -216,7 +216,10 @@ export declare const cancelReservation: import("convex/server").RegisteredMutati
         apiKey: string;
     } | undefined;
     reservationId: import("convex/values").GenericId<"bookings">;
-}, Promise<void>>;
+}, Promise<{
+    success: boolean;
+    alreadyCancelled: boolean;
+}>>;
 export declare const expireProvisionalBooking: import("convex/server").RegisteredMutation<"public", {
     reason?: string | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
@@ -379,6 +382,20 @@ export declare const getBookingByUid: import("convex/server").RegisteredQuery<"p
     bookerEmail: string;
     eventTitle: string;
 } | null>>;
+/**
+ * Lists bookings, newest `start` first, hiding provisional reservations
+ * unless `status` asks for them.
+ *
+ * Pass `organizationId` or `resourceId`: those branches read the
+ * `by_org_start` / `by_resource_start` indexes, so `dateFrom` / `dateTo`
+ * narrow the index range itself and the scan is proportional to the window.
+ * The `eventTypeId` branch uses `by_event_type` and range-filters in JS.
+ *
+ * With no selector at all the scan is bounded: only the 1000 most recently
+ * *created* bookings are considered (then filtered, sorted and limited). That
+ * branch is meant for small deployments, admin tooling and tests; a large
+ * host should always pass a selector.
+ */
 export declare const listBookings: import("convex/server").RegisteredQuery<"public", {
     organizationId?: string | undefined;
     resourceId?: string | undefined;
@@ -498,7 +515,7 @@ export declare const rescheduleBooking: import("convex/server").RegisteredMutati
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;
-} | null>>;
+}>>;
 export declare const rescheduleBookingByToken: import("convex/server").RegisteredMutation<"public", {
     resendOptions?: {
         fromEmail?: string | undefined;
@@ -537,5 +554,5 @@ export declare const rescheduleBookingByToken: import("convex/server").Registere
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;
-} | null>>;
+}>>;
 //# sourceMappingURL=public.d.ts.map

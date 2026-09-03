@@ -22,19 +22,44 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
     hooks: {
         getBookingHistory: FunctionReference<"query", "internal", {
             bookingId: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            bookingId: string;
+            changedBy?: string;
+            fromStatus: string;
+            reason?: string;
+            timestamp: number;
+            toStatus: string;
+        }>, Name>;
         getHook: FunctionReference<"query", "internal", {
             hookId: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            enabled: boolean;
+            eventType: string;
+            functionHandle: string;
+            organizationId?: string;
+        } | null, Name>;
         listHooks: FunctionReference<"query", "internal", {
             eventType?: string;
             organizationId?: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            enabled: boolean;
+            eventType: string;
+            functionHandle: string;
+            organizationId?: string;
+        }>, Name>;
         registerHook: FunctionReference<"mutation", "internal", {
             eventType: string;
             functionHandle: string;
             organizationId?: string;
-        }, any, Name>;
+        }, string, Name>;
         transitionBookingState: FunctionReference<"mutation", "internal", {
             bookingId: string;
             changedBy?: string;
@@ -45,15 +70,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 fromEmail?: string;
             };
             toStatus: string;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         unregisterHook: FunctionReference<"mutation", "internal", {
             hookId: string;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         updateHook: FunctionReference<"mutation", "internal", {
             enabled?: boolean;
             functionHandle?: string;
             hookId: string;
-        }, any, Name>;
+        }, string, Name>;
     };
     maintenance: {
         getDailyAvailability: FunctionReference<"query", "internal", {
@@ -91,7 +120,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 baseUrl?: string;
                 fromEmail?: string;
             };
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         checkMultiResourceAvailability: FunctionReference<"query", "internal", {
             end: number;
             resources: Array<{
@@ -99,7 +130,16 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 resourceId: string;
             }>;
             start: number;
-        }, any, Name>;
+        }, {
+            available: boolean;
+            resources: Array<{
+                available: boolean;
+                availableQuantity: number;
+                conflicts: Array<number>;
+                requestedQuantity: number;
+                resourceId: string;
+            }>;
+        }, Name>;
         createMultiResourceBooking: FunctionReference<"mutation", "internal", {
             booker: {
                 email: string;
@@ -125,36 +165,132 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             }>;
             start: number;
             timezone: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        }, Name>;
         getBookingWithItems: FunctionReference<"query", "internal", {
             bookingId: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            items: Array<{
+                _creationTime: number;
+                _id: string;
+                bookingId: string;
+                quantity: number;
+                resource: {
+                    _creationTime: number;
+                    _id: string;
+                    createdAt: number;
+                    description?: string;
+                    id: string;
+                    isActive: boolean;
+                    isFungible?: boolean;
+                    isStandalone?: boolean;
+                    metadata?: Record<string, string>;
+                    name: string;
+                    organizationId: string;
+                    quantity?: number;
+                    timezone: string;
+                    type: string;
+                    updatedAt: number;
+                } | null;
+                resourceId: string;
+            }>;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        } | null, Name>;
     };
     presence: {
         getActivePresenceCount: FunctionReference<"query", "internal", {
             eventTypeId?: string;
             resourceId?: string;
-        }, any, Name>;
+        }, {
+            count: number;
+            users: Array<string>;
+        }, Name>;
         getDatePresence: FunctionReference<"query", "internal", {
             date: string;
             resourceId: string;
-        }, any, Name>;
+        }, Array<{
+            slot: string;
+            updated: number;
+            user: string;
+        }>, Name>;
         heartbeat: FunctionReference<"mutation", "internal", {
             data?: any;
             eventTypeId?: string;
             resourceId: string;
             slots: Array<string>;
             user: string;
-        }, any, Name>;
+        }, null, Name>;
         leave: FunctionReference<"mutation", "internal", {
             resourceId: string;
             slots: Array<string>;
             user: string;
-        }, any, Name>;
+        }, null, Name>;
         list: FunctionReference<"query", "internal", {
             resourceId: string;
             slot: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            data?: any;
+            eventTypeId?: string;
+            resourceId: string;
+            slot: string;
+            updated: number;
+            user: string;
+        }>, Name>;
     };
     public: {
         cancelBookingByToken: FunctionReference<"mutation", "internal", {
@@ -166,7 +302,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             };
             token: string;
             uid: string;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         cancelReservation: FunctionReference<"mutation", "internal", {
             resendOptions?: {
                 apiKey: string;
@@ -174,7 +312,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 fromEmail?: string;
             };
             reservationId: string;
-        }, any, Name>;
+        }, {
+            alreadyCancelled: boolean;
+            success: boolean;
+        }, Name>;
         createBooking: FunctionReference<"mutation", "internal", {
             booker: {
                 email: string;
@@ -196,7 +337,35 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             resourceId: string;
             start: number;
             timezone: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        }, Name>;
         createEventType: FunctionReference<"mutation", "internal", {
             bufferAfter?: number;
             bufferBefore?: number;
@@ -220,7 +389,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             slug: string;
             timezone: string;
             title: string;
-        }, any, Name>;
+        }, string, Name>;
         createProvisionalBooking: FunctionReference<"mutation", "internal", {
             booker: {
                 email: string;
@@ -237,7 +406,35 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             resourceId: string;
             start: number;
             timezone: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        }, Name>;
         createReservation: FunctionReference<"mutation", "internal", {
             actorId: string;
             end: number;
@@ -248,29 +445,118 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             };
             resourceId: string;
             start: number;
-        }, any, Name>;
+        }, string, Name>;
         deleteEventType: FunctionReference<"mutation", "internal", {
             id: string;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         expireProvisionalBooking: FunctionReference<"mutation", "internal", {
             bookingId: string;
             reason?: string;
-        }, any, Name>;
+        }, {
+            reason?: string;
+            success: boolean;
+        }, Name>;
         getAvailability: FunctionReference<"query", "internal", {
             end: number;
             resourceId: string;
             start: number;
-        }, any, Name>;
+        }, boolean, Name>;
         getBooking: FunctionReference<"query", "internal", {
             bookingId: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        } | null, Name>;
         getBookingByToken: FunctionReference<"query", "internal", {
             token: string;
             uid: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        }, Name>;
         getBookingByUid: FunctionReference<"query", "internal", {
             uid: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        } | null, Name>;
         getDaySlots: FunctionReference<"query", "internal", {
             availableSlots?: Array<number>;
             date: string;
@@ -279,14 +565,70 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             resourceId: string;
             resourceTimezone?: string;
             slotInterval?: number;
-        }, any, Name>;
+        }, Array<{
+            time: string;
+        }>, Name>;
         getEventType: FunctionReference<"query", "internal", {
             eventTypeId: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            bufferAfter?: number;
+            bufferBefore?: number;
+            createdAt?: number;
+            description?: string;
+            id: string;
+            isActive?: boolean;
+            lengthInMinutes: number;
+            lengthInMinutesOptions?: Array<number>;
+            locations: Array<{
+                address?: string;
+                public?: boolean;
+                type: string;
+            }>;
+            lockTimeZoneToggle: boolean;
+            maxFutureMinutes?: number;
+            minNoticeMinutes?: number;
+            organizationId?: string;
+            requiresConfirmation?: boolean;
+            scheduleId?: string;
+            slotInterval?: number;
+            slug: string;
+            timezone: string;
+            title: string;
+            updatedAt?: number;
+        }, Name>;
         getEventTypeBySlug: FunctionReference<"query", "internal", {
             organizationId?: string;
             slug: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            bufferAfter?: number;
+            bufferBefore?: number;
+            createdAt?: number;
+            description?: string;
+            id: string;
+            isActive?: boolean;
+            lengthInMinutes: number;
+            lengthInMinutesOptions?: Array<number>;
+            locations: Array<{
+                address?: string;
+                public?: boolean;
+                type: string;
+            }>;
+            lockTimeZoneToggle: boolean;
+            maxFutureMinutes?: number;
+            minNoticeMinutes?: number;
+            organizationId?: string;
+            requiresConfirmation?: boolean;
+            scheduleId?: string;
+            slotInterval?: number;
+            slug: string;
+            timezone: string;
+            title: string;
+            updatedAt?: number;
+        } | null, Name>;
         getMonthAvailability: FunctionReference<"query", "internal", {
             dateFrom: string;
             dateTo: string;
@@ -296,7 +638,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             resourceTimezone?: string;
             scheduleId?: string;
             slotInterval?: number;
-        }, any, Name>;
+        }, Record<string, boolean>, Name>;
         listBookings: FunctionReference<"query", "internal", {
             dateFrom?: number;
             dateTo?: number;
@@ -305,11 +647,66 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             organizationId?: string;
             resourceId?: string;
             status?: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        }>, Name>;
         listEventTypes: FunctionReference<"query", "internal", {
             activeOnly?: boolean;
             organizationId?: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            bufferAfter?: number;
+            bufferBefore?: number;
+            createdAt?: number;
+            description?: string;
+            id: string;
+            isActive?: boolean;
+            lengthInMinutes: number;
+            lengthInMinutesOptions?: Array<number>;
+            locations: Array<{
+                address?: string;
+                public?: boolean;
+                type: string;
+            }>;
+            lockTimeZoneToggle: boolean;
+            maxFutureMinutes?: number;
+            minNoticeMinutes?: number;
+            organizationId?: string;
+            requiresConfirmation?: boolean;
+            scheduleId?: string;
+            slotInterval?: number;
+            slug: string;
+            timezone: string;
+            title: string;
+            updatedAt?: number;
+        }>, Name>;
         rescheduleBooking: FunctionReference<"mutation", "internal", {
             bookingId: string;
             newEnd: number;
@@ -320,7 +717,35 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 baseUrl?: string;
                 fromEmail?: string;
             };
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        }, Name>;
         rescheduleBookingByToken: FunctionReference<"mutation", "internal", {
             newEnd: number;
             newStart: number;
@@ -331,11 +756,42 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             };
             token: string;
             uid: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            resourceId: string;
+            start: number;
+            status: string;
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        }, Name>;
         toggleEventTypeActive: FunctionReference<"mutation", "internal", {
             id: string;
             isActive: boolean;
-        }, any, Name>;
+        }, {
+            affectedUsers: number;
+            success: boolean;
+        }, Name>;
         updateEventType: FunctionReference<"mutation", "internal", {
             bufferAfter?: number;
             bufferBefore?: number;
@@ -358,47 +814,101 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             slug?: string;
             timezone?: string;
             title?: string;
-        }, any, Name>;
+        }, string, Name>;
     };
     resource_event_types: {
         deleteAllLinksForEventType: FunctionReference<"mutation", "internal", {
             eventTypeId: string;
-        }, any, Name>;
+        }, {
+            deleted: number;
+        }, Name>;
         deleteAllLinksForResource: FunctionReference<"mutation", "internal", {
             resourceId: string;
-        }, any, Name>;
+        }, {
+            deleted: number;
+        }, Name>;
         getEventTypeIdsForResource: FunctionReference<"query", "internal", {
             resourceId: string;
-        }, any, Name>;
+        }, Array<string>, Name>;
         getEventTypesForResource: FunctionReference<"query", "internal", {
             resourceId: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            bufferAfter?: number;
+            bufferBefore?: number;
+            createdAt?: number;
+            description?: string;
+            id: string;
+            isActive?: boolean;
+            lengthInMinutes: number;
+            lengthInMinutesOptions?: Array<number>;
+            locations: Array<{
+                address?: string;
+                public?: boolean;
+                type: string;
+            }>;
+            lockTimeZoneToggle: boolean;
+            maxFutureMinutes?: number;
+            minNoticeMinutes?: number;
+            organizationId?: string;
+            requiresConfirmation?: boolean;
+            scheduleId?: string;
+            slotInterval?: number;
+            slug: string;
+            timezone: string;
+            title: string;
+            updatedAt?: number;
+        }>, Name>;
         getResourceIdsForEventType: FunctionReference<"query", "internal", {
             eventTypeId: string;
-        }, any, Name>;
+        }, Array<string>, Name>;
         getResourcesForEventType: FunctionReference<"query", "internal", {
             eventTypeId: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            description?: string;
+            id: string;
+            isActive: boolean;
+            isFungible?: boolean;
+            isStandalone?: boolean;
+            metadata?: Record<string, string>;
+            name: string;
+            organizationId: string;
+            quantity?: number;
+            timezone: string;
+            type: string;
+            updatedAt: number;
+        }>, Name>;
         hasResourceEventTypeLink: FunctionReference<"query", "internal", {
             eventTypeId: string;
             resourceId: string;
-        }, any, Name>;
+        }, boolean, Name>;
         linkResourceToEventType: FunctionReference<"mutation", "internal", {
             eventTypeId: string;
             resourceId: string;
-        }, any, Name>;
+        }, string, Name>;
         setEventTypesForResource: FunctionReference<"mutation", "internal", {
             eventTypeIds: Array<string>;
             resourceId: string;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         setResourcesForEventType: FunctionReference<"mutation", "internal", {
             eventTypeId: string;
             resourceIds: Array<string>;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         unlinkResourceFromEventType: FunctionReference<"mutation", "internal", {
             eventTypeId: string;
             resourceId: string;
-        }, any, Name>;
+        }, {
+            existed: boolean;
+            success: boolean;
+        }, Name>;
     };
     resources: {
         createResource: FunctionReference<"mutation", "internal", {
@@ -413,37 +923,109 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             quantity?: number;
             timezone: string;
             type: string;
-        }, any, Name>;
+        }, string, Name>;
         deleteResource: FunctionReference<"mutation", "internal", {
             id: string;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         getQuantityAvailability: FunctionReference<"query", "internal", {
             date: string;
             resourceId: string;
-        }, any, Name>;
+        }, {
+            bookedQuantities: any;
+            totalQuantity: number;
+        }, Name>;
         getResource: FunctionReference<"query", "internal", {
             id: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            description?: string;
+            id: string;
+            isActive: boolean;
+            isFungible?: boolean;
+            isStandalone?: boolean;
+            metadata?: Record<string, string>;
+            name: string;
+            organizationId: string;
+            quantity?: number;
+            timezone: string;
+            type: string;
+            updatedAt: number;
+        } | null, Name>;
         getResourceAvailability: FunctionReference<"query", "internal", {
             date: string;
             resourceId: string;
-        }, any, Name>;
+        }, Array<number>, Name>;
         getResourceById: FunctionReference<"query", "internal", {
             resourceId: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            description?: string;
+            id: string;
+            isActive: boolean;
+            isFungible?: boolean;
+            isStandalone?: boolean;
+            metadata?: Record<string, string>;
+            name: string;
+            organizationId: string;
+            quantity?: number;
+            timezone: string;
+            type: string;
+            updatedAt: number;
+        } | null, Name>;
         listResources: FunctionReference<"query", "internal", {
             activeOnly?: boolean;
             organizationId: string;
             type?: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            description?: string;
+            id: string;
+            isActive: boolean;
+            isFungible?: boolean;
+            isStandalone?: boolean;
+            metadata?: Record<string, string>;
+            name: string;
+            organizationId: string;
+            quantity?: number;
+            timezone: string;
+            type: string;
+            updatedAt: number;
+        }>, Name>;
         listResourcesByType: FunctionReference<"query", "internal", {
             organizationId: string;
             type: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            description?: string;
+            id: string;
+            isActive: boolean;
+            isFungible?: boolean;
+            isStandalone?: boolean;
+            metadata?: Record<string, string>;
+            name: string;
+            organizationId: string;
+            quantity?: number;
+            timezone: string;
+            type: string;
+            updatedAt: number;
+        }>, Name>;
         toggleResourceActive: FunctionReference<"mutation", "internal", {
             id: string;
             isActive: boolean;
-        }, any, Name>;
+        }, {
+            affectedUsers: number;
+            success: boolean;
+        }, Name>;
         updateResource: FunctionReference<"mutation", "internal", {
             description?: string;
             id: string;
@@ -455,7 +1037,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             quantity?: number;
             timezone?: string;
             type?: string;
-        }, any, Name>;
+        }, string, Name>;
     };
     schedules: {
         createDateOverride: FunctionReference<"mutation", "internal", {
@@ -466,7 +1048,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             date: string;
             scheduleId: string;
             type: string;
-        }, any, Name>;
+        }, string, Name>;
         createSchedule: FunctionReference<"mutation", "internal", {
             id: string;
             isDefault?: boolean;
@@ -478,38 +1060,124 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 endTime: string;
                 startTime: string;
             }>;
-        }, any, Name>;
+        }, string, Name>;
         deleteDateOverride: FunctionReference<"mutation", "internal", {
             overrideId: string;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         deleteSchedule: FunctionReference<"mutation", "internal", {
             id: string;
-        }, any, Name>;
+        }, {
+            success: boolean;
+        }, Name>;
         getDateOverride: FunctionReference<"query", "internal", {
             date: string;
             scheduleId: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            customHours?: Array<{
+                endTime: string;
+                startTime: string;
+            }>;
+            date: string;
+            scheduleId: string;
+            type: string;
+        } | null, Name>;
         getDefaultSchedule: FunctionReference<"query", "internal", {
             organizationId: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            id: string;
+            isDefault: boolean;
+            name: string;
+            organizationId: string;
+            timezone: string;
+            updatedAt: number;
+            weeklyHours: Array<{
+                dayOfWeek: number;
+                endTime: string;
+                startTime: string;
+            }>;
+        } | null, Name>;
         getEffectiveAvailability: FunctionReference<"query", "internal", {
             date: string;
             scheduleId: string;
-        }, any, Name>;
+        }, {
+            availableSlots: Array<number>;
+        }, Name>;
         getSchedule: FunctionReference<"query", "internal", {
             id: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            id: string;
+            isDefault: boolean;
+            name: string;
+            organizationId: string;
+            timezone: string;
+            updatedAt: number;
+            weeklyHours: Array<{
+                dayOfWeek: number;
+                endTime: string;
+                startTime: string;
+            }>;
+        } | null, Name>;
         getScheduleById: FunctionReference<"query", "internal", {
             scheduleId: string;
-        }, any, Name>;
+        }, {
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            id: string;
+            isDefault: boolean;
+            name: string;
+            organizationId: string;
+            timezone: string;
+            updatedAt: number;
+            weeklyHours: Array<{
+                dayOfWeek: number;
+                endTime: string;
+                startTime: string;
+            }>;
+        } | null, Name>;
         listDateOverrides: FunctionReference<"query", "internal", {
             dateFrom?: string;
             dateTo?: string;
             scheduleId: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            customHours?: Array<{
+                endTime: string;
+                startTime: string;
+            }>;
+            date: string;
+            scheduleId: string;
+            type: string;
+        }>, Name>;
         listSchedules: FunctionReference<"query", "internal", {
             organizationId: string;
-        }, any, Name>;
+        }, Array<{
+            _creationTime: number;
+            _id: string;
+            createdAt: number;
+            id: string;
+            isDefault: boolean;
+            name: string;
+            organizationId: string;
+            timezone: string;
+            updatedAt: number;
+            weeklyHours: Array<{
+                dayOfWeek: number;
+                endTime: string;
+                startTime: string;
+            }>;
+        }>, Name>;
         updateDateOverride: FunctionReference<"mutation", "internal", {
             customHours?: Array<{
                 endTime: string;
@@ -517,7 +1185,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             }>;
             overrideId: string;
             type?: string;
-        }, any, Name>;
+        }, string, Name>;
         updateSchedule: FunctionReference<"mutation", "internal", {
             id: string;
             isDefault?: boolean;
@@ -528,7 +1196,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 endTime: string;
                 startTime: string;
             }>;
-        }, any, Name>;
+        }, string, Name>;
     };
 };
 //# sourceMappingURL=component.d.ts.map

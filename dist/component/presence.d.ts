@@ -13,7 +13,7 @@ export declare const heartbeat: import("convex/server").RegisteredMutation<"publ
     resourceId: string;
     slots: string[];
     user: string;
-}, Promise<void>>;
+}, Promise<null>>;
 /**
  * Explicitly removes a user from one or more slots.
  * Called when a user navigates away or unmounts.
@@ -23,10 +23,12 @@ export declare const leave: import("convex/server").RegisteredMutation<"public",
     resourceId: string;
     slots: string[];
     user: string;
-}, Promise<void>>;
+}, Promise<null>>;
 /**
- * Returns a list of users currently present in a slot.
- * filters out stale entries just in case cleanup hasn't run yet.
+ * Returns the (up to 20) most recently active users present in a slot.
+ * Stale entries (older than TIMEOUT_MS) are excluded by the index range
+ * itself, so rows the cleanup job hasn't removed yet neither show up nor
+ * crowd live holds out of the 20.
  */
 export declare const list: import("convex/server").RegisteredQuery<"public", {
     resourceId: string;
@@ -81,5 +83,5 @@ export declare const cleanup: import("convex/server").RegisteredMutation<"intern
     resourceId: string;
     user: string;
     slot: string;
-}, Promise<void>>;
+}, Promise<null>>;
 //# sourceMappingURL=presence.d.ts.map

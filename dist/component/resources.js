@@ -1,10 +1,12 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { resourceDoc, successResult, successWithAffectedUsers, } from "./validators";
 // ============================================
 // RESOURCE QUERIES
 // ============================================
 export const getResource = query({
     args: { id: v.string() },
+    returns: v.union(resourceDoc, v.null()),
     handler: async (ctx, args) => {
         return await ctx.db
             .query("resources")
@@ -14,6 +16,7 @@ export const getResource = query({
 });
 export const getResourceById = query({
     args: { resourceId: v.id("resources") },
+    returns: v.union(resourceDoc, v.null()),
     handler: async (ctx, args) => {
         return await ctx.db.get(args.resourceId);
     },
@@ -24,15 +27,20 @@ export const listResources = query({
         type: v.optional(v.string()),
         activeOnly: v.optional(v.boolean()),
     },
+    returns: v.array(resourceDoc),
     handler: async (ctx, args) => {
-        const query = ctx.db
-            .query("resources")
-            .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId));
-        const resources = await query.collect();
-        // Filter by type if specified
-        let filtered = args.type
-            ? resources.filter((r) => r.type === args.type)
-            : resources;
+        // by_org_type when a type is given, else by_org (same creation order either way).
+        const type = args.type;
+        const resources = type
+            ? await ctx.db
+                .query("resources")
+                .withIndex("by_org_type", (q) => q.eq("organizationId", args.organizationId).eq("type", type))
+                .collect()
+            : await ctx.db
+                .query("resources")
+                .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+                .collect();
+        let filtered = resources;
         // Filter active only if specified
         if (args.activeOnly) {
             filtered = filtered.filter((r) => r.isActive);
@@ -45,6 +53,7 @@ export const listResourcesByType = query({
         organizationId: v.string(),
         type: v.string(),
     },
+    returns: v.array(resourceDoc),
     handler: async (ctx, args) => {
         return await ctx.db
             .query("resources")
@@ -70,6 +79,7 @@ export const createResource = mutation({
         // Free-form host-app metadata (see schema.ts)
         metadata: v.optional(v.record(v.string(), v.string())),
     },
+    returns: v.id("resources"),
     handler: async (ctx, args) => {
         // Check for existing ID
         const existing = await ctx.db
@@ -113,6 +123,7 @@ export const updateResource = mutation({
         // remove individual keys by passing the map without them.
         metadata: v.optional(v.record(v.string(), v.string())),
     },
+    returns: v.id("resources"),
     handler: async (ctx, args) => {
         const resource = await ctx.db
             .query("resources")
@@ -146,6 +157,7 @@ export const updateResource = mutation({
 });
 export const deleteResource = mutation({
     args: { id: v.string() },
+    returns: successResult,
     handler: async (ctx, args) => {
         const resource = await ctx.db
             .query("resources")
@@ -154,10 +166,10 @@ export const deleteResource = mutation({
         if (!resource) {
             throw new Error(`Resource "${args.id}" not found`);
         }
-        // Check for existing bookings
+        // Check for existing bookings (prefix query on the compound index)
         const bookings = await ctx.db
             .query("bookings")
-            .withIndex("by_resource", (q) => q.eq("resourceId", args.id))
+            .withIndex("by_resource_start", (q) => q.eq("resourceId", args.id))
             .first();
         if (bookings) {
             throw new Error("Cannot delete resource with existing bookings. Deactivate it instead.");
@@ -171,6 +183,7 @@ export const toggleResourceActive = mutation({
         id: v.string(),
         isActive: v.boolean(),
     },
+    returns: successWithAffectedUsers,
     handler: async (ctx, args) => {
         const resource = await ctx.db
             .query("resources")
@@ -179,7 +192,9 @@ export const toggleResourceActive = mutation({
         if (!resource) {
             throw new Error(`Resource "${args.id}" not found`);
         }
-        // Check for active presence (final safety guard)
+        // Check for active presence (final safety guard). Deliberately no
+        // [resourceId, updated] index — `updated` churns on every heartbeat and
+        // this is a rare admin write, so the JS staleness filter is the cheaper trade.
         const TIMEOUT_MS = 10_000;
         const now = Date.now();
         const presenceRecords = await ctx.db
@@ -209,6 +224,7 @@ export const getResourceAvailability = query({
         resourceId: v.string(),
         date: v.string(),
     },
+    returns: v.array(v.number()),
     handler: async (ctx, args) => {
         const availability = await ctx.db
             .query("daily_availability")
@@ -223,6 +239,8 @@ export const getQuantityAvailability = query({
         resourceId: v.string(),
         date: v.string(),
     },
+    // `slotQuantities` is `v.any()` in schema.ts; do not tighten it here.
+    returns: v.object({ totalQuantity: v.number(), bookedQuantities: v.any() }),
     handler: async (ctx, args) => {
         const resource = await ctx.db
             .query("resources")

@@ -4,7 +4,7 @@
  */
 export declare const getEventTypesForResource: import("convex/server").RegisteredQuery<"public", {
     resourceId: string;
-}, Promise<({
+}, Promise<{
     _id: import("convex/values").GenericId<"event_types">;
     _creationTime: number;
     organizationId?: string | undefined;
@@ -31,7 +31,7 @@ export declare const getEventTypesForResource: import("convex/server").Registere
     lockTimeZoneToggle: boolean;
     slug: string;
     title: string;
-} | null)[]>>;
+}[]>>;
 /**
  * Get all resources linked to an event type
  * Usage: Admin views event type → show linked resources

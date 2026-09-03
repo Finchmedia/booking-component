@@ -28,6 +28,7 @@ import type * as resources from "../resources.js";
 import type * as schedules from "../schedules.js";
 import type * as slot_helpers from "../slot_helpers.js";
 import type * as utils from "../utils.js";
+import type * as validators from "../validators.js";
 import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server";
 declare const fullApi: ApiFromModules<{
     availability: typeof availability;
@@ -52,6 +53,7 @@ declare const fullApi: ApiFromModules<{
     schedules: typeof schedules;
     slot_helpers: typeof slot_helpers;
     utils: typeof utils;
+    validators: typeof validators;
 }>;
 /**
  * A utility for referencing Convex functions in your app's public API.

@@ -5,6 +5,7 @@ import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, isCan
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
 import { releaseBookingSlots } from "./slot_helpers";
+import { bookingDoc, cancelResult, eventTypeDoc, successResult, successWithAffectedUsers, } from "./validators";
 // Generate a secure random token (64 hex chars = 256 bits)
 function generateSecureToken() {
     const segments = [];
@@ -91,6 +92,7 @@ export const getEventType = query({
     args: {
         eventTypeId: v.string(),
     },
+    returns: eventTypeDoc,
     handler: async (ctx, args) => {
         const eventType = await ctx.db
             .query("event_types")
@@ -108,6 +110,7 @@ export const getAvailability = query({
         start: v.number(),
         end: v.number(),
     },
+    returns: v.boolean(),
     handler: async (ctx, args) => {
         return await isAvailable(ctx, args.resourceId, args.start, args.end);
     },
@@ -132,6 +135,7 @@ export const getMonthAvailability = query({
         scheduleId: v.optional(v.string()), // Schedule ID for opening-hours-aware availability
         excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
     },
+    returns: v.record(v.string(), v.boolean()),
     handler: async (ctx, args) => {
         const { resourceId, dateFrom, dateTo, eventLength } = args;
         // Parse dates with explicit UTC context to avoid timezone bugs
@@ -218,6 +222,7 @@ export const getDaySlots = query({
         availableSlots: v.optional(v.array(v.number())), // Schedule-based available slot indices (in resource's local timezone)
         excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
     },
+    returns: v.array(v.object({ time: v.string() })),
     handler: async (ctx, args) => {
         const { resourceId, date, eventLength, slotInterval, resourceTimezone, availableSlots } = args;
         // Generate all possible slots for this day
@@ -264,6 +269,7 @@ export const createReservation = mutation({
             baseUrl: v.optional(v.string()),
         })),
     },
+    returns: v.id("bookings"),
     handler: async (ctx, args) => {
         const { resourceId, start, end, actorId } = args;
         // 0. Range guard — shared with every other write path.
@@ -365,6 +371,7 @@ export const createBooking = mutation({
             baseUrl: v.optional(v.string()),
         })),
     },
+    returns: bookingDoc,
     handler: async (ctx, args) => {
         // 0. Basic range validation (shared guard): NaN/Infinity and end <= start
         // would otherwise silently reserve zero slots.
@@ -503,8 +510,11 @@ export const createBooking = mutation({
             },
             resendOptions: args.resendOptions,
         });
-        // 12. Return full booking object
-        return await ctx.db.get(bookingId);
+        // 12. Return full booking object (just written — cannot be missing)
+        const doc = await ctx.db.get(bookingId);
+        if (!doc)
+            throw new Error("Booking not found after write");
+        return doc;
     },
 });
 export const createProvisionalBooking = mutation({
@@ -525,6 +535,7 @@ export const createProvisionalBooking = mutation({
             value: v.optional(v.string()),
         }),
     },
+    returns: bookingDoc,
     handler: async (ctx, args) => {
         // Basic range validation — parallel to createBooking.
         assertValidRange(args.start, args.end);
@@ -623,11 +634,15 @@ export const createProvisionalBooking = mutation({
                 });
             }
         }
-        return await ctx.db.get(bookingId);
+        const doc = await ctx.db.get(bookingId);
+        if (!doc)
+            throw new Error("Booking not found after write");
+        return doc;
     },
 });
 export const getBooking = query({
     args: { bookingId: v.id("bookings") },
+    returns: v.union(bookingDoc, v.null()),
     handler: async (ctx, args) => {
         return await ctx.db.get(args.bookingId);
     },
@@ -642,13 +657,16 @@ export const cancelReservation = mutation({
             baseUrl: v.optional(v.string()),
         })),
     },
+    returns: cancelResult,
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.reservationId);
         if (!booking) {
             throw new Error("Reservation not found");
         }
         if (booking.status === "cancelled") {
-            return; // Already cancelled
+            // Idempotent: the slots were released by the first cancel, and
+            // subtracting them again could free a later holder's slots.
+            return { success: true, alreadyCancelled: true };
         }
         // 1. Calculate slots to free up
         const slotsToFree = getRequiredSlots(booking.start, booking.end);
@@ -684,6 +702,7 @@ export const cancelReservation = mutation({
             },
             resendOptions: args.resendOptions,
         });
+        return { success: true, alreadyCancelled: false };
     },
 });
 export const expireProvisionalBooking = mutation({
@@ -691,6 +710,7 @@ export const expireProvisionalBooking = mutation({
         bookingId: v.id("bookings"),
         reason: v.optional(v.string()),
     },
+    returns: v.object({ success: v.boolean(), reason: v.optional(v.string()) }),
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.bookingId);
         if (!booking) {
@@ -747,6 +767,7 @@ export const createEventType = mutation({
         requiresConfirmation: v.optional(v.boolean()),
         isActive: v.optional(v.boolean()),
     },
+    returns: v.id("event_types"),
     handler: async (ctx, args) => {
         const existing = await ctx.db
             .query("event_types")
@@ -776,6 +797,7 @@ export const listEventTypes = query({
         organizationId: v.optional(v.string()),
         activeOnly: v.optional(v.boolean()),
     },
+    returns: v.array(eventTypeDoc),
     handler: async (ctx, args) => {
         let eventTypes;
         if (args.organizationId) {
@@ -798,6 +820,7 @@ export const getEventTypeBySlug = query({
         slug: v.string(),
         organizationId: v.optional(v.string()),
     },
+    returns: v.union(eventTypeDoc, v.null()),
     handler: async (ctx, args) => {
         const eventTypes = await ctx.db
             .query("event_types")
@@ -833,6 +856,7 @@ export const updateEventType = mutation({
         requiresConfirmation: v.optional(v.boolean()),
         isActive: v.optional(v.boolean()),
     },
+    returns: v.id("event_types"),
     handler: async (ctx, args) => {
         const eventType = await ctx.db
             .query("event_types")
@@ -854,6 +878,7 @@ export const updateEventType = mutation({
 });
 export const deleteEventType = mutation({
     args: { id: v.string() },
+    returns: successResult,
     handler: async (ctx, args) => {
         const eventType = await ctx.db
             .query("event_types")
@@ -879,6 +904,7 @@ export const toggleEventTypeActive = mutation({
         id: v.string(),
         isActive: v.boolean(),
     },
+    returns: successWithAffectedUsers,
     handler: async (ctx, args) => {
         const eventType = await ctx.db
             .query("event_types")
@@ -914,6 +940,7 @@ export const toggleEventTypeActive = mutation({
 // ============================================
 export const getBookingByUid = query({
     args: { uid: v.string() },
+    returns: v.union(bookingDoc, v.null()),
     handler: async (ctx, args) => {
         return await ctx.db
             .query("bookings")
@@ -921,6 +948,20 @@ export const getBookingByUid = query({
             .unique();
     },
 });
+/**
+ * Lists bookings, newest `start` first, hiding provisional reservations
+ * unless `status` asks for them.
+ *
+ * Pass `organizationId` or `resourceId`: those branches read the
+ * `by_org_start` / `by_resource_start` indexes, so `dateFrom` / `dateTo`
+ * narrow the index range itself and the scan is proportional to the window.
+ * The `eventTypeId` branch uses `by_event_type` and range-filters in JS.
+ *
+ * With no selector at all the scan is bounded: only the 1000 most recently
+ * *created* bookings are considered (then filtered, sorted and limited). That
+ * branch is meant for small deployments, admin tooling and tests; a large
+ * host should always pass a selector.
+ */
 export const listBookings = query({
     args: {
         organizationId: v.optional(v.string()),
@@ -931,19 +972,33 @@ export const listBookings = query({
         dateTo: v.optional(v.number()),
         limit: v.optional(v.number()),
     },
+    returns: v.array(bookingDoc),
     handler: async (ctx, args) => {
         let bookings;
+        const { dateFrom, dateTo } = args;
         // Use the most specific index available
         if (args.organizationId) {
+            const organizationId = args.organizationId;
             bookings = await ctx.db
                 .query("bookings")
-                .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+                .withIndex("by_org_start", (q) => {
+                const byOrg = q.eq("organizationId", organizationId);
+                const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
+                return dateTo !== undefined ? from.lte("start", dateTo) : from;
+            })
+                .order("desc")
                 .collect();
         }
         else if (args.resourceId) {
+            const resourceId = args.resourceId;
             bookings = await ctx.db
                 .query("bookings")
-                .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+                .withIndex("by_resource_start", (q) => {
+                const byResource = q.eq("resourceId", resourceId);
+                const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
+                return dateTo !== undefined ? from.lte("start", dateTo) : from;
+            })
+                .order("desc")
                 .collect();
         }
         else if (args.eventTypeId) {
@@ -953,7 +1008,8 @@ export const listBookings = query({
                 .collect();
         }
         else {
-            bookings = await ctx.db.query("bookings").collect();
+            // No selector: bounded scan of the most recently created bookings (see docstring).
+            bookings = await ctx.db.query("bookings").order("desc").take(1000);
         }
         // The ids that did not pick the index still narrow the result — a caller
         // asking for one resource's bookings of one event type must not get that
@@ -974,13 +1030,16 @@ export const listBookings = query({
         if (args.status) {
             bookings = bookings.filter((b) => b.status === args.status);
         }
-        if (args.dateFrom) {
-            bookings = bookings.filter((b) => b.start >= args.dateFrom);
+        // Redundant for the org/resource branches (already an index range), still
+        // needed for the event-type and no-selector branches.
+        if (dateFrom !== undefined) {
+            bookings = bookings.filter((b) => b.start >= dateFrom);
         }
-        if (args.dateTo) {
-            bookings = bookings.filter((b) => b.start <= args.dateTo);
+        if (dateTo !== undefined) {
+            bookings = bookings.filter((b) => b.start <= dateTo);
         }
-        // Sort by start time descending (newest first)
+        // Sort by start time descending (newest first). A no-op for the org/resource
+        // branches (index order, stable sort keeps it); orders the other two.
         bookings.sort((a, b) => b.start - a.start);
         // Apply limit
         if (args.limit) {
@@ -994,6 +1053,7 @@ export const listBookings = query({
 // ============================================
 export const getBookingByToken = query({
     args: { uid: v.string(), token: v.string() },
+    returns: bookingDoc,
     handler: async (ctx, args) => {
         const booking = await ctx.db
             .query("bookings")
@@ -1019,6 +1079,7 @@ export const cancelBookingByToken = mutation({
             baseUrl: v.optional(v.string()),
         })),
     },
+    returns: successResult,
     handler: async (ctx, args) => {
         // 1. Find and verify booking
         const booking = await ctx.db
@@ -1097,6 +1158,7 @@ export const rescheduleBooking = mutation({
             baseUrl: v.optional(v.string()),
         })),
     },
+    returns: bookingDoc,
     handler: async (ctx, args) => {
         // 0. Range guard. Without it an inverted/NaN range maps to zero slots:
         // the old slots would be released and none reserved, leaving a live
@@ -1212,8 +1274,10 @@ export const rescheduleBooking = mutation({
             },
             resendOptions: args.resendOptions,
         });
-        // 10. Get and return the new booking
+        // 10. Get and return the new booking (just written — cannot be missing)
         const newBooking = await ctx.db.get(newBookingId);
+        if (!newBooking)
+            throw new Error("Booking not found after write");
         return newBooking;
     },
 });
@@ -1229,6 +1293,7 @@ export const rescheduleBookingByToken = mutation({
             baseUrl: v.optional(v.string()),
         })),
     },
+    returns: bookingDoc,
     handler: async (ctx, args) => {
         // 0. Range guard — see rescheduleBooking.
         assertValidRange(args.newStart, args.newEnd);
@@ -1357,7 +1422,10 @@ export const rescheduleBookingByToken = mutation({
             },
             resendOptions: args.resendOptions,
         });
+        // The new booking was just written — cannot be missing.
         const newBooking = await ctx.db.get(newBookingId);
+        if (!newBooking)
+            throw new Error("Booking not found after write");
         return newBooking;
     }
 });

@@ -247,11 +247,9 @@ declare const _default: import("convex/server").SchemaDefinition<{
         rescheduleUid: import("convex/values").VString<string | undefined, "optional">;
         cancellationReason: import("convex/values").VString<string | undefined, "optional">;
     }, "required", "organizationId" | "resourceId" | "end" | "start" | "eventTypeId" | "location" | "timezone" | "uid" | "actorId" | "status" | "createdAt" | "updatedAt" | "managementToken" | "bookerName" | "bookerEmail" | "bookerPhone" | "bookerNotes" | "eventTitle" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "location.type" | "location.value">, {
-        by_resource: ["resourceId", "_creationTime"];
+        by_org_start: ["organizationId", "start", "_creationTime"];
+        by_resource_start: ["resourceId", "start", "_creationTime"];
         by_uid: ["uid", "_creationTime"];
-        by_email: ["bookerEmail", "_creationTime"];
-        by_org: ["organizationId", "_creationTime"];
-        by_org_status: ["organizationId", "status", "_creationTime"];
         by_event_type: ["eventTypeId", "_creationTime"];
     }, {}, {}>;
     booking_items: import("convex/server").TableDefinition<import("convex/values").VObject<{
