@@ -3,6 +3,11 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { FunctionHandle } from "convex/server";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
+import {
+  bookingHistoryDoc,
+  hookDoc,
+  successResult,
+} from "./validators";
 
 // ============================================
 // HOOK EVENT TYPES
@@ -30,6 +35,7 @@ export const listHooks = query({
     organizationId: v.optional(v.string()),
     eventType: v.optional(v.string()),
   },
+  returns: v.array(hookDoc),
   handler: async (ctx, args) => {
     let hooks = await ctx.db.query("hooks").collect();
 
@@ -49,6 +55,7 @@ export const listHooks = query({
 
 export const getHook = query({
   args: { hookId: v.id("hooks") },
+  returns: v.union(hookDoc, v.null()),
   handler: async (ctx, args) => {
     return await ctx.db.get(args.hookId);
   },
@@ -64,6 +71,7 @@ export const registerHook = mutation({
     functionHandle: v.string(),
     organizationId: v.optional(v.string()),
   },
+  returns: v.id("hooks"),
   handler: async (ctx, args) => {
     // Validate event type
     if (!HOOK_EVENTS.includes(args.eventType as HookEventType)) {
@@ -88,6 +96,7 @@ export const updateHook = mutation({
     enabled: v.optional(v.boolean()),
     functionHandle: v.optional(v.string()),
   },
+  returns: v.id("hooks"),
   handler: async (ctx, args) => {
     const hook = await ctx.db.get(args.hookId);
     if (!hook) {
@@ -106,6 +115,7 @@ export const updateHook = mutation({
 
 export const unregisterHook = mutation({
   args: { hookId: v.id("hooks") },
+  returns: successResult,
   handler: async (ctx, args) => {
     const hook = await ctx.db.get(args.hookId);
     if (!hook) {
@@ -133,6 +143,7 @@ export const triggerHooks = internalMutation({
       baseUrl: v.optional(v.string()),
     })),
   },
+  returns: v.object({ triggeredCount: v.number(), emailsSent: v.boolean() }),
   handler: async (ctx, args) => {
     const payload = args.payload as Record<string, unknown>;
 
@@ -326,6 +337,7 @@ export const transitionBookingState = mutation({
       baseUrl: v.optional(v.string()),
     })),
   },
+  returns: successResult,
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) {
@@ -415,6 +427,7 @@ export const transitionBookingState = mutation({
 
 export const getBookingHistory = query({
   args: { bookingId: v.id("bookings") },
+  returns: v.array(bookingHistoryDoc),
   handler: async (ctx, args) => {
     return await ctx.db
       .query("booking_history")

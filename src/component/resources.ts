@@ -1,5 +1,10 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import {
+  resourceDoc,
+  successResult,
+  successWithAffectedUsers,
+} from "./validators";
 
 // ============================================
 // RESOURCE QUERIES
@@ -7,6 +12,7 @@ import { v } from "convex/values";
 
 export const getResource = query({
   args: { id: v.string() },
+  returns: v.union(resourceDoc, v.null()),
   handler: async (ctx, args) => {
     return await ctx.db
       .query("resources")
@@ -17,6 +23,7 @@ export const getResource = query({
 
 export const getResourceById = query({
   args: { resourceId: v.id("resources") },
+  returns: v.union(resourceDoc, v.null()),
   handler: async (ctx, args) => {
     return await ctx.db.get(args.resourceId);
   },
@@ -28,6 +35,7 @@ export const listResources = query({
     type: v.optional(v.string()),
     activeOnly: v.optional(v.boolean()),
   },
+  returns: v.array(resourceDoc),
   handler: async (ctx, args) => {
     const query = ctx.db
       .query("resources")
@@ -54,6 +62,7 @@ export const listResourcesByType = query({
     organizationId: v.string(),
     type: v.string(),
   },
+  returns: v.array(resourceDoc),
   handler: async (ctx, args) => {
     return await ctx.db
       .query("resources")
@@ -83,6 +92,7 @@ export const createResource = mutation({
     // Free-form host-app metadata (see schema.ts)
     metadata: v.optional(v.record(v.string(), v.string())),
   },
+  returns: v.id("resources"),
   handler: async (ctx, args) => {
     // Check for existing ID
     const existing = await ctx.db
@@ -129,6 +139,7 @@ export const updateResource = mutation({
     // remove individual keys by passing the map without them.
     metadata: v.optional(v.record(v.string(), v.string())),
   },
+  returns: v.id("resources"),
   handler: async (ctx, args) => {
     const resource = await ctx.db
       .query("resources")
@@ -158,6 +169,7 @@ export const updateResource = mutation({
 
 export const deleteResource = mutation({
   args: { id: v.string() },
+  returns: successResult,
   handler: async (ctx, args) => {
     const resource = await ctx.db
       .query("resources")
@@ -190,6 +202,7 @@ export const toggleResourceActive = mutation({
     id: v.string(),
     isActive: v.boolean(),
   },
+  returns: successWithAffectedUsers,
   handler: async (ctx, args) => {
     const resource = await ctx.db
       .query("resources")
@@ -244,6 +257,7 @@ export const getResourceAvailability = query({
     resourceId: v.string(),
     date: v.string(),
   },
+  returns: v.array(v.number()),
   handler: async (ctx, args) => {
     const availability = await ctx.db
       .query("daily_availability")
@@ -262,6 +276,8 @@ export const getQuantityAvailability = query({
     resourceId: v.string(),
     date: v.string(),
   },
+  // `slotQuantities` is `v.any()` in schema.ts; do not tighten it here.
+  returns: v.object({ totalQuantity: v.number(), bookedQuantities: v.any() }),
   handler: async (ctx, args) => {
     const resource = await ctx.db
       .query("resources")

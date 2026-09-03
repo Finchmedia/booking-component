@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, assertValidRange } from "./utils";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
+import { bookingDoc, bookingWithItemsDoc, successResult } from "./validators";
 
 // Generate a secure random token (64 hex chars = 256 bits)
 function generateSecureToken(): string {
@@ -28,6 +29,18 @@ export const checkMultiResourceAvailability = query({
     start: v.number(),
     end: v.number(),
   },
+  returns: v.object({
+    available: v.boolean(),
+    resources: v.array(
+      v.object({
+        resourceId: v.string(),
+        available: v.boolean(),
+        requestedQuantity: v.number(),
+        availableQuantity: v.number(),
+        conflicts: v.array(v.number()),
+      })
+    ),
+  }),
   handler: async (ctx, args) => {
     const results: Array<{
       resourceId: string;
@@ -156,6 +169,7 @@ export const createMultiResourceBooking = mutation({
       baseUrl: v.optional(v.string()),
     })),
   },
+  returns: bookingDoc,
   handler: async (ctx, args) => {
     // 0. Range guard — shared with every other write path (an inverted or
     // NaN range maps to zero slots and would create a booking that holds
@@ -388,6 +402,7 @@ export const createMultiResourceBooking = mutation({
 
     // 8. Return the booking
     const booking = await ctx.db.get(bookingId);
+    if (!booking) throw new Error("Booking not found after write");
     return booking;
   },
 });
@@ -398,6 +413,7 @@ export const createMultiResourceBooking = mutation({
 
 export const getBookingWithItems = query({
   args: { bookingId: v.id("bookings") },
+  returns: v.union(bookingWithItemsDoc, v.null()),
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) return null;
@@ -444,6 +460,7 @@ export const cancelMultiResourceBooking = mutation({
       baseUrl: v.optional(v.string()),
     })),
   },
+  returns: successResult,
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) {

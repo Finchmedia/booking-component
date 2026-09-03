@@ -152,8 +152,11 @@ describe("cancelReservation", () => {
     const seed = await seedResource(t);
     const reservationId = await reserve(AT("09:00"), AT("10:00"));
 
-    // The mutation returns nothing; Convex serialises that as null.
-    expect(await t.mutation(api.public.cancelReservation, { reservationId })).toBeNull();
+    // First cancel: slots released, reported as a fresh cancellation.
+    expect(await t.mutation(api.public.cancelReservation, { reservationId })).toEqual({
+      success: true,
+      alreadyCancelled: false,
+    });
     const cancelled = await t.query(api.public.getBooking, { bookingId: reservationId });
     expect(cancelled!.status).toBe("cancelled");
     // The legacy path only patches `status` — no cancelledAt / reason / history.
@@ -170,7 +173,10 @@ describe("cancelReservation", () => {
 
     // … and cancelling the old reservation a second time returns early instead
     // of subtracting the successor's slots.
-    expect(await t.mutation(api.public.cancelReservation, { reservationId })).toBeNull();
+    expect(await t.mutation(api.public.cancelReservation, { reservationId })).toEqual({
+      success: true,
+      alreadyCancelled: true,
+    });
     expect(await busy()).toEqual(range(36, 40));
     expect((await t.query(api.public.getBooking, { bookingId: successor!._id }))?.status).toBe(
       "confirmed"

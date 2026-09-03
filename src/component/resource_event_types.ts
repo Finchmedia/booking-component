@@ -1,5 +1,11 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import {
+  deletedCount,
+  eventTypeDoc,
+  resourceDoc,
+  successResult,
+} from "./validators";
 
 // ============================================
 // RESOURCE ↔ EVENT TYPE MAPPING
@@ -16,6 +22,7 @@ import { v } from "convex/values";
  */
 export const getEventTypesForResource = query({
   args: { resourceId: v.string() },
+  returns: v.array(eventTypeDoc),
   handler: async (ctx, args) => {
     // Get all mappings for this resource
     const mappings = await ctx.db
@@ -33,8 +40,11 @@ export const getEventTypesForResource = query({
       })
     );
 
-    // Filter out nulls (deleted event types) and inactive event types
-    return eventTypes.filter((et) => et !== null && et.isActive !== false);
+    // Filter out nulls (deleted event types) and inactive event types.
+    // Two steps: a compound predicate would not narrow `(Doc | null)[]`.
+    return eventTypes
+      .filter((et) => et !== null)
+      .filter((et) => et.isActive !== false);
   },
 });
 
@@ -44,6 +54,7 @@ export const getEventTypesForResource = query({
  */
 export const getResourcesForEventType = query({
   args: { eventTypeId: v.string() },
+  returns: v.array(resourceDoc),
   handler: async (ctx, args) => {
     // Get all mappings for this event type
     const mappings = await ctx.db
@@ -74,6 +85,7 @@ export const hasResourceEventTypeLink = query({
     resourceId: v.string(),
     eventTypeId: v.string(),
   },
+  returns: v.boolean(),
   handler: async (ctx, args) => {
     const mapping = await ctx.db
       .query("resource_event_types")
@@ -92,6 +104,7 @@ export const hasResourceEventTypeLink = query({
  */
 export const getResourceIdsForEventType = query({
   args: { eventTypeId: v.string() },
+  returns: v.array(v.string()),
   handler: async (ctx, args) => {
     const mappings = await ctx.db
       .query("resource_event_types")
@@ -107,6 +120,7 @@ export const getResourceIdsForEventType = query({
  */
 export const getEventTypeIdsForResource = query({
   args: { resourceId: v.string() },
+  returns: v.array(v.string()),
   handler: async (ctx, args) => {
     const mappings = await ctx.db
       .query("resource_event_types")
@@ -129,6 +143,7 @@ export const linkResourceToEventType = mutation({
     resourceId: v.string(),
     eventTypeId: v.string(),
   },
+  returns: v.id("resource_event_types"),
   handler: async (ctx, args) => {
     // Check if resource exists
     const resource = await ctx.db
@@ -179,6 +194,7 @@ export const unlinkResourceFromEventType = mutation({
     resourceId: v.string(),
     eventTypeId: v.string(),
   },
+  returns: v.object({ success: v.boolean(), existed: v.boolean() }),
   handler: async (ctx, args) => {
     const mapping = await ctx.db
       .query("resource_event_types")
@@ -206,6 +222,7 @@ export const setResourcesForEventType = mutation({
     eventTypeId: v.string(),
     resourceIds: v.array(v.string()),
   },
+  returns: successResult,
   handler: async (ctx, args) => {
     // Check if event type exists
     const eventType = await ctx.db
@@ -264,6 +281,7 @@ export const setEventTypesForResource = mutation({
     resourceId: v.string(),
     eventTypeIds: v.array(v.string()),
   },
+  returns: successResult,
   handler: async (ctx, args) => {
     // Check if resource exists
     const resource = await ctx.db
@@ -318,6 +336,7 @@ export const setEventTypesForResource = mutation({
  */
 export const deleteAllLinksForResource = mutation({
   args: { resourceId: v.string() },
+  returns: deletedCount,
   handler: async (ctx, args) => {
     const mappings = await ctx.db
       .query("resource_event_types")
@@ -337,6 +356,7 @@ export const deleteAllLinksForResource = mutation({
  */
 export const deleteAllLinksForEventType = mutation({
   args: { eventTypeId: v.string() },
+  returns: deletedCount,
   handler: async (ctx, args) => {
     const mappings = await ctx.db
       .query("resource_event_types")

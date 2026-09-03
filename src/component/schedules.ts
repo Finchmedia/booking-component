@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { getDayOfWeekInTimezone } from "./utils";
+import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 
 // ============================================
 // TIME WINDOW VALIDATION
@@ -100,6 +101,7 @@ function assertValidCustomHours(
 
 export const getSchedule = query({
   args: { id: v.string() },
+  returns: v.union(scheduleDoc, v.null()),
   handler: async (ctx, args) => {
     return await ctx.db
       .query("schedules")
@@ -110,6 +112,7 @@ export const getSchedule = query({
 
 export const getScheduleById = query({
   args: { scheduleId: v.id("schedules") },
+  returns: v.union(scheduleDoc, v.null()),
   handler: async (ctx, args) => {
     return await ctx.db.get(args.scheduleId);
   },
@@ -117,6 +120,7 @@ export const getScheduleById = query({
 
 export const listSchedules = query({
   args: { organizationId: v.string() },
+  returns: v.array(scheduleDoc),
   handler: async (ctx, args) => {
     return await ctx.db
       .query("schedules")
@@ -127,6 +131,7 @@ export const listSchedules = query({
 
 export const getDefaultSchedule = query({
   args: { organizationId: v.string() },
+  returns: v.union(scheduleDoc, v.null()),
   handler: async (ctx, args) => {
     const schedules = await ctx.db
       .query("schedules")
@@ -156,6 +161,7 @@ export const createSchedule = mutation({
       })
     ),
   },
+  returns: v.id("schedules"),
   handler: async (ctx, args) => {
     assertValidWeeklyHours(args.weeklyHours);
 
@@ -213,6 +219,7 @@ export const updateSchedule = mutation({
       )
     ),
   },
+  returns: v.id("schedules"),
   handler: async (ctx, args) => {
     if (args.weeklyHours !== undefined) {
       assertValidWeeklyHours(args.weeklyHours);
@@ -257,6 +264,7 @@ export const updateSchedule = mutation({
 
 export const deleteSchedule = mutation({
   args: { id: v.string() },
+  returns: successResult,
   handler: async (ctx, args) => {
     const schedule = await ctx.db
       .query("schedules")
@@ -292,6 +300,7 @@ export const listDateOverrides = query({
     dateFrom: v.optional(v.string()),
     dateTo: v.optional(v.string()),
   },
+  returns: v.array(dateOverrideDoc),
   handler: async (ctx, args) => {
     const overrides = await ctx.db
       .query("date_overrides")
@@ -316,6 +325,7 @@ export const getDateOverride = query({
     scheduleId: v.id("schedules"),
     date: v.string(),
   },
+  returns: v.union(dateOverrideDoc, v.null()),
   handler: async (ctx, args) => {
     const overrides = await ctx.db
       .query("date_overrides")
@@ -344,6 +354,7 @@ export const createDateOverride = mutation({
       )
     ),
   },
+  returns: v.id("date_overrides"),
   handler: async (ctx, args) => {
     if (args.customHours !== undefined) {
       assertValidCustomHours(args.customHours);
@@ -387,6 +398,7 @@ export const updateDateOverride = mutation({
       )
     ),
   },
+  returns: v.id("date_overrides"),
   handler: async (ctx, args) => {
     if (args.customHours !== undefined) {
       assertValidCustomHours(args.customHours);
@@ -408,6 +420,7 @@ export const updateDateOverride = mutation({
 
 export const deleteDateOverride = mutation({
   args: { overrideId: v.id("date_overrides") },
+  returns: successResult,
   handler: async (ctx, args) => {
     const override = await ctx.db.get(args.overrideId);
     if (!override) {
@@ -512,6 +525,7 @@ export const getEffectiveAvailability = query({
     scheduleId: v.string(),
     date: v.string(),
   },
+  returns: v.object({ availableSlots: v.array(v.number()) }),
   handler: async (ctx, args) =>
     computeAvailabilityForDate(ctx, args.scheduleId, args.date),
 });

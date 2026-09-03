@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { presenceDoc } from "./validators";
 
 const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
 
@@ -21,6 +22,7 @@ export const heartbeat = mutation({
     eventTypeId: v.optional(v.string()),
     data: v.optional(v.any()),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const now = Date.now();
 
@@ -79,6 +81,8 @@ export const heartbeat = mutation({
         });
       }
     }
+
+    return null;
   },
 });
 
@@ -93,6 +97,7 @@ export const leave = mutation({
     slots: v.array(v.string()),
     user: v.string(),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     // Process each slot in the batch
     for (const slot of args.slots) {
@@ -121,6 +126,8 @@ export const leave = mutation({
         await ctx.db.delete(heartbeatDoc._id);
       }
     }
+
+    return null;
   },
 });
 
@@ -133,6 +140,7 @@ export const list = query({
     resourceId: v.string(),
     slot: v.string(),
   },
+  returns: v.array(presenceDoc),
   handler: async (ctx, args) => {
     const presence = await ctx.db
       .query("presence")
@@ -162,6 +170,13 @@ export const getDatePresence = query({
     resourceId: v.string(),
     date: v.string(),
   },
+  returns: v.array(
+    v.object({
+      slot: v.string(),
+      user: v.string(),
+      updated: v.number(),
+    })
+  ),
   handler: async (ctx, args) => {
     const now = Date.now();
 
@@ -205,6 +220,10 @@ export const getActivePresenceCount = query({
     resourceId: v.optional(v.string()),
     eventTypeId: v.optional(v.string()),
   },
+  returns: v.object({
+    count: v.number(),
+    users: v.array(v.string()),
+  }),
   handler: async (ctx, args) => {
     const now = Date.now();
     let presenceRecords;
@@ -255,6 +274,7 @@ export const cleanup = internalMutation({
     slot: v.string(),
     user: v.string(),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const presence = await ctx.db
       .query("presence")
@@ -274,7 +294,7 @@ export const cleanup = internalMutation({
       // Data missing, clean up whatever remains
       if (presence) await ctx.db.delete(presence._id);
       if (heartbeatDoc) await ctx.db.delete(heartbeatDoc._id);
-      return;
+      return null;
     }
 
     const now = Date.now();
@@ -292,5 +312,7 @@ export const cleanup = internalMutation({
       );
       await ctx.db.patch(heartbeatDoc._id, { markAsGone: scheduledId });
     }
+
+    return null;
   },
 });
