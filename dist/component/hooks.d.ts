@@ -6,16 +6,16 @@ export type HookEventType = (typeof HOOK_EVENTS)[number];
  * always in creation order, whichever branch produced it.
  */
 export declare const listHooks: import("convex/server").RegisteredQuery<"public", {
-    organizationId?: string | undefined;
     eventType?: string | undefined;
+    organizationId?: string | undefined;
 }, Promise<{
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
-    createdAt: number;
     eventType: string;
     functionHandle: string;
     enabled: boolean;
+    createdAt: number;
 }[]>>;
 export declare const getHook: import("convex/server").RegisteredQuery<"public", {
     hookId: import("convex/values").GenericId<"hooks">;
@@ -23,10 +23,10 @@ export declare const getHook: import("convex/server").RegisteredQuery<"public", 
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
-    createdAt: number;
     eventType: string;
     functionHandle: string;
     enabled: boolean;
+    createdAt: number;
 } | null>>;
 export declare const registerHook: import("convex/server").RegisteredMutation<"public", {
     organizationId?: string | undefined;
@@ -77,8 +77,8 @@ export declare const getBookingHistory: import("convex/server").RegisteredQuery<
     changedBy?: string | undefined;
     reason?: string | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
-    fromStatus: string;
     toStatus: string;
+    fromStatus: string;
     timestamp: number;
 }[]>>;
 //# sourceMappingURL=hooks.d.ts.map

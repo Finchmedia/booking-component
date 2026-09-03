@@ -42,6 +42,10 @@ before bumping.
 
 ### Added
 
+- **Return validators on all 75 public component functions** (37 queries, 38
+  mutations — plus the 2 internal maintenance mutations, so 77 of 77 declare
+  `returns:`). Host code sees concrete `ComponentApi` return types instead of
+  `any`.
 - `src/component/validators.ts`: schema-derived document validators
   (`bookingDoc`, `eventTypeDoc`, `resourceDoc`, `hookDoc`, …) and shared result
   validators (`successResult`, `cancelResult`, `successWithAffectedUsers`,
@@ -54,14 +58,18 @@ before bumping.
   returning the booking document (never `null`); the re-read after the write
   throws `Booking not found after write` in the impossible case instead of
   returning `null`.
-- Package export map: `@mrfinch/booking/_generated/component` (extensionless)
-  resolves alongside `…/_generated/component.js`, and both carry a `default`
-  entry, so `import type { ComponentApi } from
-  "@mrfinch/booking/_generated/component"` works under
-  `moduleResolution: "Bundler"` (was `TS2307`).
-
 ### Changed
 
+- `cancelReservation` returns `{ success: boolean, alreadyCancelled: boolean }`
+  instead of `null`, matching `cancelBooking` and `cancelMultiResourceBooking`
+  (see _Upgrading_).
+- `createBooking`, `createProvisionalBooking`, `rescheduleBooking`,
+  `rescheduleBookingByToken` and `createMultiResourceBooking` return the booking
+  document, never `null`.
+- Bookings indexes: `by_org_start` `[organizationId, start]` and
+  `by_resource_start` `[resourceId, start]` replace `by_org` / `by_resource`;
+  the unused `by_email` and `by_org_status` are removed (6 → 4). No host code
+  changes — your next `convex deploy` backfills the new indexes.
 - Read paths use compound indexes instead of scan-and-filter. Result sets and
   shapes are unchanged:
   - `listBookings({ organizationId | resourceId, dateFrom?, dateTo? })` pushes
@@ -82,6 +90,20 @@ before bumping.
     uses `by_event`. `listHooks` returns hooks in creation order from both
     branches.
 - `src/client/index.ts`: the dead `as any` casts on id arguments are gone.
+
+### Fixed
+
+- **Package exports for `_generated/component` resolve at runtime.** Both
+  `@mrfinch/booking/_generated/component` (extensionless, new) and
+  `…/_generated/component.js` are exported, and each now carries a `default`
+  condition next to `types`. Previously the subpath had only a `types` entry,
+  so `import type { ComponentApi } from "@mrfinch/booking/_generated/component"`
+  failed to resolve (`TS2307`) under `moduleResolution: "Bundler"` and the
+  specifier had no runtime resolution at all.
+- **`convex` peer dependency is now `^1.29.0` (was `^1.17.0`).** This is a
+  requirement change, not a preference: `src/component/validators.ts` calls
+  `VObject.extend()`, which convex added in 1.29, at module load inside your
+  deployment. Hosts on 1.17–1.28 must upgrade `convex` before installing 0.3.1.
 
 ### Tests
 
