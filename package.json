@@ -84,6 +84,9 @@
     "@hookform/resolvers": {
       "optional": true
     },
+    "convex-helpers": {
+      "optional": true
+    },
     "lucide-react": {
       "optional": true
     },

@@ -34,7 +34,10 @@ before bumping.
   Component indexes are not addressable from the host, so no host code changes;
   your next `convex deploy` backfills the two new indexes.
 - The React-only peers (`react`, `react-hook-form`, `@hookform/resolvers`,
-  `zod`, `lucide-react`) are marked optional in `peerDependenciesMeta`. Nothing
+  `zod`, `lucide-react`, `convex-helpers`) are marked optional in
+  `peerDependenciesMeta`. `convex-helpers` is only imported by `./react`; recent
+  `convex-helpers` releases require `convex >= 1.43`, so hosts on 1.29–1.42
+  that use `./react` should pin `convex-helpers@0.1.106`. Nothing
   behind the package root imports them, so backend-only installs no longer pull
   the React stack (or hit `ERESOLVE` against a React 17 / zod 4 host) for the
   `./react` subpath they never use. Install them yourself when you use

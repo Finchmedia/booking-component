@@ -23,7 +23,7 @@ npm install @mrfinch/booking
 
 Requires `convex >= 1.29.0` in your app. Every component function declares a
 return validator, so the generated component API gives you concrete result
-types instead of `any`.
+types instead of `any`. The `./react` entry also needs `convex-helpers`; its recent releases require `convex >= 1.43`, so on convex 1.29–1.42 pin `convex-helpers@0.1.106`.
 
 Create a `convex.config.ts` file in your app's `convex/` folder and install the
 component by calling `use`:
