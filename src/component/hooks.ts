@@ -37,16 +37,20 @@ export const listHooks = query({
   },
   returns: v.array(hookDoc),
   handler: async (ctx, args) => {
-    let hooks = await ctx.db.query("hooks").collect();
+    const eventType = args.eventType;
+    let hooks = eventType
+      ? await ctx.db
+          .query("hooks")
+          .withIndex("by_event", (q) => q.eq("eventType", eventType))
+          .collect()
+      : await ctx.db.query("hooks").collect();
 
+    // "This org's or global (no organizationId)" is an OR, not an index range,
+    // so it stays a JS filter.
     if (args.organizationId) {
       hooks = hooks.filter(
         (h) => h.organizationId === args.organizationId || !h.organizationId
       );
-    }
-
-    if (args.eventType) {
-      hooks = hooks.filter((h) => h.eventType === args.eventType);
     }
 
     return hooks;

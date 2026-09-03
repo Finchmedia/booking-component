@@ -192,11 +192,12 @@ export default defineSchema({
     rescheduleUid: v.optional(v.string()),
     cancellationReason: v.optional(v.string()),
   })
-    .index("by_resource", ["resourceId"])
+    // listBookings ranges on `start` (dateFrom/dateTo) and reads newest-first
+    // straight out of these two compound indexes; by_resource_start also
+    // serves the deleteResource existence probe as a prefix query.
+    .index("by_org_start", ["organizationId", "start"])
+    .index("by_resource_start", ["resourceId", "start"])
     .index("by_uid", ["uid"])
-    .index("by_email", ["bookerEmail"])
-    .index("by_org", ["organizationId"])
-    .index("by_org_status", ["organizationId", "status"])
     .index("by_event_type", ["eventTypeId"]),
 
   // Booking items (for multi-resource bookings)

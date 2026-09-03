@@ -1170,6 +1170,20 @@ export const getBookingByUid = query({
   },
 });
 
+/**
+ * Lists bookings, newest `start` first, hiding provisional reservations
+ * unless `status` asks for them.
+ *
+ * Pass `organizationId` or `resourceId`: those branches read the
+ * `by_org_start` / `by_resource_start` indexes, so `dateFrom` / `dateTo`
+ * narrow the index range itself and the scan is proportional to the window.
+ * The `eventTypeId` branch uses `by_event_type` and range-filters in JS.
+ *
+ * With no selector at all the scan is bounded: only the 1000 most recently
+ * *created* bookings are considered (then filtered, sorted and limited). That
+ * branch is meant for small deployments, admin tooling and tests; a large
+ * host should always pass a selector.
+ */
 export const listBookings = query({
   args: {
     organizationId: v.optional(v.string()),
@@ -1183,17 +1197,30 @@ export const listBookings = query({
   returns: v.array(bookingDoc),
   handler: async (ctx, args) => {
     let bookings;
+    const { dateFrom, dateTo } = args;
 
     // Use the most specific index available
     if (args.organizationId) {
+      const organizationId = args.organizationId;
       bookings = await ctx.db
         .query("bookings")
-        .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+        .withIndex("by_org_start", (q) => {
+          const byOrg = q.eq("organizationId", organizationId);
+          const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
+          return dateTo !== undefined ? from.lte("start", dateTo) : from;
+        })
+        .order("desc")
         .collect();
     } else if (args.resourceId) {
+      const resourceId = args.resourceId;
       bookings = await ctx.db
         .query("bookings")
-        .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId!))
+        .withIndex("by_resource_start", (q) => {
+          const byResource = q.eq("resourceId", resourceId);
+          const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
+          return dateTo !== undefined ? from.lte("start", dateTo) : from;
+        })
+        .order("desc")
         .collect();
     } else if (args.eventTypeId) {
       bookings = await ctx.db
@@ -1201,7 +1228,8 @@ export const listBookings = query({
         .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId!))
         .collect();
     } else {
-      bookings = await ctx.db.query("bookings").collect();
+      // No selector: bounded scan of the most recently created bookings (see docstring).
+      bookings = await ctx.db.query("bookings").order("desc").take(1000);
     }
 
     // The ids that did not pick the index still narrow the result — a caller
@@ -1225,14 +1253,17 @@ export const listBookings = query({
     if (args.status) {
       bookings = bookings.filter((b) => b.status === args.status);
     }
-    if (args.dateFrom) {
-      bookings = bookings.filter((b) => b.start >= args.dateFrom!);
+    // Redundant for the org/resource branches (already an index range), still
+    // needed for the event-type and no-selector branches.
+    if (dateFrom !== undefined) {
+      bookings = bookings.filter((b) => b.start >= dateFrom);
     }
-    if (args.dateTo) {
-      bookings = bookings.filter((b) => b.start <= args.dateTo!);
+    if (dateTo !== undefined) {
+      bookings = bookings.filter((b) => b.start <= dateTo);
     }
 
-    // Sort by start time descending (newest first)
+    // Sort by start time descending (newest first). A no-op for the org/resource
+    // branches (index order, stable sort keeps it); orders the other two.
     bookings.sort((a, b) => b.start - a.start);
 
     // Apply limit

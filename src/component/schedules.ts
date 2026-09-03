@@ -302,21 +302,18 @@ export const listDateOverrides = query({
   },
   returns: v.array(dateOverrideDoc),
   handler: async (ctx, args) => {
-    const overrides = await ctx.db
+    // The index is [scheduleId, date] and ISO dates sort lexicographically ==
+    // chronologically, so both the range and the ascending date order come
+    // straight from the index.
+    const { dateFrom, dateTo } = args;
+    return await ctx.db
       .query("date_overrides")
-      .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId))
+      .withIndex("by_schedule_date", (q) => {
+        const bySchedule = q.eq("scheduleId", args.scheduleId);
+        const from = dateFrom !== undefined ? bySchedule.gte("date", dateFrom) : bySchedule;
+        return dateTo !== undefined ? from.lte("date", dateTo) : from;
+      })
       .collect();
-
-    // Filter by date range if specified
-    let filtered = overrides;
-    if (args.dateFrom) {
-      filtered = filtered.filter((o) => o.date >= args.dateFrom!);
-    }
-    if (args.dateTo) {
-      filtered = filtered.filter((o) => o.date <= args.dateTo!);
-    }
-
-    return filtered.sort((a, b) => a.date.localeCompare(b.date));
   },
 });
 
@@ -327,12 +324,14 @@ export const getDateOverride = query({
   },
   returns: v.union(dateOverrideDoc, v.null()),
   handler: async (ctx, args) => {
-    const overrides = await ctx.db
+    // Full-depth lookup. .first() keeps first-match semantics should a legacy
+    // duplicate (scheduleId, date) row exist; .unique() would throw on it.
+    return await ctx.db
       .query("date_overrides")
-      .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
-
-    return overrides.find((o) => o.date === args.date) ?? null;
+      .withIndex("by_schedule_date", (q) =>
+        q.eq("scheduleId", args.scheduleId).eq("date", args.date)
+      )
+      .first();
   },
 });
 
@@ -361,12 +360,12 @@ export const createDateOverride = mutation({
     }
 
     // Check for existing override on this date
-    const overrides = await ctx.db
+    const existing = await ctx.db
       .query("date_overrides")
-      .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
-
-    const existing = overrides.find((o) => o.date === args.date);
+      .withIndex("by_schedule_date", (q) =>
+        q.eq("scheduleId", args.scheduleId).eq("date", args.date)
+      )
+      .first();
     if (existing) {
       // Update existing
       await ctx.db.patch(existing._id, {
@@ -465,12 +464,12 @@ export async function computeAvailabilityForDate(
   }
 
   // Check for date override
-  const overrides = await ctx.db
+  const override = await ctx.db
     .query("date_overrides")
-    .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id))
-    .collect();
-
-  const override = overrides.find((o) => o.date === date);
+    .withIndex("by_schedule_date", (q) =>
+      q.eq("scheduleId", schedule._id).eq("date", date)
+    )
+    .first();
 
   if (override) {
     if (override.type === "unavailable") {

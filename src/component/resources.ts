@@ -37,16 +37,21 @@ export const listResources = query({
   },
   returns: v.array(resourceDoc),
   handler: async (ctx, args) => {
-    const query = ctx.db
-      .query("resources")
-      .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId));
+    // by_org_type when a type is given, else by_org (same creation order either way).
+    const type = args.type;
+    const resources = type
+      ? await ctx.db
+          .query("resources")
+          .withIndex("by_org_type", (q) =>
+            q.eq("organizationId", args.organizationId).eq("type", type)
+          )
+          .collect()
+      : await ctx.db
+          .query("resources")
+          .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+          .collect();
 
-    const resources = await query.collect();
-
-    // Filter by type if specified
-    let filtered = args.type
-      ? resources.filter((r) => r.type === args.type)
-      : resources;
+    let filtered = resources;
 
     // Filter active only if specified
     if (args.activeOnly) {
@@ -180,10 +185,10 @@ export const deleteResource = mutation({
       throw new Error(`Resource "${args.id}" not found`);
     }
 
-    // Check for existing bookings
+    // Check for existing bookings (prefix query on the compound index)
     const bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_resource", (q) => q.eq("resourceId", args.id))
+      .withIndex("by_resource_start", (q) => q.eq("resourceId", args.id))
       .first();
 
     if (bookings) {
@@ -213,7 +218,9 @@ export const toggleResourceActive = mutation({
       throw new Error(`Resource "${args.id}" not found`);
     }
 
-    // Check for active presence (final safety guard)
+    // Check for active presence (final safety guard). Deliberately no
+    // [resourceId, updated] index — `updated` churns on every heartbeat and
+    // this is a rare admin write, so the JS staleness filter is the cheaper trade.
     const TIMEOUT_MS = 10_000;
     const now = Date.now();
 

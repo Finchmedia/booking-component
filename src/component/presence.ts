@@ -132,8 +132,10 @@ export const leave = mutation({
 });
 
 /**
- * Returns a list of users currently present in a slot.
- * filters out stale entries just in case cleanup hasn't run yet.
+ * Returns the (up to 20) most recently active users present in a slot.
+ * Stale entries (older than TIMEOUT_MS) are excluded by the index range
+ * itself, so rows the cleanup job hasn't removed yet neither show up nor
+ * crowd live holds out of the 20.
  */
 export const list = query({
   args: {
@@ -142,18 +144,19 @@ export const list = query({
   },
   returns: v.array(presenceDoc),
   handler: async (ctx, args) => {
-    const presence = await ctx.db
+    // `gte`: exactly TIMEOUT_MS old is still live, matching `markAsGone` and
+    // the other reads (`now - updated <= TIMEOUT_MS`).
+    const now = Date.now();
+    return await ctx.db
       .query("presence")
       .withIndex("by_resource_slot_updated", (q) =>
-        q.eq("resourceId", args.resourceId).eq("slot", args.slot)
+        q
+          .eq("resourceId", args.resourceId)
+          .eq("slot", args.slot)
+          .gte("updated", now - TIMEOUT_MS)
       )
       .order("desc") // Most recently active first
       .take(20);
-
-    // Filter out stale users (older than timeout) immediately for snappy UI
-    // even if the backend job hasn't cleaned them up yet.
-    const now = Date.now();
-    return presence.filter((p) => now - p.updated <= TIMEOUT_MS);
   },
 });
 
@@ -228,7 +231,9 @@ export const getActivePresenceCount = query({
     const now = Date.now();
     let presenceRecords;
 
-    // Query based on what's provided
+    // Query based on what's provided. Deliberately no [resourceId, updated]
+    // index: `updated` is rewritten on every heartbeat, and this is a rare
+    // admin read — the JS staleness filter below is the cheaper trade.
     if (args.resourceId) {
       // Get all presence for this resource
       presenceRecords = await ctx.db
