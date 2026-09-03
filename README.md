@@ -21,6 +21,10 @@ Run `npm create convex` or follow any of the
 npm install @mrfinch/booking
 ```
 
+Requires `convex >= 1.29.0` in your app. Every component function declares a
+return validator, so the generated component API gives you concrete result
+types instead of `any`.
+
 Create a `convex.config.ts` file in your app's `convex/` folder and install the
 component by calling `use`:
 

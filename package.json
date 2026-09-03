@@ -55,7 +55,12 @@
     },
     "./test": "./src/test.ts",
     "./_generated/component.js": {
-      "types": "./dist/component/_generated/component.d.ts"
+      "types": "./dist/component/_generated/component.d.ts",
+      "default": "./dist/component/_generated/component.js"
+    },
+    "./_generated/component": {
+      "types": "./dist/component/_generated/component.d.ts",
+      "default": "./dist/component/_generated/component.js"
     },
     "./convex.config.js": {
       "types": "./dist/component/convex.config.d.ts",
@@ -68,7 +73,7 @@
   },
   "peerDependencies": {
     "@hookform/resolvers": ">=3.3.0",
-    "convex": "^1.17.0",
+    "convex": "^1.29.0",
     "convex-helpers": "^0.1.106",
     "lucide-react": ">=0.400.0",
     "react": "^18.0.0 || ^19.0.0",

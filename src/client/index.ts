@@ -238,7 +238,7 @@ export function makeBookingAPI(component: ComponentApi) {
       args: { bookingId: v.string() },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getBooking, {
-          bookingId: args.bookingId as any,
+          bookingId: args.bookingId,
         });
       },
     }),
@@ -275,7 +275,7 @@ export function makeBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.public.cancelReservation, {
-          reservationId: args.reservationId as any,
+          reservationId: args.reservationId,
           resendOptions: args.resendOptions,
         });
       },
@@ -288,7 +288,7 @@ export function makeBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.public.expireProvisionalBooking, {
-          bookingId: args.bookingId as any,
+          bookingId: args.bookingId,
           reason: args.reason,
         });
       },
@@ -535,7 +535,7 @@ export function makeBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.schedules.listDateOverrides, {
-          scheduleId: args.scheduleId as any,
+          scheduleId: args.scheduleId,
           dateFrom: args.dateFrom,
           dateTo: args.dateTo,
         });
@@ -558,7 +558,7 @@ export function makeBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.schedules.createDateOverride, {
-          scheduleId: args.scheduleId as any,
+          scheduleId: args.scheduleId,
           date: args.date,
           type: args.type,
           customHours: args.customHours,
@@ -570,7 +570,7 @@ export function makeBookingAPI(component: ComponentApi) {
       args: { overrideId: v.string() },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.schedules.deleteDateOverride, {
-          overrideId: args.overrideId as any,
+          overrideId: args.overrideId,
         });
       },
     }),
@@ -633,7 +633,7 @@ export function makeBookingAPI(component: ComponentApi) {
       args: { bookingId: v.string() },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.multi_resource.getBookingWithItems, {
-          bookingId: args.bookingId as any,
+          bookingId: args.bookingId,
         });
       },
     }),
@@ -650,7 +650,7 @@ export function makeBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.multi_resource.cancelMultiResourceBooking, {
-          bookingId: args.bookingId as any,
+          bookingId: args.bookingId,
           reason: args.reason,
           cancelledBy: args.cancelledBy,
           resendOptions: args.resendOptions,
@@ -676,7 +676,7 @@ export function makeBookingAPI(component: ComponentApi) {
       args: { hookId: v.string() },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.hooks.unregisterHook, {
-          hookId: args.hookId as any,
+          hookId: args.hookId,
         });
       },
     }),
@@ -694,7 +694,7 @@ export function makeBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.hooks.transitionBookingState, {
-          bookingId: args.bookingId as any,
+          bookingId: args.bookingId,
           toStatus: args.toStatus,
           reason: args.reason,
           changedBy: args.changedBy,
@@ -707,7 +707,7 @@ export function makeBookingAPI(component: ComponentApi) {
       args: { bookingId: v.string() },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.hooks.getBookingHistory, {
-          bookingId: args.bookingId as any,
+          bookingId: args.bookingId,
         });
       },
     }),
