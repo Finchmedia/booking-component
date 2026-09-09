@@ -1,13 +1,13 @@
 "use client";
 
 import React from "react";
-import type { CalcomSlot } from "../../types";
+import type { BookingSlot } from "../../types";
 import { TimeSlotButton } from "./time-slot-button";
 
 interface TimeSlotsPanelProps {
   selectedDate: Date | null;
-  availableSlots: CalcomSlot[];
-  reservedSlots: CalcomSlot[]; // Slots held by other users
+  availableSlots: BookingSlot[];
+  reservedSlots: BookingSlot[]; // Slots held by other users
   loading: boolean;
   timeFormat: "12h" | "24h";
   onTimeFormatChange: (format: "12h" | "24h") => void;

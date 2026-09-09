@@ -147,7 +147,7 @@ export const EventMetaPanel: React.FC<EventMetaPanelProps> = ({
           </div>
         )}
 
-        {/* Timezone Display (Cal.com style) */}
+        {/* Timezone display */}
         {userTimezone && (
           <div className="flex items-center text-xs text-muted-foreground cursor-pointer hover:text-foreground transition">
             <Globe className="mr-2 h-3.5 w-3.5 flex-shrink-0" />

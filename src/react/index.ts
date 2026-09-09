@@ -13,7 +13,7 @@ export {
 // Types
 export type {
   BookingStep,
-  CalcomSlot,
+  BookingSlot,
   BookingFormData,
   Booking,
   EventType,

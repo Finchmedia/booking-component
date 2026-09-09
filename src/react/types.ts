@@ -2,7 +2,7 @@
 export type BookingStep = "event-meta" | "booking-form" | "success";
 
 // Slot interface
-export interface CalcomSlot {
+export interface BookingSlot {
   time: string; // ISO timestamp: "2024-11-21T14:00:00.000Z"
   attendees?: number; // For future multi-attendee support
 }

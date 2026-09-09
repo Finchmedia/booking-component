@@ -88,7 +88,7 @@ export const useConvexSlots = (
   } | null>(null);
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
 
-  // Smart defaulting: Use minimum duration for maximum booking flexibility (Cal.com best practice)
+  // Smart default: use the minimum duration so the slot grid offers maximum booking flexibility
   const effectiveInterval =
     slotInterval ??
     (allDurationOptions && allDurationOptions.length > 0
