@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2
+
+Cosmetic release: no runtime changes.
+
+### Changed
+
+- **Public type rename: `CalcomSlot` → `BookingSlot`** (exported from
+  `@mrfinch/booking/react`, used by `TimeSlotsPanel` / `TimeSlotButton` props).
+  The shape is unchanged (`{ time: string; attendees?: number }`). If you import
+  the type by name, update the import; nothing else changes.
+- Comments no longer reference third-party products; the repository carries no
+  competitor brand names in its API, comments or docs.
+
 ## 0.3.1
 
 Quality pass. Every component function now declares a return validator, so the

@@ -1,5 +1,5 @@
 export { BookingProvider, useBookingAPI, type BookingAPI, type PublicBookingAPI, type AdminBookingAPI, type BookingProviderProps, } from "./context";
-export type { BookingStep, CalcomSlot, BookingFormData, Booking, EventType, Resource, Schedule, TimeSlot, MonthSlots, PresenceRecord, BookingValidationError, BookingValidationResult, } from "./types";
+export type { BookingStep, BookingSlot, BookingFormData, Booking, EventType, Resource, Schedule, TimeSlot, MonthSlots, PresenceRecord, BookingValidationError, BookingValidationResult, } from "./types";
 export { useConvexSlots, type UseConvexSlotsResult, } from "./hooks/use-convex-slots";
 export { useSlotHold } from "./hooks/use-slot-hold";
 export { useBookingValidation, type ValidationError, type ValidationErrorType, type ValidationResult, } from "./hooks/use-booking-validation";

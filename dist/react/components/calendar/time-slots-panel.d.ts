@@ -1,9 +1,9 @@
 import React from "react";
-import type { CalcomSlot } from "../../types";
+import type { BookingSlot } from "../../types";
 interface TimeSlotsPanelProps {
     selectedDate: Date | null;
-    availableSlots: CalcomSlot[];
-    reservedSlots: CalcomSlot[];
+    availableSlots: BookingSlot[];
+    reservedSlots: BookingSlot[];
     loading: boolean;
     timeFormat: "12h" | "24h";
     onTimeFormatChange: (format: "12h" | "24h") => void;

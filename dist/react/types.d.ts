@@ -1,5 +1,5 @@
 export type BookingStep = "event-meta" | "booking-form" | "success";
-export interface CalcomSlot {
+export interface BookingSlot {
     time: string;
     attendees?: number;
 }

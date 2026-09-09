@@ -1,7 +1,7 @@
 import React from "react";
-import type { CalcomSlot } from "../../types";
+import type { BookingSlot } from "../../types";
 interface TimeSlotButtonProps {
-    slot: CalcomSlot;
+    slot: BookingSlot;
     timeFormat: "12h" | "24h";
     timezone: string;
     onSlotSelect: (slotTime: string) => void;
