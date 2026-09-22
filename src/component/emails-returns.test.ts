@@ -340,7 +340,7 @@ describe("the send failure path", () => {
     expect(Object.keys(result).sort()).toEqual(["error", "success"]);
     expectDeclaredKeysOnly(result);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain(`[emails] Failed to send confirmation to ${BOOKER.email}:`);
+    expect(errors[0]).toBe("[emails] Failed to enqueue confirmation email");
     expect(net.calls()).toBe(0);
   });
 

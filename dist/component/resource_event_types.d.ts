@@ -20,8 +20,8 @@ export declare const getEventTypesForResource: import("convex/server").Registere
     slotInterval?: number | undefined;
     createdAt?: number | undefined;
     updatedAt?: number | undefined;
-    timezone: string;
     id: string;
+    timezone: string;
     lengthInMinutes: number;
     locations: {
         public?: boolean | undefined;
@@ -46,12 +46,12 @@ export declare const getResourcesForEventType: import("convex/server").Registere
     isStandalone?: boolean | undefined;
     metadata?: Record<string, string> | undefined;
     quantity?: number | undefined;
+    type: string;
+    id: string;
     organizationId: string;
     timezone: string;
-    id: string;
     isActive: boolean;
     name: string;
-    type: string;
     createdAt: number;
     updatedAt: number;
 }[]>>;

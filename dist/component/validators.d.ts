@@ -4,12 +4,12 @@ export declare const resourceDoc: import("convex/values").VObject<{
     isStandalone?: boolean | undefined;
     metadata?: Record<string, string> | undefined;
     quantity?: number | undefined;
+    type: string;
+    id: string;
     organizationId: string;
     timezone: string;
-    id: string;
     isActive: boolean;
     name: string;
-    type: string;
     createdAt: number;
     updatedAt: number;
     _creationTime: number;
@@ -30,11 +30,11 @@ export declare const resourceDoc: import("convex/values").VObject<{
     updatedAt: import("convex/values").VFloat64<number, "required">;
     _id: import("convex/values").VId<import("convex/values").GenericId<"resources">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "organizationId" | "timezone" | "description" | "id" | "isActive" | "isFungible" | "isStandalone" | "metadata" | "name" | "quantity" | "type" | "createdAt" | "updatedAt" | `metadata.${string}` | "_creationTime" | "_id">;
+}, "required", "type" | "id" | "organizationId" | "timezone" | "description" | "isActive" | "isFungible" | "isStandalone" | "metadata" | "name" | "quantity" | "createdAt" | "updatedAt" | `metadata.${string}` | "_creationTime" | "_id">;
 export declare const scheduleDoc: import("convex/values").VObject<{
+    id: string;
     organizationId: string;
     timezone: string;
-    id: string;
     name: string;
     isDefault: boolean;
     weeklyHours: {
@@ -69,15 +69,15 @@ export declare const scheduleDoc: import("convex/values").VObject<{
     updatedAt: import("convex/values").VFloat64<number, "required">;
     _id: import("convex/values").VId<import("convex/values").GenericId<"schedules">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "organizationId" | "timezone" | "id" | "name" | "isDefault" | "weeklyHours" | "createdAt" | "updatedAt" | "_creationTime" | "_id">;
+}, "required", "id" | "organizationId" | "timezone" | "name" | "isDefault" | "weeklyHours" | "createdAt" | "updatedAt" | "_creationTime" | "_id">;
 export declare const dateOverrideDoc: import("convex/values").VObject<{
     customHours?: {
         startTime: string;
         endTime: string;
     }[] | undefined;
+    type: string;
     date: string;
     scheduleId: import("convex/values").GenericId<"schedules">;
-    type: string;
     _creationTime: number;
     _id: import("convex/values").GenericId<"date_overrides">;
 }, {
@@ -96,7 +96,7 @@ export declare const dateOverrideDoc: import("convex/values").VObject<{
     }, "required", "startTime" | "endTime">, "optional">;
     _id: import("convex/values").VId<import("convex/values").GenericId<"date_overrides">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "date" | "scheduleId" | "type" | "customHours" | "_creationTime" | "_id">;
+}, "required", "type" | "date" | "scheduleId" | "customHours" | "_creationTime" | "_id">;
 export declare const eventTypeDoc: import("convex/values").VObject<{
     organizationId?: string | undefined;
     bufferAfter?: number | undefined;
@@ -111,8 +111,8 @@ export declare const eventTypeDoc: import("convex/values").VObject<{
     slotInterval?: number | undefined;
     createdAt?: number | undefined;
     updatedAt?: number | undefined;
-    timezone: string;
     id: string;
+    timezone: string;
     lengthInMinutes: number;
     locations: {
         public?: boolean | undefined;
@@ -146,7 +146,7 @@ export declare const eventTypeDoc: import("convex/values").VObject<{
         type: import("convex/values").VString<string, "required">;
         address: import("convex/values").VString<string | undefined, "optional">;
         public: import("convex/values").VBoolean<boolean | undefined, "optional">;
-    }, "required", "public" | "type" | "address">, "required">;
+    }, "required", "type" | "public" | "address">, "required">;
     organizationId: import("convex/values").VString<string | undefined, "optional">;
     scheduleId: import("convex/values").VString<string | undefined, "optional">;
     bufferBefore: import("convex/values").VFloat64<number | undefined, "optional">;
@@ -159,7 +159,7 @@ export declare const eventTypeDoc: import("convex/values").VObject<{
     updatedAt: import("convex/values").VFloat64<number | undefined, "optional">;
     _id: import("convex/values").VId<import("convex/values").GenericId<"event_types">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "organizationId" | "timezone" | "bufferAfter" | "bufferBefore" | "description" | "id" | "isActive" | "lengthInMinutes" | "lengthInMinutesOptions" | "locations" | "lockTimeZoneToggle" | "maxFutureMinutes" | "minNoticeMinutes" | "requiresConfirmation" | "scheduleId" | "slotInterval" | "slug" | "title" | "createdAt" | "updatedAt" | "_creationTime" | "_id">;
+}, "required", "id" | "organizationId" | "timezone" | "bufferAfter" | "bufferBefore" | "description" | "isActive" | "lengthInMinutes" | "lengthInMinutesOptions" | "locations" | "lockTimeZoneToggle" | "maxFutureMinutes" | "minNoticeMinutes" | "requiresConfirmation" | "scheduleId" | "slotInterval" | "slug" | "title" | "createdAt" | "updatedAt" | "_creationTime" | "_id">;
 export declare const resourceEventTypeDoc: import("convex/values").VObject<{
     resourceId: string;
     eventTypeId: string;
@@ -172,8 +172,8 @@ export declare const resourceEventTypeDoc: import("convex/values").VObject<{
     _creationTime: import("convex/values").VFloat64<number, "required">;
 }, "required", "resourceId" | "eventTypeId" | "_creationTime" | "_id">;
 export declare const dailyAvailabilityDoc: import("convex/values").VObject<{
-    date: string;
     resourceId: string;
+    date: string;
     busySlots: number[];
     _creationTime: number;
     _id: import("convex/values").GenericId<"daily_availability">;
@@ -183,10 +183,10 @@ export declare const dailyAvailabilityDoc: import("convex/values").VObject<{
     busySlots: import("convex/values").VArray<number[], import("convex/values").VFloat64<number, "required">, "required">;
     _id: import("convex/values").VId<import("convex/values").GenericId<"daily_availability">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "date" | "resourceId" | "_creationTime" | "busySlots" | "_id">;
+}, "required", "resourceId" | "date" | "_creationTime" | "busySlots" | "_id">;
 export declare const quantityAvailabilityDoc: import("convex/values").VObject<{
-    date: string;
     resourceId: string;
+    date: string;
     slotQuantities: any;
     _creationTime: number;
     _id: import("convex/values").GenericId<"quantity_availability">;
@@ -196,7 +196,7 @@ export declare const quantityAvailabilityDoc: import("convex/values").VObject<{
     slotQuantities: import("convex/values").VAny<any, "required", string>;
     _id: import("convex/values").VId<import("convex/values").GenericId<"quantity_availability">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "date" | "resourceId" | "_creationTime" | "slotQuantities" | `slotQuantities.${string}` | "_id">;
+}, "required", "resourceId" | "date" | "_creationTime" | "slotQuantities" | `slotQuantities.${string}` | "_id">;
 export declare const bookingDoc: import("convex/values").VObject<{
     organizationId?: string | undefined;
     managementToken?: string | undefined;
@@ -207,22 +207,22 @@ export declare const bookingDoc: import("convex/values").VObject<{
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
-    end: number;
-    start: number;
     eventTypeId: string;
+    bookerName: string;
+    bookerEmail: string;
+    eventTitle: string;
+    start: number;
+    end: number;
+    timezone: string;
     location: {
         value?: string | undefined;
         type: string;
     };
-    timezone: string;
     uid: string;
     actorId: string;
     status: string;
     createdAt: number;
     updatedAt: number;
-    bookerName: string;
-    bookerEmail: string;
-    eventTitle: string;
     _creationTime: number;
     _id: import("convex/values").GenericId<"bookings">;
 }, {
@@ -256,7 +256,7 @@ export declare const bookingDoc: import("convex/values").VObject<{
     cancellationReason: import("convex/values").VString<string | undefined, "optional">;
     _id: import("convex/values").VId<import("convex/values").GenericId<"bookings">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "organizationId" | "resourceId" | "end" | "start" | "eventTypeId" | "location" | "timezone" | "uid" | "actorId" | "status" | "createdAt" | "updatedAt" | "_creationTime" | "managementToken" | "bookerName" | "bookerEmail" | "bookerPhone" | "bookerNotes" | "eventTitle" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "location.type" | "location.value" | "_id">;
+}, "required", "organizationId" | "resourceId" | "eventTypeId" | "bookerName" | "bookerEmail" | "eventTitle" | "start" | "end" | "timezone" | "location" | "location.type" | "location.value" | "uid" | "actorId" | "status" | "createdAt" | "updatedAt" | "_creationTime" | "managementToken" | "bookerPhone" | "bookerNotes" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "_id">;
 export declare const bookingItemDoc: import("convex/values").VObject<{
     bookingId: import("convex/values").GenericId<"bookings">;
     resourceId: string;
@@ -271,8 +271,8 @@ export declare const bookingItemDoc: import("convex/values").VObject<{
     _creationTime: import("convex/values").VFloat64<number, "required">;
 }, "required", "bookingId" | "resourceId" | "quantity" | "_creationTime" | "_id">;
 export declare const bookingHistoryDoc: import("convex/values").VObject<{
-    changedBy?: string | undefined;
     reason?: string | undefined;
+    changedBy?: string | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
     toStatus: string;
     fromStatus: string;
@@ -288,7 +288,7 @@ export declare const bookingHistoryDoc: import("convex/values").VObject<{
     timestamp: import("convex/values").VFloat64<number, "required">;
     _id: import("convex/values").VId<import("convex/values").GenericId<"booking_history">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "bookingId" | "changedBy" | "reason" | "toStatus" | "_creationTime" | "fromStatus" | "timestamp" | "_id">;
+}, "required", "bookingId" | "reason" | "changedBy" | "toStatus" | "_creationTime" | "fromStatus" | "timestamp" | "_id">;
 export declare const presenceDoc: import("convex/values").VObject<{
     eventTypeId?: string | undefined;
     data?: any;
@@ -339,7 +339,7 @@ export declare const hookDoc: import("convex/values").VObject<{
     createdAt: import("convex/values").VFloat64<number, "required">;
     _id: import("convex/values").VId<import("convex/values").GenericId<"hooks">, "required">;
     _creationTime: import("convex/values").VFloat64<number, "required">;
-}, "required", "eventType" | "organizationId" | "functionHandle" | "enabled" | "createdAt" | "_creationTime" | "_id">;
+}, "required", "organizationId" | "eventType" | "functionHandle" | "enabled" | "createdAt" | "_creationTime" | "_id">;
 /**
  * multi_resource.getBookingWithItems: the booking spread with its items, each
  * item carrying the resolved resource (or null when the resource is gone).
@@ -354,22 +354,22 @@ export declare const bookingWithItemsDoc: import("convex/values").VObject<{
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
-    end: number;
-    start: number;
     eventTypeId: string;
+    bookerName: string;
+    bookerEmail: string;
+    eventTitle: string;
+    start: number;
+    end: number;
+    timezone: string;
     location: {
         value?: string | undefined;
         type: string;
     };
-    timezone: string;
     uid: string;
     actorId: string;
     status: string;
     createdAt: number;
     updatedAt: number;
-    bookerName: string;
-    bookerEmail: string;
-    eventTitle: string;
     _creationTime: number;
     _id: import("convex/values").GenericId<"bookings">;
     items: {
@@ -384,12 +384,12 @@ export declare const bookingWithItemsDoc: import("convex/values").VObject<{
             isStandalone?: boolean | undefined;
             metadata?: Record<string, string> | undefined;
             quantity?: number | undefined;
+            type: string;
+            id: string;
             organizationId: string;
             timezone: string;
-            id: string;
             isActive: boolean;
             name: string;
-            type: string;
             createdAt: number;
             updatedAt: number;
             _creationTime: number;
@@ -439,12 +439,12 @@ export declare const bookingWithItemsDoc: import("convex/values").VObject<{
             isStandalone?: boolean | undefined;
             metadata?: Record<string, string> | undefined;
             quantity?: number | undefined;
+            type: string;
+            id: string;
             organizationId: string;
             timezone: string;
-            id: string;
             isActive: boolean;
             name: string;
-            type: string;
             createdAt: number;
             updatedAt: number;
             _creationTime: number;
@@ -462,12 +462,12 @@ export declare const bookingWithItemsDoc: import("convex/values").VObject<{
             isStandalone?: boolean | undefined;
             metadata?: Record<string, string> | undefined;
             quantity?: number | undefined;
+            type: string;
+            id: string;
             organizationId: string;
             timezone: string;
-            id: string;
             isActive: boolean;
             name: string;
-            type: string;
             createdAt: number;
             updatedAt: number;
             _creationTime: number;
@@ -485,12 +485,12 @@ export declare const bookingWithItemsDoc: import("convex/values").VObject<{
             isStandalone?: boolean | undefined;
             metadata?: Record<string, string> | undefined;
             quantity?: number | undefined;
+            type: string;
+            id: string;
             organizationId: string;
             timezone: string;
-            id: string;
             isActive: boolean;
             name: string;
-            type: string;
             createdAt: number;
             updatedAt: number;
             _creationTime: number;
@@ -501,12 +501,12 @@ export declare const bookingWithItemsDoc: import("convex/values").VObject<{
             isStandalone?: boolean | undefined;
             metadata?: Record<string, string> | undefined;
             quantity?: number | undefined;
+            type: string;
+            id: string;
             organizationId: string;
             timezone: string;
-            id: string;
             isActive: boolean;
             name: string;
-            type: string;
             createdAt: number;
             updatedAt: number;
             _creationTime: number;
@@ -527,9 +527,9 @@ export declare const bookingWithItemsDoc: import("convex/values").VObject<{
             updatedAt: import("convex/values").VFloat64<number, "required">;
             _id: import("convex/values").VId<import("convex/values").GenericId<"resources">, "required">;
             _creationTime: import("convex/values").VFloat64<number, "required">;
-        }, "required", "organizationId" | "timezone" | "description" | "id" | "isActive" | "isFungible" | "isStandalone" | "metadata" | "name" | "quantity" | "type" | "createdAt" | "updatedAt" | `metadata.${string}` | "_creationTime" | "_id">, import("convex/values").VNull<null, "required">], "required", "organizationId" | "timezone" | "description" | "id" | "isActive" | "isFungible" | "isStandalone" | "metadata" | "name" | "quantity" | "type" | "createdAt" | "updatedAt" | `metadata.${string}` | "_creationTime" | "_id">;
-    }, "required", "bookingId" | "resourceId" | "quantity" | "_creationTime" | "_id" | "resource" | "resource.organizationId" | "resource.timezone" | "resource.description" | "resource.id" | "resource.isActive" | "resource.isFungible" | "resource.isStandalone" | "resource.metadata" | "resource.name" | "resource.quantity" | "resource.type" | "resource.createdAt" | "resource.updatedAt" | `resource.metadata.${string}` | "resource._creationTime" | "resource._id">, "required">;
-}, "required", "organizationId" | "resourceId" | "end" | "start" | "eventTypeId" | "location" | "timezone" | "uid" | "actorId" | "status" | "createdAt" | "updatedAt" | "_creationTime" | "managementToken" | "bookerName" | "bookerEmail" | "bookerPhone" | "bookerNotes" | "eventTitle" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "location.type" | "location.value" | "_id" | "items">;
+        }, "required", "type" | "id" | "organizationId" | "timezone" | "description" | "isActive" | "isFungible" | "isStandalone" | "metadata" | "name" | "quantity" | "createdAt" | "updatedAt" | `metadata.${string}` | "_creationTime" | "_id">, import("convex/values").VNull<null, "required">], "required", "type" | "id" | "organizationId" | "timezone" | "description" | "isActive" | "isFungible" | "isStandalone" | "metadata" | "name" | "quantity" | "createdAt" | "updatedAt" | `metadata.${string}` | "_creationTime" | "_id">;
+    }, "required", "bookingId" | "resourceId" | "quantity" | "_creationTime" | "_id" | "resource" | "resource.type" | "resource.id" | "resource.organizationId" | "resource.timezone" | "resource.description" | "resource.isActive" | "resource.isFungible" | "resource.isStandalone" | "resource.metadata" | "resource.name" | "resource.quantity" | "resource.createdAt" | "resource.updatedAt" | `resource.metadata.${string}` | "resource._creationTime" | "resource._id">, "required">;
+}, "required", "organizationId" | "resourceId" | "eventTypeId" | "bookerName" | "bookerEmail" | "eventTitle" | "start" | "end" | "timezone" | "location" | "location.type" | "location.value" | "uid" | "actorId" | "status" | "createdAt" | "updatedAt" | "_creationTime" | "managementToken" | "bookerPhone" | "bookerNotes" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason" | "_id" | "items">;
 /** `{ success }` — delete / unregister / set-links / cancel-by-token style mutations. */
 export declare const successResult: import("convex/values").VObject<{
     success: boolean;

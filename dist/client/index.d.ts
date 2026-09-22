@@ -114,8 +114,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         requiresConfirmation?: boolean | undefined;
         scheduleId?: string | undefined;
         slotInterval?: number | undefined;
-        timezone: string;
         id: string;
+        timezone: string;
         lengthInMinutes: number;
         locations: {
             public?: boolean | undefined;
@@ -163,8 +163,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     }>>;
     getAvailability: import("convex/server").RegisteredQuery<"internal", {
         resourceId: string;
-        end: number;
         start: number;
+        end: number;
     }, Promise<boolean>>;
     getMonthAvailability: import("convex/server").RegisteredQuery<"internal", {
         scheduleId?: string | undefined;
@@ -181,8 +181,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         availableSlots?: number[] | undefined;
         excludeBookingUid?: string | undefined;
         resourceTimezone?: string | undefined;
-        date: string;
         resourceId: string;
+        date: string;
         eventLength: number;
     }, Promise<{
         time: string;
@@ -190,33 +190,37 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     createReservation: import("convex/server").RegisteredMutation<"internal", {
         resendOptions?: {
             fromEmail?: string | undefined;
+            baseUrl?: string | undefined;
+            renderer?: string | undefined;
             apiKey: string;
         } | undefined;
         resourceId: string;
-        end: number;
         start: number;
+        end: number;
         actorId: string;
     }, Promise<string>>;
     createBooking: import("convex/server").RegisteredMutation<"internal", {
         resendOptions?: {
             fromEmail?: string | undefined;
+            baseUrl?: string | undefined;
+            renderer?: string | undefined;
             apiKey: string;
         } | undefined;
         resourceId: string;
-        end: number;
+        eventTypeId: string;
         start: number;
+        end: number;
+        timezone: string;
+        location: {
+            value?: string | undefined;
+            type: string;
+        };
         booker: {
             phone?: string | undefined;
             notes?: string | undefined;
             name: string;
             email: string;
         };
-        eventTypeId: string;
-        location: {
-            value?: string | undefined;
-            type: string;
-        };
-        timezone: string;
     }, Promise<{
         _creationTime: number;
         _id: string;
@@ -248,20 +252,20 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     }>>;
     createProvisionalBooking: import("convex/server").RegisteredMutation<"internal", {
         resourceId: string;
-        end: number;
+        eventTypeId: string;
         start: number;
+        end: number;
+        timezone: string;
+        location: {
+            value?: string | undefined;
+            type: string;
+        };
         booker: {
             phone?: string | undefined;
             notes?: string | undefined;
             name: string;
             email: string;
         };
-        eventTypeId: string;
-        location: {
-            value?: string | undefined;
-            type: string;
-        };
-        timezone: string;
     }, Promise<{
         _creationTime: number;
         _id: string;
@@ -393,6 +397,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     cancelReservation: import("convex/server").RegisteredMutation<"internal", {
         resendOptions?: {
             fromEmail?: string | undefined;
+            baseUrl?: string | undefined;
+            renderer?: string | undefined;
             apiKey: string;
         } | undefined;
         reservationId: string;
@@ -427,8 +433,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         updatedAt: number;
     } | null>>;
     listResources: import("convex/server").RegisteredQuery<"internal", {
-        activeOnly?: boolean | undefined;
         type?: string | undefined;
+        activeOnly?: boolean | undefined;
         organizationId: string;
     }, Promise<{
         _creationTime: number;
@@ -454,13 +460,14 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         isStandalone?: boolean | undefined;
         metadata?: Record<string, string> | undefined;
         quantity?: number | undefined;
+        type: string;
+        id: string;
         organizationId: string;
         timezone: string;
-        id: string;
         name: string;
-        type: string;
     }, Promise<string>>;
     updateResource: import("convex/server").RegisteredMutation<"internal", {
+        type?: string | undefined;
         timezone?: string | undefined;
         description?: string | undefined;
         isActive?: boolean | undefined;
@@ -469,7 +476,6 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         metadata?: Record<string, string> | undefined;
         name?: string | undefined;
         quantity?: number | undefined;
-        type?: string | undefined;
         id: string;
     }, Promise<string>>;
     deleteResource: import("convex/server").RegisteredMutation<"internal", {
@@ -622,9 +628,9 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     } | null>>;
     createSchedule: import("convex/server").RegisteredMutation<"internal", {
         isDefault?: boolean | undefined;
+        id: string;
         organizationId: string;
         timezone: string;
-        id: string;
         name: string;
         weeklyHours: {
             dayOfWeek: number;
@@ -674,9 +680,9 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
             startTime: string;
             endTime: string;
         }[] | undefined;
+        type: string;
         date: string;
         scheduleId: string;
-        type: string;
     }, Promise<string>>;
     deleteDateOverride: import("convex/server").RegisteredMutation<"internal", {
         overrideId: string;
@@ -684,12 +690,12 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         success: boolean;
     }>>;
     checkMultiResourceAvailability: import("convex/server").RegisteredQuery<"internal", {
+        start: number;
         end: number;
         resources: {
             quantity?: number | undefined;
             resourceId: string;
         }[];
-        start: number;
     }, Promise<{
         available: boolean;
         resources: Array<{
@@ -702,28 +708,30 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     }>>;
     createMultiResourceBooking: import("convex/server").RegisteredMutation<"internal", {
         organizationId?: string | undefined;
-        resendOptions?: {
-            fromEmail?: string | undefined;
-            apiKey: string;
-        } | undefined;
         location?: {
             value?: string | undefined;
             type: string;
         } | undefined;
+        resendOptions?: {
+            fromEmail?: string | undefined;
+            baseUrl?: string | undefined;
+            renderer?: string | undefined;
+            apiKey: string;
+        } | undefined;
+        eventTypeId: string;
+        start: number;
         end: number;
+        timezone: string;
         resources: {
             quantity?: number | undefined;
             resourceId: string;
         }[];
-        start: number;
         booker: {
             phone?: string | undefined;
             notes?: string | undefined;
             name: string;
             email: string;
         };
-        eventTypeId: string;
-        timezone: string;
     }, Promise<{
         _creationTime: number;
         _id: string;
@@ -812,6 +820,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         reason?: string | undefined;
         resendOptions?: {
             fromEmail?: string | undefined;
+            baseUrl?: string | undefined;
+            renderer?: string | undefined;
             apiKey: string;
         } | undefined;
         cancelledBy?: string | undefined;
@@ -830,10 +840,12 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         success: boolean;
     }>>;
     transitionBookingState: import("convex/server").RegisteredMutation<"internal", {
-        changedBy?: string | undefined;
         reason?: string | undefined;
+        changedBy?: string | undefined;
         resendOptions?: {
             fromEmail?: string | undefined;
+            baseUrl?: string | undefined;
+            renderer?: string | undefined;
             apiKey: string;
         } | undefined;
         bookingId: string;
@@ -879,8 +891,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         user: string;
     }[]>>;
     getDatePresence: import("convex/server").RegisteredQuery<"internal", {
-        date: string;
         resourceId: string;
+        date: string;
     }, Promise<{
         slot: string;
         updated: number;
@@ -914,8 +926,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         schedules: number;
     }>>;
     getDailyAvailability: import("convex/server").RegisteredQuery<"internal", {
-        date: string;
         resourceId: string;
+        date: string;
     }, Promise<number[] | null>>;
 };
 //# sourceMappingURL=index.d.ts.map

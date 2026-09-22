@@ -35,7 +35,7 @@ export declare const wipeAllData: import("convex/server").RegisteredMutation<"pu
  * Returns the busySlots array, or null when no row exists for that day.
  */
 export declare const getDailyAvailability: import("convex/server").RegisteredQuery<"public", {
-    date: string;
     resourceId: string;
+    date: string;
 }, Promise<number[] | null>>;
 //# sourceMappingURL=maintenance.d.ts.map

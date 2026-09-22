@@ -6,6 +6,9 @@ import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { Resend } from "@convex-dev/resend";
 import { components } from "../_generated/api";
+import { bookingEmailContextValidator } from "../../emails.js";
+import { bookingEmailLinks } from "./context.js";
+import { resolveBookingEmail } from "./renderer.js";
 
 import { generateBookingConfirmationHTML } from "./templates/confirmation.js";
 import { generateBookingPendingHTML } from "./templates/pending.js";
@@ -20,6 +23,8 @@ import { generateBookingRescheduledHTML } from "./templates/rescheduled.js";
 
 export const sendBookingConfirmation = internalMutation({
     args: {
+        renderer: v.optional(v.string()),
+        emailContext: v.optional(bookingEmailContextValidator),
         to: v.string(),
         bookerName: v.string(),
         eventTitle: v.string(),
@@ -55,31 +60,48 @@ export const sendBookingConfirmation = internalMutation({
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
 
-        const html = generateBookingConfirmationHTML({
+        const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
+            version: 1,
+            kind: "confirmed",
             bookerName: args.bookerName,
+            bookerEmail: args.to,
             eventTitle: args.eventTitle,
             start: args.start,
             end: args.end,
             timezone: args.timezone,
-            resourceId: args.resourceId,
             bookingUid: args.bookingUid,
-            managementToken: args.managementToken,
-            baseUrl: args.baseUrl,
-        });
+            links: bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl),
+            resourceId: args.resourceId,
+        }, () => ({
+            subject: `Booking Confirmed: ${args.eventTitle}`,
+            html: generateBookingConfirmationHTML({
+                bookerName: args.bookerName,
+                eventTitle: args.eventTitle,
+                start: args.start,
+                end: args.end,
+                timezone: args.timezone,
+                resourceId: args.resourceId,
+                bookingUid: args.bookingUid,
+                managementToken: args.managementToken,
+                baseUrl: args.baseUrl,
+            }),
+        }));
 
         try {
             const emailId = await resend.sendEmail(ctx, {
                 from: fromAddress,
                 to: args.to,
-                subject: `Booking Confirmed: ${args.eventTitle}`,
-                html,
+                ...content,
+                ...(args.emailContext?.notificationId
+                    ? { idempotencyKey: args.emailContext.notificationId }
+                    : {}),
             });
 
-            console.log(`[emails] Confirmation sent to ${args.to}, emailId: ${emailId}`);
+            console.log("[emails] confirmed email enqueued");
             return { success: true, emailId };
-        } catch (error) {
-            console.error(`[emails] Failed to send confirmation to ${args.to}:`, error);
-            return { success: false, error: String(error) };
+        } catch {
+            console.error("[emails] Failed to enqueue confirmation email");
+            return { success: false, error: "Email enqueue failed" };
         }
     },
 });
@@ -90,6 +112,8 @@ export const sendBookingConfirmation = internalMutation({
 
 export const sendBookingPending = internalMutation({
     args: {
+        renderer: v.optional(v.string()),
+        emailContext: v.optional(bookingEmailContextValidator),
         to: v.string(),
         bookerName: v.string(),
         eventTitle: v.string(),
@@ -124,30 +148,46 @@ export const sendBookingPending = internalMutation({
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
 
-        const html = generateBookingPendingHTML({
+        const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
+            version: 1,
+            kind: "pending",
             bookerName: args.bookerName,
+            bookerEmail: args.to,
             eventTitle: args.eventTitle,
             start: args.start,
             end: args.end,
             timezone: args.timezone,
             bookingUid: args.bookingUid,
-            managementToken: args.managementToken,
-            baseUrl: args.baseUrl,
-        });
+            links: bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl),
+        }, () => ({
+            subject: `Booking Request Received: ${args.eventTitle}`,
+            html: generateBookingPendingHTML({
+                bookerName: args.bookerName,
+                eventTitle: args.eventTitle,
+                start: args.start,
+                end: args.end,
+                timezone: args.timezone,
+                bookingUid: args.bookingUid,
+                managementToken: args.managementToken,
+                baseUrl: args.baseUrl,
+            }),
+        }));
 
         try {
             const emailId = await resend.sendEmail(ctx, {
                 from: fromAddress,
                 to: args.to,
-                subject: `Booking Request Received: ${args.eventTitle}`,
-                html,
+                ...content,
+                ...(args.emailContext?.notificationId
+                    ? { idempotencyKey: args.emailContext.notificationId }
+                    : {}),
             });
 
-            console.log(`[emails] Pending notification sent to ${args.to}, emailId: ${emailId}`);
+            console.log("[emails] pending email enqueued");
             return { success: true, emailId };
-        } catch (error) {
-            console.error(`[emails] Failed to send pending notification to ${args.to}:`, error);
-            return { success: false, error: String(error) };
+        } catch {
+            console.error("[emails] Failed to enqueue pending email");
+            return { success: false, error: "Email enqueue failed" };
         }
     },
 });
@@ -158,6 +198,8 @@ export const sendBookingPending = internalMutation({
 
 export const sendBookingApproved = internalMutation({
     args: {
+        renderer: v.optional(v.string()),
+        emailContext: v.optional(bookingEmailContextValidator),
         to: v.string(),
         bookerName: v.string(),
         eventTitle: v.string(),
@@ -192,30 +234,46 @@ export const sendBookingApproved = internalMutation({
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
 
-        const html = generateBookingApprovedHTML({
+        const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
+            version: 1,
+            kind: "approved",
             bookerName: args.bookerName,
+            bookerEmail: args.to,
             eventTitle: args.eventTitle,
             start: args.start,
             end: args.end,
             timezone: args.timezone,
             bookingUid: args.bookingUid,
-            managementToken: args.managementToken,
-            baseUrl: args.baseUrl,
-        });
+            links: bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl),
+        }, () => ({
+            subject: `Booking Approved: ${args.eventTitle}`,
+            html: generateBookingApprovedHTML({
+                bookerName: args.bookerName,
+                eventTitle: args.eventTitle,
+                start: args.start,
+                end: args.end,
+                timezone: args.timezone,
+                bookingUid: args.bookingUid,
+                managementToken: args.managementToken,
+                baseUrl: args.baseUrl,
+            }),
+        }));
 
         try {
             const emailId = await resend.sendEmail(ctx, {
                 from: fromAddress,
                 to: args.to,
-                subject: `Booking Approved: ${args.eventTitle}`,
-                html,
+                ...content,
+                ...(args.emailContext?.notificationId
+                    ? { idempotencyKey: args.emailContext.notificationId }
+                    : {}),
             });
 
-            console.log(`[emails] Approved notification sent to ${args.to}, emailId: ${emailId}`);
+            console.log("[emails] approved email enqueued");
             return { success: true, emailId };
-        } catch (error) {
-            console.error(`[emails] Failed to send approved notification to ${args.to}:`, error);
-            return { success: false, error: String(error) };
+        } catch {
+            console.error("[emails] Failed to enqueue approved email");
+            return { success: false, error: "Email enqueue failed" };
         }
     },
 });
@@ -226,6 +284,8 @@ export const sendBookingApproved = internalMutation({
 
 export const sendBookingDeclined = internalMutation({
     args: {
+        renderer: v.optional(v.string()),
+        emailContext: v.optional(bookingEmailContextValidator),
         to: v.string(),
         bookerName: v.string(),
         eventTitle: v.string(),
@@ -258,28 +318,43 @@ export const sendBookingDeclined = internalMutation({
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
 
-        const html = generateBookingDeclinedHTML({
+        const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
+            version: 1,
+            kind: "declined",
             bookerName: args.bookerName,
+            bookerEmail: args.to,
             eventTitle: args.eventTitle,
             start: args.start,
             end: args.end,
             timezone: args.timezone,
             reason: args.reason,
-        });
+        }, () => ({
+            subject: `Booking Request Declined: ${args.eventTitle}`,
+            html: generateBookingDeclinedHTML({
+                bookerName: args.bookerName,
+                eventTitle: args.eventTitle,
+                start: args.start,
+                end: args.end,
+                timezone: args.timezone,
+                reason: args.reason,
+            }),
+        }));
 
         try {
             const emailId = await resend.sendEmail(ctx, {
                 from: fromAddress,
                 to: args.to,
-                subject: `Booking Request Declined: ${args.eventTitle}`,
-                html,
+                ...content,
+                ...(args.emailContext?.notificationId
+                    ? { idempotencyKey: args.emailContext.notificationId }
+                    : {}),
             });
 
-            console.log(`[emails] Declined notification sent to ${args.to}, emailId: ${emailId}`);
+            console.log("[emails] declined email enqueued");
             return { success: true, emailId };
-        } catch (error) {
-            console.error(`[emails] Failed to send declined notification to ${args.to}:`, error);
-            return { success: false, error: String(error) };
+        } catch {
+            console.error("[emails] Failed to enqueue declined email");
+            return { success: false, error: "Email enqueue failed" };
         }
     },
 });
@@ -290,6 +365,8 @@ export const sendBookingDeclined = internalMutation({
 
 export const sendBookingCancellation = internalMutation({
     args: {
+        renderer: v.optional(v.string()),
+        emailContext: v.optional(bookingEmailContextValidator),
         to: v.string(),
         bookerName: v.string(),
         eventTitle: v.string(),
@@ -322,28 +399,43 @@ export const sendBookingCancellation = internalMutation({
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
 
-        const html = generateBookingCancellationHTML({
+        const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
+            version: 1,
+            kind: "cancelled",
             bookerName: args.bookerName,
+            bookerEmail: args.to,
             eventTitle: args.eventTitle,
             start: args.start,
             end: args.end,
             timezone: args.timezone,
             reason: args.reason,
-        });
+        }, () => ({
+            subject: `Booking Cancelled: ${args.eventTitle}`,
+            html: generateBookingCancellationHTML({
+                bookerName: args.bookerName,
+                eventTitle: args.eventTitle,
+                start: args.start,
+                end: args.end,
+                timezone: args.timezone,
+                reason: args.reason,
+            }),
+        }));
 
         try {
             const emailId = await resend.sendEmail(ctx, {
                 from: fromAddress,
                 to: args.to,
-                subject: `Booking Cancelled: ${args.eventTitle}`,
-                html,
+                ...content,
+                ...(args.emailContext?.notificationId
+                    ? { idempotencyKey: args.emailContext.notificationId }
+                    : {}),
             });
 
-            console.log(`[emails] Cancellation sent to ${args.to}, emailId: ${emailId}`);
+            console.log("[emails] cancelled email enqueued");
             return { success: true, emailId };
-        } catch (error) {
-            console.error(`[emails] Failed to send cancellation to ${args.to}:`, error);
-            return { success: false, error: String(error) };
+        } catch {
+            console.error("[emails] Failed to enqueue cancellation email");
+            return { success: false, error: "Email enqueue failed" };
         }
     },
 });
@@ -354,6 +446,8 @@ export const sendBookingCancellation = internalMutation({
 
 export const sendBookingRescheduled = internalMutation({
     args: {
+        renderer: v.optional(v.string()),
+        emailContext: v.optional(bookingEmailContextValidator),
         to: v.string(),
         bookerName: v.string(),
         eventTitle: v.string(),
@@ -390,32 +484,50 @@ export const sendBookingRescheduled = internalMutation({
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
 
-        const html = generateBookingRescheduledHTML({
+        const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
+            version: 1,
+            kind: "rescheduled",
             bookerName: args.bookerName,
+            bookerEmail: args.to,
             eventTitle: args.eventTitle,
-            oldStart: args.oldStart,
-            oldEnd: args.oldEnd,
-            newStart: args.newStart,
-            newEnd: args.newEnd,
+            start: args.newStart,
+            end: args.newEnd,
+            previousStart: args.oldStart,
+            previousEnd: args.oldEnd,
             timezone: args.timezone,
             bookingUid: args.bookingUid,
-            managementToken: args.managementToken,
-            baseUrl: args.baseUrl,
-        });
+            links: bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl),
+        }, () => ({
+            subject: `Booking Rescheduled: ${args.eventTitle}`,
+            html: generateBookingRescheduledHTML({
+                bookerName: args.bookerName,
+                eventTitle: args.eventTitle,
+                oldStart: args.oldStart,
+                oldEnd: args.oldEnd,
+                newStart: args.newStart,
+                newEnd: args.newEnd,
+                timezone: args.timezone,
+                bookingUid: args.bookingUid,
+                managementToken: args.managementToken,
+                baseUrl: args.baseUrl,
+            }),
+        }));
 
         try {
             const emailId = await resend.sendEmail(ctx, {
                 from: fromAddress,
                 to: args.to,
-                subject: `Booking Rescheduled: ${args.eventTitle}`,
-                html,
+                ...content,
+                ...(args.emailContext?.notificationId
+                    ? { idempotencyKey: args.emailContext.notificationId }
+                    : {}),
             });
 
-            console.log(`[emails] Rescheduled notification sent to ${args.to}, emailId: ${emailId}`);
+            console.log("[emails] rescheduled email enqueued");
             return { success: true, emailId };
-        } catch (error) {
-            console.error(`[emails] Failed to send rescheduled notification to ${args.to}:`, error);
-            return { success: false, error: String(error) };
+        } catch {
+            console.error("[emails] Failed to enqueue rescheduled email");
+            return { success: false, error: "Email enqueue failed" };
         }
     },
 });

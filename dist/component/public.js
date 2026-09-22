@@ -1,3 +1,5 @@
+import { createBookingEmailContext } from "./emails/context.js";
+import { bookingEmailOptionsValidator } from "../emails.js";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
@@ -272,11 +274,7 @@ export const createReservation = mutation({
         start: v.number(),
         end: v.number(),
         // Resend config passed from main app (components can't access process.env)
-        resendOptions: v.optional(v.object({
-            apiKey: v.string(),
-            fromEmail: v.optional(v.string()),
-            baseUrl: v.optional(v.string()),
-        })),
+        resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: v.id("bookings"),
     handler: async (ctx, args) => {
@@ -337,9 +335,13 @@ export const createReservation = mutation({
             createdAt: Date.now(),
             updatedAt: Date.now(),
         });
+        const notificationBooking = await ctx.db.get(bookingId);
+        if (!notificationBooking)
+            throw new Error("Booking not found after write");
         // Trigger booking.created hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.created",
+            emailContext: createBookingEmailContext("confirmed", notificationBooking, args.resendOptions),
             payload: {
                 bookingId,
                 resourceId,
@@ -375,11 +377,7 @@ export const createBooking = mutation({
             value: v.optional(v.string()),
         }),
         // Resend config passed from main app (components can't access process.env)
-        resendOptions: v.optional(v.object({
-            apiKey: v.string(),
-            fromEmail: v.optional(v.string()),
-            baseUrl: v.optional(v.string()),
-        })),
+        resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {
@@ -501,9 +499,13 @@ export const createBooking = mutation({
                 });
             }
         }
+        const doc = await ctx.db.get(bookingId);
+        if (!doc)
+            throw new Error("Booking not found after write");
         // 11. Trigger booking.created hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.created",
+            emailContext: createBookingEmailContext(initialStatus === "pending" ? "pending" : "confirmed", doc, args.resendOptions),
             organizationId: eventType.organizationId,
             payload: {
                 bookingId,
@@ -521,10 +523,7 @@ export const createBooking = mutation({
             },
             resendOptions: args.resendOptions,
         });
-        // 12. Return full booking object (just written — cannot be missing)
-        const doc = await ctx.db.get(bookingId);
-        if (!doc)
-            throw new Error("Booking not found after write");
+        // 12. Return the captured booking.
         return doc;
     },
 });
@@ -663,11 +662,7 @@ export const cancelReservation = mutation({
     args: {
         reservationId: v.id("bookings"),
         // Resend config passed from main app (components can't access process.env)
-        resendOptions: v.optional(v.object({
-            apiKey: v.string(),
-            fromEmail: v.optional(v.string()),
-            baseUrl: v.optional(v.string()),
-        })),
+        resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: cancelResult,
     handler: async (ctx, args) => {
@@ -689,6 +684,7 @@ export const cancelReservation = mutation({
         // 4. Trigger booking.cancelled hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
+            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions),
             organizationId: booking.organizationId,
             payload: {
                 bookingId: args.reservationId,
@@ -1076,11 +1072,7 @@ export const cancelBookingByToken = mutation({
         uid: v.string(),
         token: v.string(),
         reason: v.optional(v.string()),
-        resendOptions: v.optional(v.object({
-            apiKey: v.string(),
-            fromEmail: v.optional(v.string()),
-            baseUrl: v.optional(v.string()),
-        })),
+        resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: successResult,
     handler: async (ctx, args) => {
@@ -1121,6 +1113,7 @@ export const cancelBookingByToken = mutation({
         // 6. Trigger booking.cancelled hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
+            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason: args.reason || "Cancelled by booker" }),
             organizationId: booking.organizationId,
             payload: {
                 bookingId: booking._id,
@@ -1212,8 +1205,16 @@ async function moveBooking(ctx, original, args) {
         cancellationReason: reason,
         updatedAt: now,
     });
+    const booking = await ctx.db.get(newBookingId);
+    if (!booking)
+        throw new Error("Booking not found after write");
     await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
         eventType: "booking.rescheduled",
+        emailContext: createBookingEmailContext("rescheduled", booking, args.resendOptions, {
+            previousStart: original.start,
+            previousEnd: original.end,
+            reason: args.reason,
+        }),
         organizationId: original.organizationId,
         payload: {
             originalBookingId: original._id,
@@ -1233,9 +1234,6 @@ async function moveBooking(ctx, original, args) {
         },
         resendOptions: args.resendOptions,
     });
-    const booking = await ctx.db.get(newBookingId);
-    if (!booking)
-        throw new Error("Booking not found after write");
     return booking;
 }
 export const rescheduleBooking = mutation({
@@ -1244,11 +1242,7 @@ export const rescheduleBooking = mutation({
         newStart: v.number(),
         newEnd: v.number(),
         reason: v.optional(v.string()),
-        resendOptions: v.optional(v.object({
-            apiKey: v.string(),
-            fromEmail: v.optional(v.string()),
-            baseUrl: v.optional(v.string()),
-        })),
+        resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {
@@ -1265,11 +1259,7 @@ export const rescheduleBookingByToken = mutation({
         token: v.string(),
         newStart: v.number(),
         newEnd: v.number(),
-        resendOptions: v.optional(v.object({
-            apiKey: v.string(),
-            fromEmail: v.optional(v.string()),
-            baseUrl: v.optional(v.string()),
-        })),
+        resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {

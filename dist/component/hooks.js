@@ -1,3 +1,5 @@
+import { bookingEmailOptionsValidator, bookingEmailContextValidator } from "../emails.js";
+import { createBookingEmailContext } from "./emails/context.js";
 import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
@@ -122,12 +124,9 @@ export const triggerHooks = internalMutation({
         eventType: v.string(),
         organizationId: v.optional(v.string()),
         payload: v.any(),
+        emailContext: v.optional(bookingEmailContextValidator),
         // Resend config passed from main app (components can't access process.env)
-        resendOptions: v.optional(v.object({
-            apiKey: v.string(),
-            fromEmail: v.optional(v.string()),
-            baseUrl: v.optional(v.string()),
-        })),
+        resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: v.object({ triggeredCount: v.number(), emailsSent: v.boolean() }),
     handler: async (ctx, args) => {
@@ -141,6 +140,8 @@ export const triggerHooks = internalMutation({
             if (isPending) {
                 // Send "awaiting confirmation" email for pending bookings
                 await ctx.scheduler.runAfter(0, internal.emails.sendBookingPending, {
+                    renderer: args.resendOptions?.renderer,
+                    emailContext: args.emailContext,
                     to: payload.bookerEmail,
                     bookerName: payload.bookerName ?? "Guest",
                     eventTitle: payload.eventTitle ?? "Your Booking",
@@ -157,6 +158,8 @@ export const triggerHooks = internalMutation({
             else {
                 // Send confirmation email for immediately confirmed bookings
                 await ctx.scheduler.runAfter(0, internal.emails.sendBookingConfirmation, {
+                    renderer: args.resendOptions?.renderer,
+                    emailContext: args.emailContext,
                     to: payload.bookerEmail,
                     bookerName: payload.bookerName ?? "Guest",
                     eventTitle: payload.eventTitle ?? "Your Booking",
@@ -179,6 +182,8 @@ export const triggerHooks = internalMutation({
                 : internal.emails.sendBookingApproved;
             const emailPayload = payload.previousStatus === "provisional"
                 ? {
+                    renderer: args.resendOptions?.renderer,
+                    emailContext: args.emailContext,
                     to: payload.bookerEmail,
                     bookerName: payload.bookerName ?? "Guest",
                     eventTitle: payload.eventTitle ?? "Your Booking",
@@ -193,6 +198,8 @@ export const triggerHooks = internalMutation({
                     resendFromEmail: args.resendOptions?.fromEmail,
                 }
                 : {
+                    renderer: args.resendOptions?.renderer,
+                    emailContext: args.emailContext,
                     to: payload.bookerEmail,
                     bookerName: payload.bookerName ?? "Guest",
                     eventTitle: payload.eventTitle ?? "Your Booking",
@@ -210,6 +217,8 @@ export const triggerHooks = internalMutation({
         // Send cancellation email
         if (args.eventType === "booking.cancelled" && payload.bookerEmail) {
             await ctx.scheduler.runAfter(0, internal.emails.sendBookingCancellation, {
+                renderer: args.resendOptions?.renderer,
+                emailContext: args.emailContext,
                 to: payload.bookerEmail,
                 bookerName: payload.bookerName ?? "Guest",
                 eventTitle: payload.eventTitle ?? "Your Booking",
@@ -224,6 +233,8 @@ export const triggerHooks = internalMutation({
         // Send declined email when admin rejects a pending booking
         if (args.eventType === "booking.declined" && payload.bookerEmail) {
             await ctx.scheduler.runAfter(0, internal.emails.sendBookingDeclined, {
+                renderer: args.resendOptions?.renderer,
+                emailContext: args.emailContext,
                 to: payload.bookerEmail,
                 bookerName: payload.bookerName ?? "Guest",
                 eventTitle: payload.eventTitle ?? "Your Booking",
@@ -238,6 +249,8 @@ export const triggerHooks = internalMutation({
         // Send rescheduled email
         if (args.eventType === "booking.rescheduled" && payload.bookerEmail) {
             await ctx.scheduler.runAfter(0, internal.emails.sendBookingRescheduled, {
+                renderer: args.resendOptions?.renderer,
+                emailContext: args.emailContext,
                 to: payload.bookerEmail,
                 bookerName: payload.bookerName ?? "Guest",
                 eventTitle: payload.eventTitle ?? "Your Booking",
@@ -302,11 +315,7 @@ export const transitionBookingState = mutation({
         reason: v.optional(v.string()),
         changedBy: v.optional(v.string()),
         // Resend config passed from main app (components can't access process.env)
-        resendOptions: v.optional(v.object({
-            apiKey: v.string(),
-            fromEmail: v.optional(v.string()),
-            baseUrl: v.optional(v.string()),
-        })),
+        resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: successResult,
     handler: async (ctx, args) => {
@@ -350,11 +359,20 @@ export const transitionBookingState = mutation({
             // pooled resources) — the same logic as cancelMultiResourceBooking.
             await releaseAllSlotsForBooking(ctx, booking);
         }
+        // Capture notification data before a later mutation can change this booking.
+        const emailKind = args.toStatus === "confirmed"
+            ? (currentStatus === "provisional" ? "confirmed" : "approved")
+            : args.toStatus === "pending" || args.toStatus === "cancelled" || args.toStatus === "declined"
+                ? args.toStatus
+                : undefined;
         // Trigger hooks for the transition
         const hookEventType = `booking.${args.toStatus}`;
         if (HOOK_EVENTS.includes(hookEventType)) {
             await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
                 eventType: hookEventType,
+                emailContext: emailKind
+                    ? createBookingEmailContext(emailKind, booking, args.resendOptions, { reason: args.reason })
+                    : undefined,
                 organizationId: booking.organizationId,
                 payload: {
                     bookingId: args.bookingId,

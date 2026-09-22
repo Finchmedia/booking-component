@@ -1,10 +1,10 @@
 export declare const checkMultiResourceAvailability: import("convex/server").RegisteredQuery<"public", {
+    start: number;
+    end: number;
     resources: {
         quantity?: number | undefined;
         resourceId: string;
     }[];
-    start: number;
-    end: number;
 }, Promise<{
     available: boolean;
     resources: {
@@ -24,16 +24,17 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
     resendOptions?: {
         fromEmail?: string | undefined;
         baseUrl?: string | undefined;
+        renderer?: string | undefined;
         apiKey: string;
     } | undefined;
+    eventTypeId: string;
+    start: number;
+    end: number;
     timezone: string;
     resources: {
         quantity?: number | undefined;
         resourceId: string;
     }[];
-    eventTypeId: string;
-    start: number;
-    end: number;
     booker: {
         phone?: string | undefined;
         notes?: string | undefined;
@@ -51,23 +52,23 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
-    timezone: string;
-    createdAt: number;
-    updatedAt: number;
     resourceId: string;
     eventTypeId: string;
-    actorId: string;
-    start: number;
-    end: number;
-    status: string;
-    uid: string;
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;
+    start: number;
+    end: number;
+    timezone: string;
     location: {
         value?: string | undefined;
         type: string;
     };
+    uid: string;
+    actorId: string;
+    status: string;
+    createdAt: number;
+    updatedAt: number;
 }>>;
 export declare const getBookingWithItems: import("convex/server").RegisteredQuery<"public", {
     bookingId: import("convex/values").GenericId<"bookings">;
@@ -77,24 +78,24 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
             _id: import("convex/values").GenericId<"resources">;
             _creationTime: number;
             description?: string | undefined;
-            quantity?: number | undefined;
             isFungible?: boolean | undefined;
             isStandalone?: boolean | undefined;
             metadata?: Record<string, string> | undefined;
+            quantity?: number | undefined;
+            type: string;
             id: string;
             organizationId: string;
-            name: string;
             timezone: string;
-            type: string;
             isActive: boolean;
+            name: string;
             createdAt: number;
             updatedAt: number;
         } | null;
         _id: import("convex/values").GenericId<"booking_items">;
         _creationTime: number;
-        quantity: number;
-        resourceId: string;
         bookingId: import("convex/values").GenericId<"bookings">;
+        resourceId: string;
+        quantity: number;
     }[];
     _id: import("convex/values").GenericId<"bookings">;
     _creationTime: number;
@@ -106,29 +107,30 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
     cancellationReason?: string | undefined;
-    timezone: string;
-    createdAt: number;
-    updatedAt: number;
     resourceId: string;
     eventTypeId: string;
-    actorId: string;
-    start: number;
-    end: number;
-    status: string;
-    uid: string;
     bookerName: string;
     bookerEmail: string;
     eventTitle: string;
+    start: number;
+    end: number;
+    timezone: string;
     location: {
         value?: string | undefined;
         type: string;
     };
+    uid: string;
+    actorId: string;
+    status: string;
+    createdAt: number;
+    updatedAt: number;
 } | null>>;
 export declare const cancelMultiResourceBooking: import("convex/server").RegisteredMutation<"public", {
     reason?: string | undefined;
     resendOptions?: {
         fromEmail?: string | undefined;
         baseUrl?: string | undefined;
+        renderer?: string | undefined;
         apiKey: string;
     } | undefined;
     cancelledBy?: string | undefined;

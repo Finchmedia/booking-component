@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.2 — 23 September 2026
+
+### Added
+
+- Optional host-app email renderers through `@mrfinch/booking/emails`. A typed
+  internal query receives the notification snapshot and returns subject, HTML
+  and optional plain text; returning `null` retains the built-in template.
+- Renderer configuration travels with server-owned `resendOptions`. Booking
+  still selects lifecycle notifications and queues them through its nested
+  Resend component. Existing integrations need no changes.
+- Notification identities deduplicate new email jobs during replay. Custom
+  renderer errors fail the email job visibly without undoing the booking.
+
+### Integration
+
+- The initial renderer API supports the Convex query runtime, not Node-only
+  libraries or network requests. Custom subjects are limited to 200 UTF-16 code units;
+  combined UTF-8 subject/HTML/text content is limited to 128 KiB.
+- See the [custom email guide](docs/custom-emails.md) for setup, fallback,
+  management links and recovery. No database migration is required.
+
 ## 0.4.1 — 22 September 2026
 
 ### Fixed

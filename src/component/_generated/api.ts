@@ -10,8 +10,10 @@
 
 import type * as availability from "../availability.js";
 import type * as emails from "../emails.js";
+import type * as emails_context from "../emails/context.js";
 import type * as emails_helpers from "../emails/helpers.js";
 import type * as emails_mutations from "../emails/mutations.js";
+import type * as emails_renderer from "../emails/renderer.js";
 import type * as emails_styles from "../emails/styles.js";
 import type * as emails_templates_approved from "../emails/templates/approved.js";
 import type * as emails_templates_cancelled from "../emails/templates/cancelled.js";
@@ -43,8 +45,10 @@ import { anyApi, componentsGeneric } from "convex/server";
 const fullApi: ApiFromModules<{
   availability: typeof availability;
   emails: typeof emails;
+  "emails/context": typeof emails_context;
   "emails/helpers": typeof emails_helpers;
   "emails/mutations": typeof emails_mutations;
+  "emails/renderer": typeof emails_renderer;
   "emails/styles": typeof emails_styles;
   "emails/templates/approved": typeof emails_templates_approved;
   "emails/templates/cancelled": typeof emails_templates_cancelled;

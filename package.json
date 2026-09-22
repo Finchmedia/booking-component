@@ -9,7 +9,7 @@
   "bugs": {
     "url": "https://github.com/Finchmedia/booking-component/issues"
   },
-  "version": "0.4.1",
+  "version": "0.4.2",
   "license": "Apache-2.0",
   "keywords": [
     "convex",
@@ -37,6 +37,7 @@
   "files": [
     "dist",
     "src",
+    "docs",
     "!src/**/*.test.ts"
   ],
   "exports": {
@@ -48,6 +49,10 @@
     "./react": {
       "types": "./dist/react/index.d.ts",
       "default": "./dist/react/index.js"
+    },
+    "./emails": {
+      "types": "./dist/emails.d.ts",
+      "default": "./dist/emails.js"
     },
     "./test": "./src/test.ts",
     "./_generated/component.js": {

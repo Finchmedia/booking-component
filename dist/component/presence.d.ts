@@ -11,8 +11,8 @@ export declare const heartbeat: import("convex/server").RegisteredMutation<"publ
     eventTypeId?: string | undefined;
     data?: any;
     resourceId: string;
-    user: string;
     slots: string[];
+    user: string;
 }, Promise<null>>;
 /**
  * Explicitly removes a user from one or more slots.
@@ -21,8 +21,8 @@ export declare const heartbeat: import("convex/server").RegisteredMutation<"publ
  */
 export declare const leave: import("convex/server").RegisteredMutation<"public", {
     resourceId: string;
-    user: string;
     slots: string[];
+    user: string;
 }, Promise<null>>;
 /**
  * Returns the (up to 20) most recently active users present in a slot.
@@ -54,8 +54,8 @@ export declare const list: import("convex/server").RegisteredQuery<"public", {
  * @returns Array of active presence records for that resource+date
  */
 export declare const getDatePresence: import("convex/server").RegisteredQuery<"public", {
-    date: string;
     resourceId: string;
+    date: string;
 }, Promise<{
     slot: string;
     user: string;

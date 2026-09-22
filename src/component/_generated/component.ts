@@ -88,6 +88,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
           toStatus: string;
         },
@@ -162,6 +163,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
         },
         { success: boolean },
@@ -205,6 +207,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
           resources: Array<{ quantity?: number; resourceId: string }>;
           start: number;
@@ -357,6 +360,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
           token: string;
           uid: string;
@@ -372,6 +376,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
           reservationId: string;
         },
@@ -395,6 +400,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
           resourceId: string;
           start: number;
@@ -513,6 +519,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
           resourceId: string;
           start: number;
@@ -822,6 +829,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
         },
         {
@@ -862,6 +870,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             apiKey: string;
             baseUrl?: string;
             fromEmail?: string;
+            renderer?: string;
           };
           token: string;
           uid: string;

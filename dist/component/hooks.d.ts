@@ -12,10 +12,10 @@ export declare const listHooks: import("convex/server").RegisteredQuery<"public"
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
-    createdAt: number;
     eventType: string;
     functionHandle: string;
     enabled: boolean;
+    createdAt: number;
 }[]>>;
 export declare const getHook: import("convex/server").RegisteredQuery<"public", {
     hookId: import("convex/values").GenericId<"hooks">;
@@ -23,10 +23,10 @@ export declare const getHook: import("convex/server").RegisteredQuery<"public", 
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
-    createdAt: number;
     eventType: string;
     functionHandle: string;
     enabled: boolean;
+    createdAt: number;
 } | null>>;
 export declare const registerHook: import("convex/server").RegisteredMutation<"public", {
     organizationId?: string | undefined;
@@ -48,7 +48,37 @@ export declare const triggerHooks: import("convex/server").RegisteredMutation<"i
     resendOptions?: {
         fromEmail?: string | undefined;
         baseUrl?: string | undefined;
+        renderer?: string | undefined;
         apiKey: string;
+    } | undefined;
+    emailContext?: {
+        notificationId?: string | undefined;
+        occurredAt?: number | undefined;
+        bookingId?: string | undefined;
+        bookingUid?: string | undefined;
+        organizationId?: string | undefined;
+        resourceId?: string | undefined;
+        eventTypeId?: string | undefined;
+        previousStart?: number | undefined;
+        previousEnd?: number | undefined;
+        reason?: string | undefined;
+        location?: {
+            value?: string | undefined;
+            type: string;
+        } | undefined;
+        links?: {
+            view: string;
+            reschedule: string;
+            cancel: string;
+        } | undefined;
+        version: 1;
+        kind: "confirmed" | "pending" | "approved" | "declined" | "cancelled" | "rescheduled";
+        bookerName: string;
+        bookerEmail: string;
+        eventTitle: string;
+        start: number;
+        end: number;
+        timezone: string;
     } | undefined;
     eventType: string;
     payload: any;
@@ -57,11 +87,12 @@ export declare const triggerHooks: import("convex/server").RegisteredMutation<"i
     emailsSent: boolean;
 }>>;
 export declare const transitionBookingState: import("convex/server").RegisteredMutation<"public", {
-    changedBy?: string | undefined;
     reason?: string | undefined;
+    changedBy?: string | undefined;
     resendOptions?: {
         fromEmail?: string | undefined;
         baseUrl?: string | undefined;
+        renderer?: string | undefined;
         apiKey: string;
     } | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
@@ -74,11 +105,11 @@ export declare const getBookingHistory: import("convex/server").RegisteredQuery<
 }, Promise<{
     _id: import("convex/values").GenericId<"booking_history">;
     _creationTime: number;
-    changedBy?: string | undefined;
     reason?: string | undefined;
+    changedBy?: string | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
-    fromStatus: string;
     toStatus: string;
+    fromStatus: string;
     timestamp: number;
 }[]>>;
 //# sourceMappingURL=hooks.d.ts.map

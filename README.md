@@ -112,6 +112,7 @@ endpoints to authorized host wrappers.
   inventory; presence does not guarantee a reservation.
 - **Email:** optional Resend notifications and token-based management links.
   Follow the [email guide](https://convexbooking.dev/docs/integrations/email).
+  To use your app's own design, add an optional [email renderer](https://github.com/Finchmedia/booking-component/blob/main/docs/custom-emails.md).
 
 Your host enforces resource visibility, opening-hours policy, notice periods and
 abuse limits. The quickstart gateway implements common defaults. Buffer fields

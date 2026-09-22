@@ -8,12 +8,12 @@ export declare const getResource: import("convex/server").RegisteredQuery<"publi
     isStandalone?: boolean | undefined;
     metadata?: Record<string, string> | undefined;
     quantity?: number | undefined;
+    type: string;
+    id: string;
     organizationId: string;
     timezone: string;
-    id: string;
     isActive: boolean;
     name: string;
-    type: string;
     createdAt: number;
     updatedAt: number;
 } | null>>;
@@ -27,18 +27,18 @@ export declare const getResourceById: import("convex/server").RegisteredQuery<"p
     isStandalone?: boolean | undefined;
     metadata?: Record<string, string> | undefined;
     quantity?: number | undefined;
+    type: string;
+    id: string;
     organizationId: string;
     timezone: string;
-    id: string;
     isActive: boolean;
     name: string;
-    type: string;
     createdAt: number;
     updatedAt: number;
 } | null>>;
 export declare const listResources: import("convex/server").RegisteredQuery<"public", {
-    activeOnly?: boolean | undefined;
     type?: string | undefined;
+    activeOnly?: boolean | undefined;
     organizationId: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"resources">;
@@ -48,18 +48,18 @@ export declare const listResources: import("convex/server").RegisteredQuery<"pub
     isStandalone?: boolean | undefined;
     metadata?: Record<string, string> | undefined;
     quantity?: number | undefined;
+    type: string;
+    id: string;
     organizationId: string;
     timezone: string;
-    id: string;
     isActive: boolean;
     name: string;
-    type: string;
     createdAt: number;
     updatedAt: number;
 }[]>>;
 export declare const listResourcesByType: import("convex/server").RegisteredQuery<"public", {
-    organizationId: string;
     type: string;
+    organizationId: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"resources">;
     _creationTime: number;
@@ -68,12 +68,12 @@ export declare const listResourcesByType: import("convex/server").RegisteredQuer
     isStandalone?: boolean | undefined;
     metadata?: Record<string, string> | undefined;
     quantity?: number | undefined;
+    type: string;
+    id: string;
     organizationId: string;
     timezone: string;
-    id: string;
     isActive: boolean;
     name: string;
-    type: string;
     createdAt: number;
     updatedAt: number;
 }[]>>;
@@ -84,13 +84,14 @@ export declare const createResource: import("convex/server").RegisteredMutation<
     isStandalone?: boolean | undefined;
     metadata?: Record<string, string> | undefined;
     quantity?: number | undefined;
+    type: string;
+    id: string;
     organizationId: string;
     timezone: string;
-    id: string;
     name: string;
-    type: string;
 }, Promise<import("convex/values").GenericId<"resources">>>;
 export declare const updateResource: import("convex/server").RegisteredMutation<"public", {
+    type?: string | undefined;
     timezone?: string | undefined;
     description?: string | undefined;
     isActive?: boolean | undefined;
@@ -99,7 +100,6 @@ export declare const updateResource: import("convex/server").RegisteredMutation<
     metadata?: Record<string, string> | undefined;
     name?: string | undefined;
     quantity?: number | undefined;
-    type?: string | undefined;
     id: string;
 }, Promise<import("convex/values").GenericId<"resources">>>;
 export declare const deleteResource: import("convex/server").RegisteredMutation<"public", {
@@ -115,12 +115,12 @@ export declare const toggleResourceActive: import("convex/server").RegisteredMut
     affectedUsers: number;
 }>>;
 export declare const getResourceAvailability: import("convex/server").RegisteredQuery<"public", {
-    date: string;
     resourceId: string;
+    date: string;
 }, Promise<number[]>>;
 export declare const getQuantityAvailability: import("convex/server").RegisteredQuery<"public", {
-    date: string;
     resourceId: string;
+    date: string;
 }, Promise<{
     totalQuantity: number;
     bookedQuantities: any;

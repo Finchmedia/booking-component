@@ -1,3 +1,4 @@
+import { bookingEmailOptionsValidator } from "../emails.js";
 import { internalQueryGeneric, internalMutationGeneric } from "convex/server";
 import { v } from "convex/values";
 /**
@@ -157,10 +158,7 @@ export function makeInternalBookingAPI(component) {
                 actorId: v.string(),
                 start: v.number(),
                 end: v.number(),
-                resendOptions: v.optional(v.object({
-                    apiKey: v.string(),
-                    fromEmail: v.optional(v.string()),
-                })),
+                resendOptions: v.optional(bookingEmailOptionsValidator),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.public.createReservation, args);
@@ -183,10 +181,7 @@ export function makeInternalBookingAPI(component) {
                     type: v.string(),
                     value: v.optional(v.string()),
                 }),
-                resendOptions: v.optional(v.object({
-                    apiKey: v.string(),
-                    fromEmail: v.optional(v.string()),
-                })),
+                resendOptions: v.optional(bookingEmailOptionsValidator),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.public.createBooking, args);
@@ -245,10 +240,7 @@ export function makeInternalBookingAPI(component) {
         cancelReservation: internalMutationGeneric({
             args: {
                 reservationId: v.string(),
-                resendOptions: v.optional(v.object({
-                    apiKey: v.string(),
-                    fromEmail: v.optional(v.string()),
-                })),
+                resendOptions: v.optional(bookingEmailOptionsValidator),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.public.cancelReservation, {
@@ -552,10 +544,7 @@ export function makeInternalBookingAPI(component) {
                     type: v.string(),
                     value: v.optional(v.string()),
                 })),
-                resendOptions: v.optional(v.object({
-                    apiKey: v.string(),
-                    fromEmail: v.optional(v.string()),
-                })),
+                resendOptions: v.optional(bookingEmailOptionsValidator),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.multi_resource.createMultiResourceBooking, args);
@@ -574,10 +563,7 @@ export function makeInternalBookingAPI(component) {
                 bookingId: v.string(),
                 reason: v.optional(v.string()),
                 cancelledBy: v.optional(v.string()),
-                resendOptions: v.optional(v.object({
-                    apiKey: v.string(),
-                    fromEmail: v.optional(v.string()),
-                })),
+                resendOptions: v.optional(bookingEmailOptionsValidator),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.multi_resource.cancelMultiResourceBooking, {
@@ -615,10 +601,7 @@ export function makeInternalBookingAPI(component) {
                 toStatus: v.string(),
                 reason: v.optional(v.string()),
                 changedBy: v.optional(v.string()),
-                resendOptions: v.optional(v.object({
-                    apiKey: v.string(),
-                    fromEmail: v.optional(v.string()),
-                })),
+                resendOptions: v.optional(bookingEmailOptionsValidator),
             },
             handler: async (ctx, args) => {
                 return await ctx.runMutation(component.hooks.transitionBookingState, {
