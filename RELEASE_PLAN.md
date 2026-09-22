@@ -48,15 +48,21 @@ workspace under `reports/booking-release-audit-2026-09-22`.
   without deployment credentials; 223 docs links across 11 rendered pages pass.
 - Website lint passes with zero warnings/errors. Browser verification and final
   registry-backed production checks are recorded below when completed.
+- Final clean docs-app install/build uses the candidate archive with SHA-1
+  `024321d22b6c161d2ebec9300afec1dd1c2e23b8`. Its only change after fresh
+  consumer verification is the README; all code/types/manifests are byte-identical.
+- Browser booking, guest administration, token rescheduling and cancellation pass.
+  The demo now opens management after booking and distinguishes cancellation
+  from a prior reschedule correctly.
 
 ## Publication and deployment
 
-- [ ] Final browser smoke of booking/management/admin and documentation.
-- [ ] Commit and push matching source and tracked build output.
+- [x] Final browser smoke of booking/management/admin and documentation.
+- [x] Commit and push matching source and tracked build output; GitHub CI passes.
 - [ ] Publish verified 0.4.0 to npm and compare the registry artifact.
 - [ ] Update demo manifest/lockfile to registry 0.4.0; clean install and final checks.
 - [ ] Push demo/docs and verify Vercel/Convex production deployment and domain.
-- [ ] User submits component to the Convex directory manually in the browser.
+- Directory submission: the user will submit manually in the browser.
 
 Real outbound email delivery is not tested: the sandbox intentionally has no
 Resend key. Optional WorkOS setup is documented, not claimed live-tested. These
