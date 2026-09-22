@@ -45,7 +45,8 @@ workspace under `reports/booking-release-audit-2026-09-22`.
   for a full pool (exactly one commits), all-item moves, rollback and UTC midnight.
   Only isolated release-smoke fixtures were created/cancelled/deactivated.
 - 16 complete docs examples compile against 0.4.0; production Next.js build succeeds
-  without deployment credentials; 223 docs links across 11 rendered pages pass.
+  without deployment credentials; 223 docs links and nine tables across 11
+  rendered pages pass. Table rendering is checked in website CI.
 - Website lint passes with zero warnings/errors. Browser verification and final
   registry-backed production checks are recorded below when completed.
 - Final clean docs-app install/build uses the candidate archive with SHA-1
@@ -59,10 +60,20 @@ workspace under `reports/booking-release-audit-2026-09-22`.
 
 - [x] Final browser smoke of booking/management/admin and documentation.
 - [x] Commit and push matching source and tracked build output; GitHub CI passes.
-- [ ] Publish verified 0.4.0 to npm and compare the registry artifact.
-- [ ] Update demo manifest/lockfile to registry 0.4.0; clean install and final checks.
-- [ ] Push demo/docs and verify Vercel/Convex production deployment and domain.
+- [x] Publish verified 0.4.0 to npm and compare the registry artifact.
+- [x] Update demo manifest/lockfile to registry 0.4.0; clean install and final checks.
+- [x] Push demo/docs and verify Vercel/Convex production deployment and domain.
 - Directory submission: the user will submit manually in the browser.
+
+`@mrfinch/booking@0.4.0` is available under npm's `latest` tag. The downloaded
+registry archive is byte-identical to the verified archive above. The component
+source is on `main` with release tag `v0.4.0`.
+
+The registry-backed demo and docs are live at https://convexbooking.dev. All 13
+checked routes return HTTP 200; 223 documentation links, 62 anchors and nine tables
+pass production checks. A production browser check created an isolated booking,
+rescheduled it, verified the replacement UID and preserved contact details, then
+cancelled it and verified the cancellation reason. It left no active test booking.
 
 Real outbound email delivery is not tested: the sandbox intentionally has no
 Resend key. Optional WorkOS setup is documented, not claimed live-tested. These
