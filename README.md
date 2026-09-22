@@ -1,6 +1,7 @@
 # @mrfinch/booking
 
 [![npm version](https://badge.fury.io/js/@mrfinch%2Fbooking.svg)](https://www.npmjs.com/package/@mrfinch/booking)
+[![Convex Component](https://www.convex.dev/components/badge/mrfinch/booking)](https://www.convex.dev/components/mrfinch/booking)
 
 Booking and availability for Convex apps. Reserve rooms, people or equipment;
 combine resources into a booking; and track quantities for interchangeable items.
