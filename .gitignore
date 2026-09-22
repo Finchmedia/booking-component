@@ -13,3 +13,6 @@ node_modules
 # npm pack output
 *.tgz
 *.tsbuildinfo
+
+# Local example build
+/example/dist/

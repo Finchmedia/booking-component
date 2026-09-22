@@ -1,6 +1,28 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { holdsActiveInventory, usesQuantityInventory, validateResourceCapacity } from "./inventory_helpers";
 import { resourceDoc, successResult, successWithAffectedUsers, } from "./validators";
+/** A representation change must never reinterpret an existing active hold. */
+async function assertNoActiveBookings(ctx, resourceId) {
+    const primaryBookings = await ctx.db.query("bookings")
+        .withIndex("by_resource_start", q => q.eq("resourceId", resourceId)).collect();
+    if (primaryBookings.some(booking => holdsActiveInventory(booking.status))) {
+        throw new Error("Cannot change inventory mode while resource has active bookings");
+    }
+    const items = await ctx.db.query("booking_items")
+        .withIndex("by_resource", q => q.eq("resourceId", resourceId)).collect();
+    for (const item of items) {
+        const booking = await ctx.db.get(item.bookingId);
+        if (booking && holdsActiveInventory(booking.status)) {
+            throw new Error("Cannot change inventory mode while resource has active bookings");
+        }
+    }
+}
+/** Completed bookings keep historical counters; only current/future slots constrain capacity. */
+function slotIsCurrentOrFuture(date, slot, now) {
+    const today = new Date(now).toISOString().slice(0, 10);
+    return date > today || (date === today && slot >= Math.floor((now % 86_400_000) / 900_000));
+}
 // ============================================
 // RESOURCE QUERIES
 // ============================================
@@ -81,6 +103,7 @@ export const createResource = mutation({
     },
     returns: v.id("resources"),
     handler: async (ctx, args) => {
+        validateResourceCapacity(args);
         // Check for existing ID
         const existing = await ctx.db
             .query("resources")
@@ -88,6 +111,18 @@ export const createResource = mutation({
             .unique();
         if (existing) {
             throw new Error(`Resource with ID "${args.id}" already exists`);
+        }
+        // Legacy reservations can precede a resource document. Giving their ID a
+        // pooled counter representation must not hide its existing bitmap holds.
+        if (usesQuantityInventory(args)) {
+            await assertNoActiveBookings(ctx, args.id);
+            const now = Date.now();
+            const today = new Date(now).toISOString().slice(0, 10);
+            const reservedRows = await ctx.db.query("daily_availability")
+                .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
+            if (reservedRows.some(row => row.busySlots.some(slot => slotIsCurrentOrFuture(row.date, slot, now)))) {
+                throw new Error("Cannot change inventory mode while resource slots are reserved");
+            }
         }
         const now = Date.now();
         return await ctx.db.insert("resources", {
@@ -132,6 +167,39 @@ export const updateResource = mutation({
         if (!resource) {
             throw new Error(`Resource "${args.id}" not found`);
         }
+        const nextCapacity = {
+            quantity: args.quantity ?? resource.quantity,
+            isFungible: args.isFungible ?? resource.isFungible,
+        };
+        validateResourceCapacity(nextCapacity);
+        const changesInventoryMode = usesQuantityInventory(resource) !== usesQuantityInventory(nextCapacity);
+        const reducesCapacity = (nextCapacity.quantity ?? 1) < (resource.quantity ?? 1);
+        if (changesInventoryMode || reducesCapacity) {
+            if (changesInventoryMode)
+                await assertNoActiveBookings(ctx, args.id);
+            const now = Date.now();
+            const today = new Date(now).toISOString().slice(0, 10);
+            const quantityRows = await ctx.db.query("quantity_availability")
+                .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
+            for (const row of quantityRows) {
+                const reserved = Object.entries(row.slotQuantities)
+                    .filter(([slot]) => slotIsCurrentOrFuture(row.date, Number(slot), now))
+                    .map(([, count]) => count);
+                if (changesInventoryMode && reserved.some(count => count > 0)) {
+                    throw new Error("Cannot change inventory mode while resource slots are reserved");
+                }
+                if (reserved.some(count => count > (nextCapacity.quantity ?? 1))) {
+                    throw new Error("Cannot reduce capacity below already reserved quantities");
+                }
+            }
+            if (changesInventoryMode) {
+                const bitmapRows = await ctx.db.query("daily_availability")
+                    .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
+                if (bitmapRows.some(row => row.busySlots.some(slot => slotIsCurrentOrFuture(row.date, slot, now)))) {
+                    throw new Error("Cannot change inventory mode while resource slots are reserved");
+                }
+            }
+        }
         const updates = { updatedAt: Date.now() };
         if (args.name !== undefined)
             updates.name = args.name;
@@ -171,7 +239,9 @@ export const deleteResource = mutation({
             .query("bookings")
             .withIndex("by_resource_start", (q) => q.eq("resourceId", args.id))
             .first();
-        if (bookings) {
+        const bookedItem = await ctx.db.query("booking_items")
+            .withIndex("by_resource", q => q.eq("resourceId", args.id)).first();
+        if (bookings || bookedItem) {
             throw new Error("Cannot delete resource with existing bookings. Deactivate it instead.");
         }
         await ctx.db.delete(resource._id);
@@ -226,6 +296,16 @@ export const getResourceAvailability = query({
     },
     returns: v.array(v.number()),
     handler: async (ctx, args) => {
+        const resource = await ctx.db.query("resources")
+            .withIndex("by_external_id", q => q.eq("id", args.resourceId)).unique();
+        if (usesQuantityInventory(resource)) {
+            const quantityDoc = await ctx.db.query("quantity_availability")
+                .withIndex("by_resource_date", q => q.eq("resourceId", args.resourceId).eq("date", args.date)).unique();
+            const counts = (quantityDoc?.slotQuantities ?? {});
+            return Object.entries(counts)
+                .filter(([, count]) => count >= (resource?.quantity ?? 1))
+                .map(([slot]) => Number(slot)).sort((a, b) => a - b);
+        }
         const availability = await ctx.db
             .query("daily_availability")
             .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", args.date))
@@ -248,6 +328,14 @@ export const getQuantityAvailability = query({
             .unique();
         if (!resource) {
             return { totalQuantity: 0, bookedQuantities: {} };
+        }
+        if (!usesQuantityInventory(resource)) {
+            const availability = await ctx.db.query("daily_availability")
+                .withIndex("by_resource_date", q => q.eq("resourceId", args.resourceId).eq("date", args.date)).unique();
+            return {
+                totalQuantity: resource.quantity ?? 1,
+                bookedQuantities: Object.fromEntries((availability?.busySlots ?? []).map(slot => [String(slot), 1])),
+            };
         }
         const quantityDoc = await ctx.db
             .query("quantity_availability")

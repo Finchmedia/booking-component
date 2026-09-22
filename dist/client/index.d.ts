@@ -1,16 +1,17 @@
 import type { ComponentApi } from "../component/_generated/component.js";
 /**
- * Creates a client API for the booking component.
- * This allows the main app to easily mount the component's functionality.
+ * Creates server-only helpers for the booking component.
  *
- * Uses queryGeneric/mutationGeneric directly (not via parameters) so that
- * Convex codegen can properly extract FunctionReference types.
+ * Every returned function is internal: exporting it from a host Convex module
+ * does not make it callable by browser clients. Access these helpers through
+ * `internal.<module>.<function>`, or call `components.booking.*` directly.
  *
- * @param component - The component API object (from components.booking)
- * @returns An object containing the public queries and mutations
+ * For public APIs, write host query/mutation functions that enforce your
+ * authentication, organization ownership and booking policy before calling the
+ * component. No public-function factory is provided.
  */
-export declare function makeBookingAPI(component: ComponentApi): {
-    getEventType: import("convex/server").RegisteredQuery<"public", {
+export declare function makeInternalBookingAPI(component: ComponentApi): {
+    getEventType: import("convex/server").RegisteredQuery<"internal", {
         eventTypeId: string;
     }, Promise<{
         _creationTime: number;
@@ -40,7 +41,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         title: string;
         updatedAt?: number;
     }>>;
-    getEventTypeBySlug: import("convex/server").RegisteredQuery<"public", {
+    getEventTypeBySlug: import("convex/server").RegisteredQuery<"internal", {
         slug: string;
     }, Promise<{
         _creationTime: number;
@@ -70,7 +71,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         title: string;
         updatedAt?: number;
     } | null>>;
-    listEventTypes: import("convex/server").RegisteredQuery<"public", {
+    listEventTypes: import("convex/server").RegisteredQuery<"internal", {
         organizationId?: string | undefined;
         activeOnly?: boolean | undefined;
     }, Promise<{
@@ -101,7 +102,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         title: string;
         updatedAt?: number;
     }[]>>;
-    createEventType: import("convex/server").RegisteredMutation<"public", {
+    createEventType: import("convex/server").RegisteredMutation<"internal", {
         organizationId?: string | undefined;
         bufferAfter?: number | undefined;
         bufferBefore?: number | undefined;
@@ -125,7 +126,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         slug: string;
         title: string;
     }, Promise<string>>;
-    updateEventType: import("convex/server").RegisteredMutation<"public", {
+    updateEventType: import("convex/server").RegisteredMutation<"internal", {
         timezone?: string | undefined;
         bufferAfter?: number | undefined;
         bufferBefore?: number | undefined;
@@ -148,24 +149,24 @@ export declare function makeBookingAPI(component: ComponentApi): {
         title?: string | undefined;
         id: string;
     }, Promise<string>>;
-    deleteEventType: import("convex/server").RegisteredMutation<"public", {
+    deleteEventType: import("convex/server").RegisteredMutation<"internal", {
         id: string;
     }, Promise<{
         success: boolean;
     }>>;
-    toggleEventTypeActive: import("convex/server").RegisteredMutation<"public", {
+    toggleEventTypeActive: import("convex/server").RegisteredMutation<"internal", {
         id: string;
         isActive: boolean;
     }, Promise<{
         affectedUsers: number;
         success: boolean;
     }>>;
-    getAvailability: import("convex/server").RegisteredQuery<"public", {
+    getAvailability: import("convex/server").RegisteredQuery<"internal", {
         resourceId: string;
         end: number;
         start: number;
     }, Promise<boolean>>;
-    getMonthAvailability: import("convex/server").RegisteredQuery<"public", {
+    getMonthAvailability: import("convex/server").RegisteredQuery<"internal", {
         scheduleId?: string | undefined;
         slotInterval?: number | undefined;
         excludeBookingUid?: string | undefined;
@@ -175,7 +176,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         dateFrom: string;
         dateTo: string;
     }, Promise<Record<string, boolean>>>;
-    getDaySlots: import("convex/server").RegisteredQuery<"public", {
+    getDaySlots: import("convex/server").RegisteredQuery<"internal", {
         slotInterval?: number | undefined;
         availableSlots?: number[] | undefined;
         excludeBookingUid?: string | undefined;
@@ -186,7 +187,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
     }, Promise<{
         time: string;
     }[]>>;
-    createReservation: import("convex/server").RegisteredMutation<"public", {
+    createReservation: import("convex/server").RegisteredMutation<"internal", {
         resendOptions?: {
             fromEmail?: string | undefined;
             apiKey: string;
@@ -196,7 +197,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         start: number;
         actorId: string;
     }, Promise<string>>;
-    createBooking: import("convex/server").RegisteredMutation<"public", {
+    createBooking: import("convex/server").RegisteredMutation<"internal", {
         resendOptions?: {
             fromEmail?: string | undefined;
             apiKey: string;
@@ -245,7 +246,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         uid: string;
         updatedAt: number;
     }>>;
-    createProvisionalBooking: import("convex/server").RegisteredMutation<"public", {
+    createProvisionalBooking: import("convex/server").RegisteredMutation<"internal", {
         resourceId: string;
         end: number;
         start: number;
@@ -290,7 +291,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         uid: string;
         updatedAt: number;
     }>>;
-    getBooking: import("convex/server").RegisteredQuery<"public", {
+    getBooking: import("convex/server").RegisteredQuery<"internal", {
         bookingId: string;
     }, Promise<{
         _creationTime: number;
@@ -321,7 +322,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         uid: string;
         updatedAt: number;
     } | null>>;
-    getBookingByUid: import("convex/server").RegisteredQuery<"public", {
+    getBookingByUid: import("convex/server").RegisteredQuery<"internal", {
         uid: string;
     }, Promise<{
         _creationTime: number;
@@ -352,7 +353,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         uid: string;
         updatedAt: number;
     } | null>>;
-    listBookings: import("convex/server").RegisteredQuery<"public", {
+    listBookings: import("convex/server").RegisteredQuery<"internal", {
         organizationId?: string | undefined;
         resourceId?: string | undefined;
         eventTypeId?: string | undefined;
@@ -389,7 +390,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         uid: string;
         updatedAt: number;
     }[]>>;
-    cancelReservation: import("convex/server").RegisteredMutation<"public", {
+    cancelReservation: import("convex/server").RegisteredMutation<"internal", {
         resendOptions?: {
             fromEmail?: string | undefined;
             apiKey: string;
@@ -399,14 +400,14 @@ export declare function makeBookingAPI(component: ComponentApi): {
         alreadyCancelled: boolean;
         success: boolean;
     }>>;
-    expireProvisionalBooking: import("convex/server").RegisteredMutation<"public", {
+    expireProvisionalBooking: import("convex/server").RegisteredMutation<"internal", {
         reason?: string | undefined;
         bookingId: string;
     }, Promise<{
         reason?: string;
         success: boolean;
     }>>;
-    getResource: import("convex/server").RegisteredQuery<"public", {
+    getResource: import("convex/server").RegisteredQuery<"internal", {
         id: string;
     }, Promise<{
         _creationTime: number;
@@ -425,7 +426,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         type: string;
         updatedAt: number;
     } | null>>;
-    listResources: import("convex/server").RegisteredQuery<"public", {
+    listResources: import("convex/server").RegisteredQuery<"internal", {
         activeOnly?: boolean | undefined;
         type?: string | undefined;
         organizationId: string;
@@ -446,7 +447,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         type: string;
         updatedAt: number;
     }[]>>;
-    createResource: import("convex/server").RegisteredMutation<"public", {
+    createResource: import("convex/server").RegisteredMutation<"internal", {
         description?: string | undefined;
         isActive?: boolean | undefined;
         isFungible?: boolean | undefined;
@@ -459,7 +460,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         name: string;
         type: string;
     }, Promise<string>>;
-    updateResource: import("convex/server").RegisteredMutation<"public", {
+    updateResource: import("convex/server").RegisteredMutation<"internal", {
         timezone?: string | undefined;
         description?: string | undefined;
         isActive?: boolean | undefined;
@@ -471,19 +472,19 @@ export declare function makeBookingAPI(component: ComponentApi): {
         type?: string | undefined;
         id: string;
     }, Promise<string>>;
-    deleteResource: import("convex/server").RegisteredMutation<"public", {
+    deleteResource: import("convex/server").RegisteredMutation<"internal", {
         id: string;
     }, Promise<{
         success: boolean;
     }>>;
-    toggleResourceActive: import("convex/server").RegisteredMutation<"public", {
+    toggleResourceActive: import("convex/server").RegisteredMutation<"internal", {
         id: string;
         isActive: boolean;
     }, Promise<{
         affectedUsers: number;
         success: boolean;
     }>>;
-    getEventTypesForResource: import("convex/server").RegisteredQuery<"public", {
+    getEventTypesForResource: import("convex/server").RegisteredQuery<"internal", {
         resourceId: string;
     }, Promise<{
         _creationTime: number;
@@ -513,7 +514,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         title: string;
         updatedAt?: number;
     }[]>>;
-    getResourcesForEventType: import("convex/server").RegisteredQuery<"public", {
+    getResourcesForEventType: import("convex/server").RegisteredQuery<"internal", {
         eventTypeId: string;
     }, Promise<{
         _creationTime: number;
@@ -532,40 +533,40 @@ export declare function makeBookingAPI(component: ComponentApi): {
         type: string;
         updatedAt: number;
     }[]>>;
-    getResourceIdsForEventType: import("convex/server").RegisteredQuery<"public", {
+    getResourceIdsForEventType: import("convex/server").RegisteredQuery<"internal", {
         eventTypeId: string;
     }, Promise<string[]>>;
-    getEventTypeIdsForResource: import("convex/server").RegisteredQuery<"public", {
+    getEventTypeIdsForResource: import("convex/server").RegisteredQuery<"internal", {
         resourceId: string;
     }, Promise<string[]>>;
-    hasResourceEventTypeLink: import("convex/server").RegisteredQuery<"public", {
+    hasResourceEventTypeLink: import("convex/server").RegisteredQuery<"internal", {
         resourceId: string;
         eventTypeId: string;
     }, Promise<boolean>>;
-    linkResourceToEventType: import("convex/server").RegisteredMutation<"public", {
+    linkResourceToEventType: import("convex/server").RegisteredMutation<"internal", {
         resourceId: string;
         eventTypeId: string;
     }, Promise<string>>;
-    unlinkResourceFromEventType: import("convex/server").RegisteredMutation<"public", {
+    unlinkResourceFromEventType: import("convex/server").RegisteredMutation<"internal", {
         resourceId: string;
         eventTypeId: string;
     }, Promise<{
         existed: boolean;
         success: boolean;
     }>>;
-    setResourcesForEventType: import("convex/server").RegisteredMutation<"public", {
+    setResourcesForEventType: import("convex/server").RegisteredMutation<"internal", {
         eventTypeId: string;
         resourceIds: string[];
     }, Promise<{
         success: boolean;
     }>>;
-    setEventTypesForResource: import("convex/server").RegisteredMutation<"public", {
+    setEventTypesForResource: import("convex/server").RegisteredMutation<"internal", {
         resourceId: string;
         eventTypeIds: string[];
     }, Promise<{
         success: boolean;
     }>>;
-    getSchedule: import("convex/server").RegisteredQuery<"public", {
+    getSchedule: import("convex/server").RegisteredQuery<"internal", {
         id: string;
     }, Promise<{
         _creationTime: number;
@@ -583,7 +584,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
             startTime: string;
         }>;
     } | null>>;
-    listSchedules: import("convex/server").RegisteredQuery<"public", {
+    listSchedules: import("convex/server").RegisteredQuery<"internal", {
         organizationId: string;
     }, Promise<{
         _creationTime: number;
@@ -601,7 +602,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
             startTime: string;
         }>;
     }[]>>;
-    getDefaultSchedule: import("convex/server").RegisteredQuery<"public", {
+    getDefaultSchedule: import("convex/server").RegisteredQuery<"internal", {
         organizationId: string;
     }, Promise<{
         _creationTime: number;
@@ -619,7 +620,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
             startTime: string;
         }>;
     } | null>>;
-    createSchedule: import("convex/server").RegisteredMutation<"public", {
+    createSchedule: import("convex/server").RegisteredMutation<"internal", {
         isDefault?: boolean | undefined;
         organizationId: string;
         timezone: string;
@@ -631,7 +632,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
             endTime: string;
         }[];
     }, Promise<string>>;
-    updateSchedule: import("convex/server").RegisteredMutation<"public", {
+    updateSchedule: import("convex/server").RegisteredMutation<"internal", {
         timezone?: string | undefined;
         name?: string | undefined;
         isDefault?: boolean | undefined;
@@ -642,18 +643,18 @@ export declare function makeBookingAPI(component: ComponentApi): {
         }[] | undefined;
         id: string;
     }, Promise<string>>;
-    deleteSchedule: import("convex/server").RegisteredMutation<"public", {
+    deleteSchedule: import("convex/server").RegisteredMutation<"internal", {
         id: string;
     }, Promise<{
         success: boolean;
     }>>;
-    getEffectiveAvailability: import("convex/server").RegisteredQuery<"public", {
+    getEffectiveAvailability: import("convex/server").RegisteredQuery<"internal", {
         date: string;
         scheduleId: string;
     }, Promise<{
         availableSlots: Array<number>;
     }>>;
-    listDateOverrides: import("convex/server").RegisteredQuery<"public", {
+    listDateOverrides: import("convex/server").RegisteredQuery<"internal", {
         dateFrom?: string | undefined;
         dateTo?: string | undefined;
         scheduleId: string;
@@ -668,7 +669,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         scheduleId: string;
         type: string;
     }[]>>;
-    createDateOverride: import("convex/server").RegisteredMutation<"public", {
+    createDateOverride: import("convex/server").RegisteredMutation<"internal", {
         customHours?: {
             startTime: string;
             endTime: string;
@@ -677,12 +678,12 @@ export declare function makeBookingAPI(component: ComponentApi): {
         scheduleId: string;
         type: string;
     }, Promise<string>>;
-    deleteDateOverride: import("convex/server").RegisteredMutation<"public", {
+    deleteDateOverride: import("convex/server").RegisteredMutation<"internal", {
         overrideId: string;
     }, Promise<{
         success: boolean;
     }>>;
-    checkMultiResourceAvailability: import("convex/server").RegisteredQuery<"public", {
+    checkMultiResourceAvailability: import("convex/server").RegisteredQuery<"internal", {
         end: number;
         resources: {
             quantity?: number | undefined;
@@ -699,7 +700,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
             resourceId: string;
         }>;
     }>>;
-    createMultiResourceBooking: import("convex/server").RegisteredMutation<"public", {
+    createMultiResourceBooking: import("convex/server").RegisteredMutation<"internal", {
         organizationId?: string | undefined;
         resendOptions?: {
             fromEmail?: string | undefined;
@@ -752,7 +753,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         uid: string;
         updatedAt: number;
     }>>;
-    getBookingWithItems: import("convex/server").RegisteredQuery<"public", {
+    getBookingWithItems: import("convex/server").RegisteredQuery<"internal", {
         bookingId: string;
     }, Promise<{
         _creationTime: number;
@@ -807,7 +808,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         uid: string;
         updatedAt: number;
     } | null>>;
-    cancelMultiResourceBooking: import("convex/server").RegisteredMutation<"public", {
+    cancelMultiResourceBooking: import("convex/server").RegisteredMutation<"internal", {
         reason?: string | undefined;
         resendOptions?: {
             fromEmail?: string | undefined;
@@ -818,17 +819,17 @@ export declare function makeBookingAPI(component: ComponentApi): {
     }, Promise<{
         success: boolean;
     }>>;
-    registerHook: import("convex/server").RegisteredMutation<"public", {
+    registerHook: import("convex/server").RegisteredMutation<"internal", {
         organizationId?: string | undefined;
         eventType: string;
         functionHandle: string;
     }, Promise<string>>;
-    unregisterHook: import("convex/server").RegisteredMutation<"public", {
+    unregisterHook: import("convex/server").RegisteredMutation<"internal", {
         hookId: string;
     }, Promise<{
         success: boolean;
     }>>;
-    transitionBookingState: import("convex/server").RegisteredMutation<"public", {
+    transitionBookingState: import("convex/server").RegisteredMutation<"internal", {
         changedBy?: string | undefined;
         reason?: string | undefined;
         resendOptions?: {
@@ -840,7 +841,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
     }, Promise<{
         success: boolean;
     }>>;
-    getBookingHistory: import("convex/server").RegisteredQuery<"public", {
+    getBookingHistory: import("convex/server").RegisteredQuery<"internal", {
         bookingId: string;
     }, Promise<{
         _creationTime: number;
@@ -852,19 +853,19 @@ export declare function makeBookingAPI(component: ComponentApi): {
         timestamp: number;
         toStatus: string;
     }[]>>;
-    heartbeat: import("convex/server").RegisteredMutation<"public", {
+    heartbeat: import("convex/server").RegisteredMutation<"internal", {
         eventTypeId?: string | undefined;
         data?: any;
         resourceId: string;
         slots: string[];
         user: string;
     }, Promise<null>>;
-    leave: import("convex/server").RegisteredMutation<"public", {
+    leave: import("convex/server").RegisteredMutation<"internal", {
         resourceId: string;
         slots: string[];
         user: string;
     }, Promise<null>>;
-    getPresence: import("convex/server").RegisteredQuery<"public", {
+    getPresence: import("convex/server").RegisteredQuery<"internal", {
         resourceId: string;
         slot: string;
     }, Promise<{
@@ -877,7 +878,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         updated: number;
         user: string;
     }[]>>;
-    getDatePresence: import("convex/server").RegisteredQuery<"public", {
+    getDatePresence: import("convex/server").RegisteredQuery<"internal", {
         date: string;
         resourceId: string;
     }, Promise<{
@@ -885,21 +886,21 @@ export declare function makeBookingAPI(component: ComponentApi): {
         updated: number;
         user: string;
     }[]>>;
-    getActivePresenceCount: import("convex/server").RegisteredQuery<"public", {
+    getActivePresenceCount: import("convex/server").RegisteredQuery<"internal", {
         resourceId?: string | undefined;
         eventTypeId?: string | undefined;
     }, Promise<{
         count: number;
         users: Array<string>;
     }>>;
-    wipeAllBookingData: import("convex/server").RegisteredMutation<"public", {}, Promise<{
+    wipeAllBookingData: import("convex/server").RegisteredMutation<"internal", {}, Promise<{
         bookingHistory: number;
         bookingItems: number;
         bookings: number;
         dailyAvailability: number;
         quantityAvailability: number;
     }>>;
-    wipeAllData: import("convex/server").RegisteredMutation<"public", {}, Promise<{
+    wipeAllData: import("convex/server").RegisteredMutation<"internal", {}, Promise<{
         bookingHistory: number;
         bookingItems: number;
         bookings: number;
@@ -912,7 +913,7 @@ export declare function makeBookingAPI(component: ComponentApi): {
         resources: number;
         schedules: number;
     }>>;
-    getDailyAvailability: import("convex/server").RegisteredQuery<"public", {
+    getDailyAvailability: import("convex/server").RegisteredQuery<"internal", {
         date: string;
         resourceId: string;
     }, Promise<number[] | null>>;

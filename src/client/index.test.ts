@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { anyApi, type ApiFromModules } from "convex/server";
-import { makeBookingAPI } from "./index.js";
+import { makeInternalBookingAPI } from "./index.js";
 import { components, initConvexTest } from "./setup.test.js";
 
 // The wrappers are exported so convex-test can address them as the app module
@@ -15,7 +15,7 @@ export const {
   getDaySlots,
   createBooking,
   getDailyAvailability,
-} = makeBookingAPI(components.booking);
+} = makeInternalBookingAPI(components.booking);
 
 const testApi = (
   anyApi as unknown as ApiFromModules<{
@@ -80,7 +80,6 @@ async function seedThroughWrappers(t: Client) {
 }
 
 /** Schedule-aware day view through the wrappers, as ISO start times. */
-// ComponentApi return types are `any` (no `returns` validators), so annotate here.
 async function daySlots(t: Client): Promise<string[]> {
   const { availableSlots } = await t.query(testApi.getEffectiveAvailability, {
     scheduleId: SCHEDULE,
@@ -109,7 +108,7 @@ function bookTenToEleven(t: Client) {
   });
 }
 
-describe("client wrappers (makeBookingAPI)", () => {
+describe("client wrappers (makeInternalBookingAPI)", () => {
   let t: Client;
 
   beforeEach(() => {

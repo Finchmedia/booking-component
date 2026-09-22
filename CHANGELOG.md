@@ -1,17 +1,52 @@
 # Changelog
 
-## 0.3.2
+## 0.4.0 — 22 September 2026
 
-Cosmetic release: no runtime changes.
+### Upgrading
 
-### Changed
+- Requires Convex 1.46 or newer. React UI peers now require convex-helpers
+  0.1.124, resolvers 5.9.1, react-hook-form 7.88 and lucide-react 1.47 or newer
+  within their declared compatible ranges. React 18 and 19 remain supported.
+- Replace the removed public `makeBookingAPI` factory with guarded host functions
+  that call `components.booking.*`. The new `makeInternalBookingAPI` exports
+  internal functions only, including maintenance and administrative operations.
+  See the [authorization guide](https://convexbooking.dev/docs/authentication).
+- The React slot type is now `BookingSlot`. Update imports of the former
+  `CalcomSlot` name; the data shape is unchanged.
+- Quantities and capacities must be positive safe integers. Duplicate resource
+  IDs and quantities other than one for exclusive resources are rejected.
+- Use the multi-resource API for fungible pools, even when booking one pool.
+  Ordinary, provisional and reservation creation reject pools; ordinary slot
+  queries do not advertise them.
 
-- **Public type rename: `CalcomSlot` → `BookingSlot`** (exported from
-  `@mrfinch/booking/react`, used by `TimeSlotsPanel` / `TimeSlotButton` props).
-  The shape is unchanged (`{ time: string; attendees?: number }`). If you import
-  the type by name, update the import; nothing else changes.
-- Comments no longer reference third-party products; the repository carries no
-  competitor brand names in its API, comments or docs.
+### Fixed
+
+- Terminal bookings cannot release inventory a second time. Token cancellation
+  releases every item in a bundle without disturbing unrelated bookings.
+- Both reschedule paths move all items atomically, preserve quantities, snapshots,
+  status and management tokens, and return a new booking UID. Destination
+  conflicts roll back the entire move. Reschedule notifications link to the new UID.
+- Resource registration and inventory-mode changes cannot reinterpret occupied
+  inventory. Capacity reductions cannot undercut reserved current/future slots.
+  Completed historical bookings remain recorded without permanently blocking
+  future capacity changes. Booked secondary resources cannot be deleted.
+- Availability uses the same quantity validation and pool-capacity rules as writes.
+- Booker duration defaults follow loaded options; locked durations remain stable.
+  Presence updates follow duration changes, retry failed heartbeats and clean up
+  after navigation. Elapsed slots refresh while the calendar stays open.
+
+### Maintenance and documentation
+
+- Refreshed runtime dependencies and compatible tooling; Node 24 is the
+  contributor and CI baseline. TypeScript remains on 6 while the ESLint parser
+  does not support TypeScript 7. Zod 4 is an owned dependency for the built-in form.
+- Added inventory, host authorization and rendered React regressions. Removed
+  frontend lint errors and warnings and enabled strict peer installs in CI.
+- Reworked the README and documentation around installation, a guarded host
+  gateway and a first booking. Demo administration and provider-specific setup
+  are separate guides. Complete examples are compiled and rendered links checked.
+- Buffer fields remain stored configuration; hosts must enforce booking gaps.
+  Presence is advisory. Database transactions enforce booking conflicts.
 
 ## 0.3.1
 
@@ -51,9 +86,8 @@ before bumping.
   `peerDependenciesMeta`. `convex-helpers` is only imported by `./react`; recent
   `convex-helpers` releases require `convex >= 1.43`, so hosts on 1.29–1.42
   that use `./react` should pin `convex-helpers@0.1.106`. Nothing
-  behind the package root imports them, so backend-only installs no longer pull
-  the React stack (or hit `ERESOLVE` against a React 17 / zod 4 host) for the
-  `./react` subpath they never use. Install them yourself when you use
+  behind the package root imports them directly. Transitive dependencies can
+  still install React-related packages; this is not a React-free dependency-tree guarantee. Install them yourself when you use
   `@mrfinch/booking/react`.
 
 ### Added
@@ -289,7 +323,7 @@ admin forms before upgrading.
 ## 0.2.5
 
 - Provisional bookings (`createProvisionalBooking`, `expireProvisionalBooking`)
-  and the `booking.pending` hook event. Never published to npm.
+  and the `booking.pending` hook event. Published to npm on 7 April 2026.
 
 ## 0.2.4
 

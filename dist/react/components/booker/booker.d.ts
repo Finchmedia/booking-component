@@ -42,5 +42,5 @@ export interface BookerProps {
      */
     reuseBookerInfo?: boolean;
 }
-export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, currentUser, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, originalBooking, reuseBookerInfo, }: BookerProps): import("react/jsx-runtime").JSX.Element;
+export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, currentUser, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, originalBooking, reuseBookerInfo, }: BookerProps): import("react").JSX.Element;
 //# sourceMappingURL=booker.d.ts.map

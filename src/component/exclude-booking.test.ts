@@ -488,27 +488,27 @@ describe("reschedule self-overlap", () => {
         newStart: berlin(seed.date, "10:30"), // UTC 38..41 → 40,41 foreign
         newEnd: berlin(seed.date, "11:30"),
       })
-    ).rejects.toThrow("Resource is not available for the requested time range");
+    ).rejects.toThrow(`Resource "${seed.resourceId}" is not available for the selected time`);
 
     // Nothing moved.
     expect(await getBusySlots(t, seed.resourceId, seed.date)).toEqual([32, 33, 34, 35, 40, 41, 42, 43]);
     expect((await t.query(api.public.getBookingByUid, { uid: a!.uid }))!.status).toBe("confirmed");
   });
 
-  test("the id path rejects a foreign conflict with the per-day slot message and rolls back", async () => {
+  test("the id path rejects a foreign conflict and rolls back", async () => {
     const seed = await seedBerlin(t);
     const a = await bookNine(t, seed);
     await book(t, seed, berlin(seed.date, "11:00"), berlin(seed.date, "12:00")); // UTC 40..43
 
-    // rescheduleBooking has no isAvailable() pre-check: it frees the old slots
-    // first and then hits the per-day conflict check in step 8.
+    // Both reschedule paths release their own inventory inside the transaction,
+    // then reject the foreign resource conflict and roll the entire move back.
     await expect(
       t.mutation(api.public.rescheduleBooking, {
         bookingId: a!._id,
         newStart: berlin(seed.date, "10:30"),
         newEnd: berlin(seed.date, "11:30"),
       })
-    ).rejects.toThrow(`Conflict detected on ${seed.date} at slot 40`);
+    ).rejects.toThrow(`Resource "${seed.resourceId}" is not available for the selected time`);
 
     // The rolled-back mutation left neither the booking nor the bitmap changed.
     expect(await getBusySlots(t, seed.resourceId, seed.date)).toEqual([32, 33, 34, 35, 40, 41, 42, 43]);

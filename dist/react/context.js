@@ -1,5 +1,7 @@
 "use client";
 import { jsx as _jsx } from "react/jsx-runtime";
+// This library entry deliberately exports its provider and the matching hook.
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useMemo } from "react";
 // ============================================
 // CONTEXT

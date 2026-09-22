@@ -1,8 +1,10 @@
 import { components } from "./_generated/api.js";
-import { makeBookingAPI } from "@mrfinch/booking";
+import { makeInternalBookingAPI } from "@mrfinch/booking";
 
-// Create the booking API using the Re-Mountable API Functions pattern
-// This allows direct re-export to the app's public API
+// Optional server-only helpers: these exports appear under internal.example.
+// The example has no authentication provider, so it exposes no public booking
+// API. In an authenticated app, call components.booking directly from public
+// functions after checking the caller's role and the target organization.
 export const {
   // Event Types
   getEventType,
@@ -69,10 +71,10 @@ export const {
   transitionBookingState,
   getBookingHistory,
 
-  // Presence (Real-time slot locking)
+  // Presence (Best-effort UI signals; not inventory locks)
   heartbeat,
   leave,
   getPresence,
   getDatePresence,
   getActivePresenceCount,
-} = makeBookingAPI(components.booking);
+} = makeInternalBookingAPI(components.booking);

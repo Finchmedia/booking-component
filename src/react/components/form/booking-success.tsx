@@ -54,17 +54,11 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
               : "You're booked!"}
         </h1>
         <p className="text-muted-foreground">
-          {isPending ? (
-            <>
-              Your {isRescheduling ? "rescheduled " : ""}booking is awaiting confirmation from the host.
-              <br />
-              We'll send a confirmation to {booking.bookerEmail} once approved.
-            </>
-          ) : (
-            <>
-              A {isRescheduling ? "reschedule " : ""}confirmation email has been sent to {booking.bookerEmail}
-            </>
-          )}
+          {isPending
+            ? `Your ${isRescheduling ? "rescheduled " : ""}booking is awaiting approval from the host.`
+            : isRescheduling
+              ? "Your booking has been moved to the time shown below."
+              : "Your booking is confirmed for the time shown below."}
         </p>
       </div>
 

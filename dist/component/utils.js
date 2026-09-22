@@ -41,34 +41,6 @@ export function getDateInTimezone(timestamp, timezone) {
     // sv-SE locale gives us YYYY-MM-DD format directly
     return date.toLocaleDateString("sv-SE", { timeZone: timezone });
 }
-/**
- * Parse time components from a formatted date string in a timezone
- * Uses Intl.DateTimeFormat with formatToParts for reliable parsing
- */
-function getTimePartsInTimezone(timestamp, timezone) {
-    const date = new Date(timestamp);
-    const formatter = new Intl.DateTimeFormat("en-US", {
-        hour: "numeric",
-        minute: "numeric",
-        hour12: false,
-        timeZone: timezone,
-    });
-    const parts = formatter.formatToParts(date);
-    let hours = 0;
-    let minutes = 0;
-    for (const part of parts) {
-        if (part.type === "hour") {
-            hours = parseInt(part.value, 10);
-        }
-        else if (part.type === "minute") {
-            minutes = parseInt(part.value, 10);
-        }
-    }
-    // Handle midnight edge case (some locales return 24 for midnight)
-    if (hours === 24)
-        hours = 0;
-    return { hours, minutes };
-}
 // One formatter per timezone: the month view converts ~16 candidates × ~31
 // days × up to 3 offset look-ups, and constructing Intl.DateTimeFormat is the
 // expensive part of each conversion.

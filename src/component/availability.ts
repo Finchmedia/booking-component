@@ -1,5 +1,6 @@
 import type { QueryCtx } from "./_generated/server";
-import { getRequiredSlots } from "./utils";
+import { assertValidRange, getRequiredSlots } from "./utils";
+import { isFungibleResource } from "./inventory_helpers";
 
 /**
  * Checks whether [start, end) is free on a resource's daily_availability bitmap.
@@ -18,6 +19,9 @@ export async function isAvailable(
     end: number,
     excludeSlots?: Map<string, number[]>
 ): Promise<boolean> {
+    assertValidRange(start, end);
+    // This API describes ordinary, single-resource bookings only.
+    if (await isFungibleResource(ctx, resourceId)) return false;
     const requiredSlots = getRequiredSlots(start, end);
 
     for (const [date, slots] of requiredSlots.entries()) {

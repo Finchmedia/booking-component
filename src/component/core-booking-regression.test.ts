@@ -560,7 +560,7 @@ describe("rescheduleBookingByToken", () => {
         newStart: AT("14:30"),
         newEnd: AT("15:30"),
       })
-    ).rejects.toThrow("Resource is not available for the requested time range");
+    ).rejects.toThrow(`Resource "${RESOURCE}" is not available for the selected time`);
 
     expect((await t.query(api.public.getBooking, { bookingId: mine!._id }))?.status).toBe(
       "confirmed"
@@ -716,9 +716,9 @@ describe("getAvailability", () => {
     expect(await availability(AT("10:00"), AT("11:00"))).toBe(true); // starts where it ends
     // Nothing is written for an unknown resource, so it reads as free.
     expect(await availability(AT("09:00"), AT("10:00"), "ghost")).toBe(true);
-    // Degenerate ranges cover no slot at all — the range guard lives in createBooking.
-    expect(await availability(AT("09:00"), AT("09:00"))).toBe(true);
-    expect(await availability(AT("10:00"), AT("09:00"))).toBe(true);
+    // Queries and writes reject ranges that could never reserve inventory.
+    await expect(availability(AT("09:00"), AT("09:00"))).rejects.toThrow("Invalid time range");
+    await expect(availability(AT("10:00"), AT("09:00"))).rejects.toThrow("Invalid time range");
   });
 
   test("provisional holds count as busy until they are expired", async () => {

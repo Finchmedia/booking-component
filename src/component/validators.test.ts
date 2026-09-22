@@ -19,7 +19,6 @@
  */
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { validate } from "convex-helpers/validators";
-import type { GenericDatabaseReader, GenericDataModel, SystemTableNames } from "convex/server";
 import type { Infer } from "convex/values";
 import schema from "./schema.js";
 import { internal } from "./_generated/api.js";
@@ -71,29 +70,6 @@ const DOC_VALIDATORS = {
 const TABLES = Object.keys(schema.tables) as TableNames[];
 
 const SLOT = new Date(utc(TUESDAY, "10:00")).toISOString();
-
-// ============================================
-// ID-AWARE VALIDATION
-// ============================================
-
-const isTable = (name: string): name is TableNames => name in schema.tables;
-const isSystemTable = (name: string): name is SystemTableNames =>
-  name === "_scheduled_functions" || name === "_storage";
-
-/**
- * `validate(..., { db })` checks every `v.id("t")` with `db.normalizeId("t", id)`,
- * which refuses system tables (`presence_heartbeats.markAsGone` is a
- * `v.id("_scheduled_functions")`); route those to `db.system.normalizeId`.
- * `validate` uses nothing else from the reader.
- */
-function idAwareReader(db: MutationCtx["db"]): GenericDatabaseReader<GenericDataModel> {
-  const normalizeId: GenericDatabaseReader<GenericDataModel>["normalizeId"] = (tableName, id) => {
-    if (isSystemTable(tableName)) return db.system.normalizeId(tableName, id);
-    if (isTable(tableName)) return db.normalizeId(tableName, id);
-    return null;
-  };
-  return { normalizeId } as GenericDatabaseReader<GenericDataModel>;
-}
 
 // ============================================
 // SEEDING
@@ -252,7 +228,7 @@ describe("document validators cover every table", () => {
         const doc = docs[table];
         expect(doc._id).toBeTypeOf("string");
         expect(doc._creationTime).toBeTypeOf("number");
-        return validate(validator, doc, { throw: true, db: idAwareReader(ctx.db) });
+        return validate(validator, doc, { throw: true, db: ctx.db });
       });
       expect(ok).toBe(true);
 
@@ -327,7 +303,7 @@ describe("fully populated rows", () => {
         rescheduleUid: "bk_previous",
         cancellationReason: "Booker cancelled",
       });
-      return validate(bookingDoc, await stored(ctx, id), { throw: true, db: idAwareReader(ctx.db) });
+      return validate(bookingDoc, await stored(ctx, id), { throw: true, db: ctx.db });
     });
     expect(ok).toBe(true);
   });
@@ -350,7 +326,7 @@ describe("fully populated rows", () => {
         createdAt: FIXED_NOW,
         updatedAt: FIXED_NOW,
       });
-      return validate(resourceDoc, await stored(ctx, id), { throw: true, db: idAwareReader(ctx.db) });
+      return validate(resourceDoc, await stored(ctx, id), { throw: true, db: ctx.db });
     });
     expect(ok).toBe(true);
   });
@@ -383,7 +359,7 @@ describe("fully populated rows", () => {
         createdAt: FIXED_NOW,
         updatedAt: FIXED_NOW,
       });
-      return validate(eventTypeDoc, await stored(ctx, id), { throw: true, db: idAwareReader(ctx.db) });
+      return validate(eventTypeDoc, await stored(ctx, id), { throw: true, db: ctx.db });
     });
     expect(ok).toBe(true);
   });
@@ -400,7 +376,7 @@ describe("document validators are exact", () => {
       const docs = await seedMinimalRows(ctx);
       const booking = docs.bookings;
 
-      expect(validate(bookingDoc, booking, { db: idAwareReader(ctx.db) })).toBe(true);
+      expect(validate(bookingDoc, booking, { db: ctx.db })).toBe(true);
       expect(validate(bookingDoc, { ...booking, extra: 1 })).toBe(false);
       expect(() => validate(bookingDoc, { ...booking, extra: 1 }, { throw: true })).toThrow(
         /extra/
@@ -413,7 +389,7 @@ describe("document validators are exact", () => {
 
       // `_id` from another table: only detectable with the db-aware id check.
       const foreign = { ...booking, _id: docs.resources._id };
-      expect(validate(bookingDoc, foreign, { db: idAwareReader(ctx.db) })).toBe(false);
+      expect(validate(bookingDoc, foreign, { db: ctx.db })).toBe(false);
 
       // Non-objects are rejected outright.
       expect(validate(bookingDoc, null)).toBe(false);
@@ -476,7 +452,7 @@ describe("bookingWithItemsDoc", () => {
           items: [{ ...withItems.items[0], resource: undefined }],
         })
       ).toBe(false); // resource must be a doc or null, never absent
-      return validate(bookingWithItemsDoc, withItems, { throw: true, db: idAwareReader(ctx.db) });
+      return validate(bookingWithItemsDoc, withItems, { throw: true, db: ctx.db });
     });
     expect(ok).toBe(true);
   });

@@ -1,6 +1,7 @@
 import type { MutationCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { getRequiredSlots } from "./utils";
+import { holdsActiveInventory, usesQuantityInventory } from "./inventory_helpers";
 
 // ============================================
 // SLOT RELEASE HELPERS
@@ -87,8 +88,12 @@ export async function releaseQuantitySlots(
  */
 export async function releaseAllSlotsForBooking(
   ctx: MutationCtx,
-  booking: Pick<Doc<"bookings">, "_id" | "resourceId" | "start" | "end">,
+  booking: Pick<Doc<"bookings">, "_id" | "resourceId" | "start" | "end" | "status">,
 ): Promise<void> {
+  // Terminal bookings have already released their inventory, or retain completed
+  // historical occupancy. Never subtract their interval from a later holder.
+  if (!holdsActiveInventory(booking.status)) return;
+
   const items = await ctx.db
     .query("booking_items")
     .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
@@ -105,10 +110,7 @@ export async function releaseAllSlotsForBooking(
       .withIndex("by_external_id", (q) => q.eq("id", item.resourceId))
       .unique();
 
-    const totalQuantity = resource?.quantity ?? 1;
-    const isFungible = resource?.isFungible ?? false;
-
-    if (isFungible && totalQuantity > 1) {
+    if (usesQuantityInventory(resource)) {
       await releaseQuantitySlots(
         ctx,
         item.resourceId,

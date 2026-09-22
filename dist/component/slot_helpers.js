@@ -1,4 +1,5 @@
 import { getRequiredSlots } from "./utils";
+import { holdsActiveInventory, usesQuantityInventory } from "./inventory_helpers";
 // ============================================
 // SLOT RELEASE HELPERS
 // ============================================
@@ -58,6 +59,10 @@ export async function releaseQuantitySlots(ctx, resourceId, start, end, quantity
  *   booking.resourceId.
  */
 export async function releaseAllSlotsForBooking(ctx, booking) {
+    // Terminal bookings have already released their inventory, or retain completed
+    // historical occupancy. Never subtract their interval from a later holder.
+    if (!holdsActiveInventory(booking.status))
+        return;
     const items = await ctx.db
         .query("booking_items")
         .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
@@ -71,9 +76,7 @@ export async function releaseAllSlotsForBooking(ctx, booking) {
             .query("resources")
             .withIndex("by_external_id", (q) => q.eq("id", item.resourceId))
             .unique();
-        const totalQuantity = resource?.quantity ?? 1;
-        const isFungible = resource?.isFungible ?? false;
-        if (isFungible && totalQuantity > 1) {
+        if (usesQuantityInventory(resource)) {
             await releaseQuantitySlots(ctx, item.resourceId, booking.start, booking.end, item.quantity);
         }
         else {

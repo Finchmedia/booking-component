@@ -24,5 +24,5 @@ export declare function releaseQuantitySlots(ctx: MutationCtx, resourceId: strin
  * - Single-resource bookings (no items): daily_availability of
  *   booking.resourceId.
  */
-export declare function releaseAllSlotsForBooking(ctx: MutationCtx, booking: Pick<Doc<"bookings">, "_id" | "resourceId" | "start" | "end">): Promise<void>;
+export declare function releaseAllSlotsForBooking(ctx: MutationCtx, booking: Pick<Doc<"bookings">, "_id" | "resourceId" | "start" | "end" | "status">): Promise<void>;
 //# sourceMappingURL=slot_helpers.d.ts.map

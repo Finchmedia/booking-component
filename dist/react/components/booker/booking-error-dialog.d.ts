@@ -1,3 +1,4 @@
+import React from "react";
 import type { ValidationError } from "../../hooks/use-booking-validation";
 interface BookingErrorDialogProps {
     error: ValidationError;
@@ -14,6 +15,6 @@ interface BookingErrorDialogProps {
  * - resource_deleted / resource_deactivated → onNavigate callback with path
  * - duration_invalid → onReset callback
  */
-export declare function BookingErrorDialog({ error, onReset, onEventTypeReset, onNavigate, }: BookingErrorDialogProps): import("react/jsx-runtime").JSX.Element;
+export declare function BookingErrorDialog({ error, onReset, onEventTypeReset, onNavigate, }: BookingErrorDialogProps): React.JSX.Element;
 export {};
 //# sourceMappingURL=booking-error-dialog.d.ts.map

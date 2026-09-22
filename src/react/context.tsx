@@ -1,5 +1,8 @@
 "use client";
 
+// This library entry deliberately exports its provider and the matching hook.
+/* eslint-disable react-refresh/only-export-components */
+
 import { createContext, useContext, useMemo } from "react";
 import type { ReactNode } from "react";
 import type { FunctionReference } from "convex/server";

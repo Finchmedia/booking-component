@@ -171,7 +171,9 @@ export default defineSchema({
         bookingId: v.id("bookings"),
         resourceId: v.string(),
         quantity: v.number(),
-    }).index("by_booking", ["bookingId"]),
+    })
+        .index("by_booking", ["bookingId"])
+        .index("by_resource", ["resourceId"]),
     // Booking state history (audit trail)
     booking_history: defineTable({
         bookingId: v.id("bookings"),

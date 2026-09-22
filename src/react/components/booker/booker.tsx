@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useQuery } from "convex-helpers/react/cache/hooks";
@@ -90,7 +90,7 @@ export function Booker({
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   // Pre-populate duration from original booking if rescheduling
-  const [selectedDuration, setSelectedDuration] = useState<number>(
+  const [requestedDuration, setSelectedDuration] = useState<number>(
     originalBooking
       ? Math.round((originalBooking.end - originalBooking.start) / 60000)
       : 60
@@ -140,26 +140,17 @@ export function Booker({
         )
       : eventType?.lengthInMinutes);
 
-  // Sync selectedDuration with event type's available options when event type loads
-  // This fixes the bug where default duration (60) might not be in the event type's options
-  useEffect(() => {
-    if (!eventType || originalBooking) return; // Skip if loading or rescheduling (has its own default)
+  // Derive a valid default as event data arrives; no effect/state round-trip.
+  // Preserve the original duration in reschedule mode for validation to report.
+  const availableDurations = eventType?.lengthInMinutesOptions?.length
+    ? eventType.lengthInMinutesOptions
+    : eventType ? [eventType.lengthInMinutes] : [];
+  const selectedDuration = bookingStep === "event-meta" && !originalBooking && availableDurations.length > 0 &&
+    !availableDurations.includes(requestedDuration)
+    ? Math.min(...availableDurations)
+    : requestedDuration;
 
-    const availableDurations = eventType.lengthInMinutesOptions?.length
-      ? eventType.lengthInMinutesOptions
-      : [eventType.lengthInMinutes];
-
-    // Only update if current selection is not valid
-    if (!availableDurations.includes(selectedDuration)) {
-      // Pick the first available duration (smallest if options exist)
-      const newDuration = eventType.lengthInMinutesOptions?.length
-        ? Math.min(...eventType.lengthInMinutesOptions)
-        : eventType.lengthInMinutes;
-      setSelectedDuration(newDuration);
-    }
-  }, [eventType, originalBooking, selectedDuration]);
-
-  // Real-time Hold: Automatically reserve all affected slots (quantum coverage)
+  // Advisory presence follows the selected interval; mutations enforce inventory.
   useSlotHold(resourceId, selectedSlot, selectedDuration, eventTypeId);
 
   // Reactive validation: Monitor event type, resource, and link state

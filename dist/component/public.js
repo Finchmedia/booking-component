@@ -4,7 +4,8 @@ import { v } from "convex/values";
 import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, isCandidateAvailable, isDayAvailable, assertValidRange, } from "./utils";
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
-import { releaseBookingSlots } from "./slot_helpers";
+import { releaseAllSlotsForBooking } from "./slot_helpers";
+import { assertSingleResourceSupported, holdsActiveInventory, isFungibleResource, reserveResourceSlots, } from "./inventory_helpers";
 import { bookingDoc, cancelResult, eventTypeDoc, successResult, successWithAffectedUsers, } from "./validators";
 // Generate a secure random token (64 hex chars = 256 bits)
 function generateSecureToken() {
@@ -138,6 +139,7 @@ export const getMonthAvailability = query({
     returns: v.record(v.string(), v.boolean()),
     handler: async (ctx, args) => {
         const { resourceId, dateFrom, dateTo, eventLength } = args;
+        const pooledResource = await isFungibleResource(ctx, resourceId);
         // Parse dates with explicit UTC context to avoid timezone bugs
         // Adding T00:00:00.000Z ensures we get UTC midnight, not local midnight
         const startDate = new Date(dateFrom + "T00:00:00.000Z");
@@ -156,6 +158,11 @@ export const getMonthAvailability = query({
         while (currentDate <= endDate) {
             // Extract date string in UTC context
             const dateStr = currentDate.toISOString().split("T")[0];
+            if (pooledResource) {
+                availabilityByDate[dateStr] = false;
+                currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+                continue;
+            }
             // If a scheduleId is provided, use it to determine the available slots window
             let scheduleSlots;
             if (args.scheduleId) {
@@ -225,6 +232,8 @@ export const getDaySlots = query({
     returns: v.array(v.object({ time: v.string() })),
     handler: async (ctx, args) => {
         const { resourceId, date, eventLength, slotInterval, resourceTimezone, availableSlots } = args;
+        if (await isFungibleResource(ctx, resourceId))
+            return [];
         // Generate all possible slots for this day
         let possibleSlots;
         if (resourceTimezone && availableSlots) {
@@ -274,6 +283,7 @@ export const createReservation = mutation({
         const { resourceId, start, end, actorId } = args;
         // 0. Range guard — shared with every other write path.
         assertValidRange(start, end);
+        await assertSingleResourceSupported(ctx, resourceId);
         // 1. Check availability first (read-before-write pattern)
         // Note: We re-check inside the transaction to ensure atomicity
         const available = await isAvailable(ctx, resourceId, start, end);
@@ -376,6 +386,7 @@ export const createBooking = mutation({
         // 0. Basic range validation (shared guard): NaN/Infinity and end <= start
         // would otherwise silently reserve zero slots.
         assertValidRange(args.start, args.end);
+        await assertSingleResourceSupported(ctx, args.resourceId);
         // 1. Fetch event type (for snapshot)
         const eventType = await ctx.db
             .query("event_types")
@@ -539,6 +550,7 @@ export const createProvisionalBooking = mutation({
     handler: async (ctx, args) => {
         // Basic range validation — parallel to createBooking.
         assertValidRange(args.start, args.end);
+        await assertSingleResourceSupported(ctx, args.resourceId);
         const eventType = await ctx.db
             .query("event_types")
             .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
@@ -668,19 +680,10 @@ export const cancelReservation = mutation({
             // subtracting them again could free a later holder's slots.
             return { success: true, alreadyCancelled: true };
         }
-        // 1. Calculate slots to free up
-        const slotsToFree = getRequiredSlots(booking.start, booking.end);
-        // 2. Update daily_availability
-        for (const [date, slots] of slotsToFree.entries()) {
-            const availability = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", booking.resourceId).eq("date", date))
-                .unique();
-            if (availability) {
-                const updatedSlots = availability.busySlots.filter((s) => !slots.includes(s));
-                await ctx.db.patch(availability._id, { busySlots: updatedSlots });
-            }
+        if (!holdsActiveInventory(booking.status)) {
+            throw new Error(`Cannot cancel booking with status: ${booking.status}`);
         }
+        await releaseAllSlotsForBooking(ctx, booking);
         // 3. Update booking status
         await ctx.db.patch(args.reservationId, { status: "cancelled" });
         // 4. Trigger booking.cancelled hook
@@ -731,7 +734,7 @@ export const expireProvisionalBooking = mutation({
             reason: args.reason ?? "Provisional booking expired",
             timestamp: now,
         });
-        await releaseBookingSlots(ctx, booking.resourceId, booking.start, booking.end);
+        await releaseAllSlotsForBooking(ctx, booking);
         await ctx.db.patch(args.bookingId, {
             status: "cancelled",
             cancelledAt: now,
@@ -1093,7 +1096,7 @@ export const cancelBookingByToken = mutation({
             throw new Error("Invalid token");
         }
         // 2. Check if booking can be cancelled (not already cancelled/completed/declined)
-        if (["cancelled", "completed", "declined"].includes(booking.status)) {
+        if (!holdsActiveInventory(booking.status)) {
             throw new Error(`Cannot cancel booking with status: ${booking.status}`);
         }
         const now = Date.now();
@@ -1113,18 +1116,8 @@ export const cancelBookingByToken = mutation({
             cancellationReason: args.reason || "Cancelled by booker",
             updatedAt: now,
         });
-        // 5. Release the slots in daily_availability
-        const requiredSlots = getRequiredSlots(booking.start, booking.end);
-        for (const [date, slots] of requiredSlots.entries()) {
-            const availability = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", booking.resourceId).eq("date", date))
-                .unique();
-            if (availability) {
-                const updatedSlots = availability.busySlots.filter((s) => !slots.includes(s));
-                await ctx.db.patch(availability._id, { busySlots: updatedSlots });
-            }
-        }
+        // 5. Release every item, including pooled add-ons and legacy bookings.
+        await releaseAllSlotsForBooking(ctx, booking);
         // 6. Trigger booking.cancelled hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
@@ -1146,6 +1139,105 @@ export const cancelBookingByToken = mutation({
         return { success: true };
     }
 });
+/** A move is one Convex transaction, including inventory, history and hooks. */
+async function moveBooking(ctx, original, args) {
+    assertValidRange(args.newStart, args.newEnd);
+    if (!["pending", "confirmed"].includes(original.status)) {
+        throw new Error(`Cannot reschedule booking with status: ${original.status}`);
+    }
+    const items = await ctx.db.query("booking_items")
+        .withIndex("by_booking", q => q.eq("bookingId", original._id)).collect();
+    const resources = items.length > 0
+        ? items.map(item => ({ resourceId: item.resourceId, quantity: item.quantity }))
+        : [{ resourceId: original.resourceId, quantity: 1 }];
+    // A legacy single-resource record never used quantity counters. Do not silently
+    // reinterpret it after a host has changed the resource into a pool.
+    if (items.length === 0)
+        await assertSingleResourceSupported(ctx, original.resourceId);
+    // Read-your-writes lets overlapping moves reuse only the original's inventory.
+    // Any destination conflict aborts this mutation and restores ALL old items.
+    await releaseAllSlotsForBooking(ctx, original);
+    await reserveResourceSlots(ctx, resources, args.newStart, args.newEnd);
+    const now = Date.now();
+    const newUid = `bk_${now}_${Math.random().toString(36).slice(2, 9)}`;
+    const newBookingId = await ctx.db.insert("bookings", {
+        uid: newUid,
+        resourceId: original.resourceId,
+        organizationId: original.organizationId,
+        eventTypeId: original.eventTypeId,
+        eventTitle: original.eventTitle,
+        eventDescription: original.eventDescription,
+        bookerName: original.bookerName,
+        bookerEmail: original.bookerEmail,
+        bookerPhone: original.bookerPhone,
+        bookerNotes: original.bookerNotes,
+        start: args.newStart,
+        end: args.newEnd,
+        timezone: original.timezone,
+        status: original.status,
+        rescheduleUid: original.uid,
+        actorId: original.actorId,
+        location: original.location,
+        managementToken: original.managementToken,
+        createdAt: now,
+        updatedAt: now,
+    });
+    for (const item of items) {
+        await ctx.db.insert("booking_items", {
+            bookingId: newBookingId,
+            resourceId: item.resourceId,
+            quantity: item.quantity,
+        });
+    }
+    const reason = args.reason ?? "Rescheduled to new time";
+    await ctx.db.insert("booking_history", {
+        bookingId: original._id,
+        fromStatus: original.status,
+        toStatus: "cancelled",
+        changedBy: "system",
+        reason,
+        timestamp: now,
+    });
+    await ctx.db.insert("booking_history", {
+        bookingId: newBookingId,
+        fromStatus: "",
+        toStatus: original.status,
+        changedBy: "system",
+        reason: `Rescheduled from ${original.uid}`,
+        timestamp: now,
+    });
+    await ctx.db.patch(original._id, {
+        status: "cancelled",
+        cancelledAt: now,
+        cancellationReason: reason,
+        updatedAt: now,
+    });
+    await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
+        eventType: "booking.rescheduled",
+        organizationId: original.organizationId,
+        payload: {
+            originalBookingId: original._id,
+            newBookingId,
+            uid: newUid,
+            managementToken: original.managementToken,
+            oldStart: original.start,
+            oldEnd: original.end,
+            newStart: args.newStart,
+            newEnd: args.newEnd,
+            bookerEmail: original.bookerEmail,
+            bookerName: original.bookerName,
+            eventTitle: original.eventTitle,
+            timezone: original.timezone,
+            resources,
+            isMultiResource: items.length > 0,
+        },
+        resendOptions: args.resendOptions,
+    });
+    const booking = await ctx.db.get(newBookingId);
+    if (!booking)
+        throw new Error("Booking not found after write");
+    return booking;
+}
 export const rescheduleBooking = mutation({
     args: {
         bookingId: v.id("bookings"),
@@ -1160,125 +1252,11 @@ export const rescheduleBooking = mutation({
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {
-        // 0. Range guard. Without it an inverted/NaN range maps to zero slots:
-        // the old slots would be released and none reserved, leaving a live
-        // "confirmed" booking that holds nothing.
         assertValidRange(args.newStart, args.newEnd);
-        // 1. Get original booking
-        const original = await ctx.db.get(args.bookingId);
-        if (!original) {
+        const booking = await ctx.db.get(args.bookingId);
+        if (!booking)
             throw new Error("Booking not found");
-        }
-        // 2. Check if booking can be rescheduled (only pending or confirmed)
-        if (!["pending", "confirmed"].includes(original.status)) {
-            throw new Error(`Cannot reschedule booking with status: ${original.status}`);
-        }
-        // 3. Generate new UID
-        const newUid = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-        // 4. Determine new booking status
-        // If original required confirmation, new one also requires it
-        const newStatus = original.status === "pending" ? "pending" : "confirmed";
-        // 5. Create new booking (copy most fields from original)
-        const now = Date.now();
-        const newBookingId = await ctx.db.insert("bookings", {
-            uid: newUid,
-            resourceId: original.resourceId,
-            organizationId: original.organizationId,
-            eventTypeId: original.eventTypeId,
-            eventTitle: original.eventTitle,
-            eventDescription: original.eventDescription,
-            bookerName: original.bookerName,
-            bookerEmail: original.bookerEmail,
-            bookerPhone: original.bookerPhone,
-            bookerNotes: original.bookerNotes,
-            start: args.newStart,
-            end: args.newEnd,
-            timezone: original.timezone,
-            status: newStatus,
-            rescheduleUid: original.uid, // Link to original
-            actorId: original.actorId,
-            location: original.location,
-            managementToken: original.managementToken, // Keep same token
-            createdAt: now,
-            updatedAt: now,
-        });
-        // 6. Cancel original booking
-        await ctx.db.insert("booking_history", {
-            bookingId: args.bookingId,
-            fromStatus: original.status,
-            toStatus: "cancelled",
-            changedBy: "system",
-            reason: "Rescheduled to new time",
-            timestamp: now,
-        });
-        await ctx.db.patch(args.bookingId, {
-            status: "cancelled",
-            cancelledAt: now,
-            cancellationReason: "Rescheduled to new time",
-            updatedAt: now,
-        });
-        // 7. Free up old slots in daily_availability
-        const oldSlotsToFree = getRequiredSlots(original.start, original.end);
-        for (const [date, slots] of oldSlotsToFree.entries()) {
-            const availability = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", original.resourceId).eq("date", date))
-                .unique();
-            if (availability) {
-                const updatedSlots = availability.busySlots.filter((s) => !slots.includes(s));
-                await ctx.db.patch(availability._id, { busySlots: updatedSlots });
-            }
-        }
-        // 8. Mark new slots as busy in daily_availability
-        const newRequiredSlots = getRequiredSlots(args.newStart, args.newEnd);
-        for (const [date, slots] of newRequiredSlots.entries()) {
-            const existing = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", original.resourceId).eq("date", date))
-                .unique();
-            if (existing) {
-                // Check for conflicts
-                for (const slot of slots) {
-                    if (existing.busySlots.includes(slot)) {
-                        throw new Error(`Conflict detected on ${date} at slot ${slot}`);
-                    }
-                }
-                // Merge new slots
-                const updatedSlots = [...existing.busySlots, ...slots].sort((a, b) => a - b);
-                await ctx.db.patch(existing._id, { busySlots: updatedSlots });
-            }
-            else {
-                // Create new day record
-                await ctx.db.insert("daily_availability", {
-                    resourceId: original.resourceId,
-                    date,
-                    busySlots: slots,
-                });
-            }
-        }
-        // 9. Trigger booking.rescheduled hook
-        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
-            eventType: "booking.rescheduled",
-            organizationId: original.organizationId,
-            payload: {
-                originalBookingId: args.bookingId,
-                newBookingId,
-                oldStart: original.start,
-                oldEnd: original.end,
-                newStart: args.newStart,
-                newEnd: args.newEnd,
-                bookerEmail: original.bookerEmail,
-                bookerName: original.bookerName,
-                eventTitle: original.eventTitle,
-                timezone: original.timezone,
-            },
-            resendOptions: args.resendOptions,
-        });
-        // 10. Get and return the new booking (just written — cannot be missing)
-        const newBooking = await ctx.db.get(newBookingId);
-        if (!newBooking)
-            throw new Error("Booking not found after write");
-        return newBooking;
+        return await moveBooking(ctx, booking, args);
     },
 });
 export const rescheduleBookingByToken = mutation({
@@ -1295,138 +1273,14 @@ export const rescheduleBookingByToken = mutation({
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {
-        // 0. Range guard — see rescheduleBooking.
         assertValidRange(args.newStart, args.newEnd);
-        // 1. Find and verify booking
-        const booking = await ctx.db
-            .query("bookings")
-            .withIndex("by_uid", (q) => q.eq("uid", args.uid))
-            .unique();
-        if (!booking) {
+        const booking = await ctx.db.query("bookings")
+            .withIndex("by_uid", q => q.eq("uid", args.uid)).unique();
+        if (!booking)
             throw new Error("Booking not found");
-        }
-        if (booking.managementToken !== args.token) {
+        if (booking.managementToken !== args.token)
             throw new Error("Invalid token");
-        }
-        // 2. Check if booking can be rescheduled
-        if (!["pending", "confirmed"].includes(booking.status)) {
-            throw new Error(`Cannot reschedule booking with status: ${booking.status}`);
-        }
-        // 3. Check availability for new time slot.
-        // The booking's OWN slots are still marked busy at this point (they are
-        // released in step 8), so they are excluded from the conflict check —
-        // otherwise a move to an overlapping range (09:00 → 09:30 with a 60-minute
-        // event) would be wrongly rejected. Only this booking's slots are excluded;
-        // the per-day conflict check in step 9 runs after the release and remains
-        // as a second guard.
-        const ownSlots = getRequiredSlots(booking.start, booking.end);
-        const available = await isAvailable(ctx, booking.resourceId, args.newStart, args.newEnd, ownSlots);
-        if (!available) {
-            throw new Error("Resource is not available for the requested time range");
-        }
-        // 4. Generate new UID for rescheduled booking
-        const newUid = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-        // 5. Determine new booking status
-        const newStatus = booking.status === "pending" ? "pending" : "confirmed";
-        // 6. Create new booking (copy most fields from original)
-        const now = Date.now();
-        const newBookingId = await ctx.db.insert("bookings", {
-            uid: newUid,
-            resourceId: booking.resourceId,
-            organizationId: booking.organizationId,
-            eventTypeId: booking.eventTypeId,
-            eventTitle: booking.eventTitle,
-            eventDescription: booking.eventDescription,
-            bookerName: booking.bookerName,
-            bookerEmail: booking.bookerEmail,
-            bookerPhone: booking.bookerPhone,
-            bookerNotes: booking.bookerNotes,
-            start: args.newStart,
-            end: args.newEnd,
-            timezone: booking.timezone,
-            status: newStatus,
-            rescheduleUid: booking.uid,
-            actorId: booking.actorId,
-            location: booking.location,
-            managementToken: booking.managementToken,
-            createdAt: now,
-            updatedAt: now,
-        });
-        // 7. Cancel original booking
-        await ctx.db.insert("booking_history", {
-            bookingId: booking._id,
-            fromStatus: booking.status,
-            toStatus: "cancelled",
-            changedBy: "system",
-            reason: "Rescheduled to new time",
-            timestamp: now,
-        });
-        await ctx.db.patch(booking._id, {
-            status: "cancelled",
-            cancelledAt: now,
-            cancellationReason: "Rescheduled to new time",
-            updatedAt: now,
-        });
-        // 8. Free up old slots
-        const oldSlotsToFree = getRequiredSlots(booking.start, booking.end);
-        for (const [date, slots] of oldSlotsToFree.entries()) {
-            const availability = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", booking.resourceId).eq("date", date))
-                .unique();
-            if (availability) {
-                const updatedSlots = availability.busySlots.filter((s) => !slots.includes(s));
-                await ctx.db.patch(availability._id, { busySlots: updatedSlots });
-            }
-        }
-        // 9. Mark new slots as busy
-        const newRequiredSlots = getRequiredSlots(args.newStart, args.newEnd);
-        for (const [date, slots] of newRequiredSlots.entries()) {
-            const existing = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", booking.resourceId).eq("date", date))
-                .unique();
-            if (existing) {
-                // Check for conflicts
-                for (const slot of slots) {
-                    if (existing.busySlots.includes(slot)) {
-                        throw new Error(`Conflict detected on ${date} at slot ${slot}`);
-                    }
-                }
-                const updatedSlots = [...existing.busySlots, ...slots].sort((a, b) => a - b);
-                await ctx.db.patch(existing._id, { busySlots: updatedSlots });
-            }
-            else {
-                await ctx.db.insert("daily_availability", {
-                    resourceId: booking.resourceId,
-                    date,
-                    busySlots: slots,
-                });
-            }
-        }
-        // 10. Trigger booking.rescheduled hook
-        await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
-            eventType: "booking.rescheduled",
-            organizationId: booking.organizationId,
-            payload: {
-                originalBookingId: booking._id,
-                newBookingId,
-                oldStart: booking.start,
-                oldEnd: booking.end,
-                newStart: args.newStart,
-                newEnd: args.newEnd,
-                bookerEmail: booking.bookerEmail,
-                bookerName: booking.bookerName,
-                eventTitle: booking.eventTitle,
-                timezone: booking.timezone,
-            },
-            resendOptions: args.resendOptions,
-        });
-        // The new booking was just written — cannot be missing.
-        const newBooking = await ctx.db.get(newBookingId);
-        if (!newBooking)
-            throw new Error("Booking not found after write");
-        return newBooking;
-    }
+        return await moveBooking(ctx, booking, args);
+    },
 });
 //# sourceMappingURL=public.js.map

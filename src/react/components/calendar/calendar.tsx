@@ -110,15 +110,6 @@ const CalendarContent: React.FC<
     timezone // Pass timezone for proper date string generation
   );
 
-  // Auto-select today's date
-  const autoSelectToday = () => {
-    if (!selectedDate) {
-      const today = new Date();
-      onDateChange(today);
-      fetchSlots(today);
-    }
-  };
-
   // Handle date selection
   const handleDateSelect = (date: Date) => {
     onDateChange(date);
@@ -138,24 +129,22 @@ const CalendarContent: React.FC<
     );
   };
 
-  // Fetch month slots when calendar becomes visible or month changes
+  const monthYear = currentMonth.getFullYear();
+  const monthIndex = currentMonth.getMonth();
+
+  // Fetch month slots when calendar becomes visible or month changes.
   useEffect(() => {
     if (hasIntersected) {
-      fetchMonthSlots(currentMonth);
+      fetchMonthSlots(new Date(monthYear, monthIndex, 1));
     }
-  }, [
-    hasIntersected,
-    currentMonth.getFullYear(),
-    currentMonth.getMonth(),
-    fetchMonthSlots,
-  ]);
+  }, [hasIntersected, monthYear, monthIndex, fetchMonthSlots]);
 
   // Auto-select today's date when month slots are loaded
   useEffect(() => {
-    if (Object.keys(monthSlots).length > 0) {
-      autoSelectToday();
+    if (!selectedDate && Object.keys(monthSlots).length > 0) {
+      onDateChange(new Date());
     }
-  }, [monthSlots]);
+  }, [monthSlots, selectedDate, onDateChange]);
 
   // Fetch slots for selected date when it changes (including on mount with persisted date)
   useEffect(() => {

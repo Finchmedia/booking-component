@@ -262,6 +262,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
         quantity: import("convex/values").VFloat64<number, "required">;
     }, "required", "bookingId" | "resourceId" | "quantity">, {
         by_booking: ["bookingId", "_creationTime"];
+        by_resource: ["resourceId", "_creationTime"];
     }, {}, {}>;
     booking_history: import("convex/server").TableDefinition<import("convex/values").VObject<{
         changedBy?: string | undefined;

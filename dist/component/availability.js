@@ -1,4 +1,5 @@
-import { getRequiredSlots } from "./utils";
+import { assertValidRange, getRequiredSlots } from "./utils";
+import { isFungibleResource } from "./inventory_helpers";
 /**
  * Checks whether [start, end) is free on a resource's daily_availability bitmap.
  *
@@ -10,6 +11,10 @@ import { getRequiredSlots } from "./utils";
  *   wrongly rejected. Only pass the slots of the booking being moved.
  */
 export async function isAvailable(ctx, resourceId, start, end, excludeSlots) {
+    assertValidRange(start, end);
+    // This API describes ordinary, single-resource bookings only.
+    if (await isFungibleResource(ctx, resourceId))
+        return false;
     const requiredSlots = getRequiredSlots(start, end);
     for (const [date, slots] of requiredSlots.entries()) {
         const availability = await ctx.db

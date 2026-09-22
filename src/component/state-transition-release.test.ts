@@ -379,9 +379,9 @@ describe("transitionBookingState: guard", () => {
     await transition(moved!._id, "cancelled", { reason: "cannot make it" });
     expect(await busy()).toEqual([]);
     expect((await getBooking(moved!._id))?.cancelledAt).toBe(FIXED_NOW);
-    // rescheduleBooking records history on the original only, so the new
-    // booking's trail starts with the cancellation.
+    // The replacement records its origin before the later cancellation.
     expect((await history(moved!._id)).map((e) => `${e.fromStatus}->${e.toStatus}`)).toEqual([
+      "->confirmed",
       "confirmed->cancelled",
     ]);
     expect((await history(original!._id)).map((e) => `${e.fromStatus}->${e.toStatus}`)).toEqual([

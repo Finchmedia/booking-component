@@ -2,31 +2,24 @@
 
 [![npm version](https://badge.fury.io/js/@mrfinch%2Fbooking.svg)](https://www.npmjs.com/package/@mrfinch/booking)
 
-Real-time booking component for [Convex](https://convex.dev) with presence-aware slot locking, multi-duration support, and O(1) availability queries.
+Booking and availability for Convex apps. Reserve rooms, people or equipment;
+combine resources into a booking; and track quantities for interchangeable items.
+Use the React Booker or build your own interface.
 
-**Full Documentation:** [convexbooking.dev/docs](https://convexbooking.dev/docs)
+[Quick Start](https://convexbooking.dev/docs/getting-started) ·
+[API Reference](https://convexbooking.dev/docs/api) ·
+[Live Demo](https://convexbooking.dev/book)
 
-## Pre-requisite: Convex
+## Install
 
-You'll need an existing Convex project to use the component. Convex is a hosted
-backend platform, including a database, serverless functions, and a ton more you
-can learn about [here](https://docs.convex.dev/get-started).
-
-Run `npm create convex` or follow any of the
-[quickstarts](https://docs.convex.dev/home) to set one up.
-
-## Installation
+Start with an existing [Convex app](https://docs.convex.dev/get-started).
+The package requires Convex 1.46 or newer. Use Node 24 LTS for development.
 
 ```sh
-npm install @mrfinch/booking
+npm install @mrfinch/booking convex@^1.46.0
 ```
 
-Requires `convex >= 1.29.0` in your app. Every component function declares a
-return validator, so the generated component API gives you concrete result
-types instead of `any`. The `./react` entry also needs `convex-helpers`; its recent releases require `convex >= 1.43`, so on convex 1.29–1.42 pin `convex-helpers@0.1.106`.
-
-Create a `convex.config.ts` file in your app's `convex/` folder and install the
-component by calling `use`:
+Register the component, then run `npx convex dev`:
 
 ```ts
 // convex/convex.config.ts
@@ -35,270 +28,128 @@ import booking from "@mrfinch/booking/convex.config";
 
 const app = defineApp();
 app.use(booking);
-
 export default app;
 ```
 
-## Usage
+For the optional React UI, also install its peer dependencies. Keep your existing
+React 18 or 19 installation and use the matching React DOM version.
 
-Create a `booking.ts` file to export the component API:
-
-```ts
-// convex/booking.ts
-import { components } from "./_generated/api";
-import { makeBookingAPI } from "@mrfinch/booking";
-
-export const {
-  // Queries
-  listResources,
-  getResource,
-  listSchedules,
-  getSchedule,
-  getEffectiveAvailability,
-  listEventTypes,
-  getEventType,
-  getMonthAvailability,
-  getDaySlots,
-  getDatePresence,
-  listBookings,
-  getBooking,
-  getBookingByUid,
-  // Mutations
-  createResource,
-  updateResource,
-  deleteResource,
-  createSchedule,
-  updateSchedule,
-  deleteSchedule,
-  createDateOverride,
-  deleteDateOverride,
-  createEventType,
-  updateEventType,
-  deleteEventType,
-  createBooking,
-  createProvisionalBooking,
-  expireProvisionalBooking,
-  cancelReservation,
-  // Presence
-  heartbeat,
-  leave,
-  // Maintenance (wrap these in admin-only functions, see below)
-  wipeAllBookingData,
-  wipeAllData,
-  getDailyAvailability,
-} = makeBookingAPI(components.booking);
+```sh
+npm install convex-helpers@^0.1.124 react-hook-form@^7.88.0 @hookform/resolvers@^5.9.1 lucide-react@^1.47.0
 ```
 
-Then use the React components:
+The package includes Zod 4. Backend-only apps can skip these UI peers.
+
+## Your first booking page
+
+Follow the [Quick Start](https://convexbooking.dev/docs/getting-started) to add the
+complete public gateway, its rate-limit table, providers and styling. Run the
+[setup seed](https://convexbooking.dev/docs/guides#basic-booking-flow) to create and
+link a resource, schedule and event type.
+
+With that setup in place, render the Booker beneath your Convex and
+`ConvexQueryCacheProvider` providers:
 
 ```tsx
 // app/book/page.tsx
-import { Booker } from "@mrfinch/booking/react";
+"use client";
+import { Booker, BookingProvider } from "@mrfinch/booking/react";
+import { api } from "@/convex/_generated/api";
 
 export default function BookingPage() {
   return (
-    <Booker
-      eventTypeId="your-event-type-id"
-      resourceId="your-resource-id"
-      title="Book a Session"
-      description="Select a time that works for you"
-    />
+    <BookingProvider publicApi={api.public}>
+      <Booker eventTypeId="quick-meeting" resourceId="meeting-room" title="Book a Meeting" />
+    </BookingProvider>
   );
 }
 ```
 
-## Schedule-aware availability
+The Booker handles date, duration and slot selection, contact details and
+confirmation for one exclusive resource. Use `onBookingComplete(booking)` to
+connect your management pages to the returned booking UID and secret token.
 
-Both availability queries work without a schedule — they then fall back to
-hardcoded 09:00–17:00 **UTC** business hours. To get real opening hours, pass the
-resource's IANA timezone plus the schedule information. The two queries take that
-information differently:
+## Backend integration
 
-`getMonthAvailability` resolves the schedule itself. Pass `resourceTimezone` and
-`scheduleId`; weekly hours and date overrides are applied per date. It returns a
-`Record<"YYYY-MM-DD", boolean>`.
+Browser clients call **your host functions**. Those functions check access and
+booking policy before calling `components.booking.*`. The component maintains
+inventory and booking records in its own database.
+
+For example, inside an authorized host function:
 
 ```ts
-const monthMap = useQuery(api.booking.getMonthAvailability, {
-  resourceId: "room-1",
-  dateFrom: "2026-03-01",
-  dateTo: "2026-03-31",
-  eventLength: 60,
-  slotInterval: 30,
-  resourceTimezone: "Europe/Berlin",
-  scheduleId: "schedule-1",
+const resource = await ctx.runQuery(components.booking.resources.getResource, {
+  id: "meeting-room",
 });
 ```
 
-`getDaySlots` does **not** resolve the schedule. Pass `resourceTimezone` and
-`availableSlots` — the day's available slot indices in the resource's local
-timezone (15-minute grid, `0`–`95`), which you normally read from
-`getEffectiveAvailability({ scheduleId, date })`. It returns `[{ time: <epoch ms> }]`.
+Import `components` from your host's `./_generated/api`. Its generated types
+provide the version-matched arguments and return values. See the
+[API reference](https://convexbooking.dev/docs/api) for schedule-aware queries,
+booking operations, metadata and hooks.
 
-```ts
-const effective = useQuery(api.booking.getEffectiveAvailability, {
-  scheduleId: "schedule-1",
-  date: "2026-03-17",
-});
+Protect administration with role and organization checks. Protect booking details
+with ownership checks or management tokens. Keep resets and seed functions
+internal. The [authorization guide](https://convexbooking.dev/docs/authentication)
+includes a complete administrator example.
 
-const slots = useQuery(
-  api.booking.getDaySlots,
-  effective
-    ? {
-        resourceId: "room-1",
-        date: "2026-03-17",
-        eventLength: 60,
-        slotInterval: 30,
-        resourceTimezone: "Europe/Berlin",
-        availableSlots: effective.availableSlots,
-      }
-    : "skip",
-);
-```
+The optional `makeInternalBookingAPI(components.booking)` factory creates only
+internal queries and mutations. Its exports are accessed through `internal.*`.
+The old public `makeBookingAPI` factory was removed in 0.4.0; migrate public
+endpoints to authorized host wrappers.
 
-An empty window (weekend, "unavailable" date override) means the day is closed:
-`getMonthAvailability` reports `false` and `getDaySlots` returns `[]`. It does not
-fall back to the 09:00–17:00 UTC hours.
+## Supported behavior
 
-### Reschedule flows: `excludeBookingUid`
+- **Schedules:** weekly hours, date overrides and IANA timezones. Booking timestamps
+  use Unix milliseconds; inventory uses a 15-minute grid.
+- **Bundles and pools:** reserve several resources atomically through the
+  [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).
+  Pool quantities use this API; ordinary single-resource flows reject pools.
+- **Lifecycle:** confirmation, decline, cancellation and atomic rescheduling.
+  Your host controls the expiry of provisional bookings.
+- **Presence:** temporary selection indicators. The final booking mutation checks
+  inventory; presence does not guarantee a reservation.
+- **Email:** optional Resend notifications and token-based management links.
+  Follow the [email guide](https://convexbooking.dev/docs/integrations/email).
 
-When a user moves an existing booking, its own slots would otherwise show as
-busy. Pass the booking's `uid` as `excludeBookingUid` to either query and those
-slots are treated as free:
-
-```ts
-const slots = useQuery(api.booking.getDaySlots, {
-  resourceId: "room-1",
-  date: "2026-03-17",
-  eventLength: 60,
-  resourceTimezone: "Europe/Berlin",
-  availableSlots: effective.availableSlots,
-  excludeBookingUid: booking.uid,
-});
-```
-
-The argument is ignored for an unknown uid, a booking on another resource, or a
-booking whose status is not `pending`, `confirmed` or `provisional` — a cancelled
-booking already released its slots, and excluding it again would hand out
-someone else's slots. It applies to the non-fungible slot bitmap only, not to
-pooled (`isFungible`) quantity.
-
-## Resource metadata
-
-Resources carry an optional `metadata` map (`Record<string, string>`) for host
-app data the component does not need to understand — a floor, a color, an
-external id:
-
-```ts
-await ctx.runMutation(api.booking.createResource, {
-  id: "room-1",
-  organizationId: "org-1",
-  name: "Studio A",
-  type: "room",
-  timezone: "Europe/Berlin",
-  metadata: { floor: "2", color: "#e11d48", externalId: "CRM-4711" },
-});
-
-// An update REPLACES the whole map …
-await ctx.runMutation(api.booking.updateResource, {
-  id: "room-1",
-  metadata: { floor: "3" }, // color and externalId are gone
-});
-
-// … and omitting it keeps the stored map.
-await ctx.runMutation(api.booking.updateResource, { id: "room-1", name: "Studio A+" });
-```
-
-There is no clear form; write an empty object to empty the map.
-
-## Maintenance / sandbox resets
-
-The component's tables are isolated from the host app — your own `ctx.db` cannot
-touch them — so demo sandboxes, seed scripts and fixtures need reset functions
-inside the component. Two levels:
-
-- **`wipeAllBookingData()`** deletes `bookings`, `booking_history`,
-  `booking_items`, `daily_availability` and `quantity_availability`, and returns
-  per-table counts. The setup (resources, schedules, date overrides, event types,
-  resource ↔ event type links, hooks) survives, so the calendar is empty but
-  immediately bookable again. Use this to reset a demo between runs.
-- **`wipeAllData()`** deletes the above **plus** the setup tables, dependents
-  first. Use this before re-seeding a sandbox from scratch.
-
-Presence tables are left alone by both: they are transient real-time locks that
-expire on their own.
-
-```ts
-// convex/admin.ts
-export const resetSandbox = mutation({
-  args: {},
-  handler: async (ctx) => {
-    await requireAdmin(ctx); // your own check
-    return await ctx.runMutation(api.booking.wipeAllBookingData, {});
-  },
-});
-```
-
-> Both wipes are **unauthenticated at the component boundary** — the component
-> cannot know who your admins are. Never re-export them as public mutations;
-> wrap them in your own admin-only function as above.
-
-`getDailyAvailability({ resourceId, date })` returns the raw `busySlots` array of
-one resource/day, or `null` when no row exists. `getDaySlots` only reports the
-free slots and says nothing about what is booked, so this is the query to use
-when verifying fixtures or debugging a stuck slot.
+Your host enforces resource visibility, opening-hours policy, notice periods and
+abuse limits. The quickstart gateway implements common defaults. Buffer fields
+are stored settings; enforce any required gaps in your host's reads and writes.
 
 ## Testing
 
-The component ships its schema and modules for [`convex-test`](https://docs.convex.dev/testing/convex-test).
-Register it under the same name you used in `convex.config.ts`:
+The package exposes its schema and modules for
+[`convex-test`](https://docs.convex.dev/testing/convex-test). Install `convex-test`
+and Vitest as development dependencies, then register the component in your host
+test before invoking host functions that call it:
 
 ```ts
 import { convexTest } from "convex-test";
-import { test, expect } from "vitest";
 import bookingComponent from "@mrfinch/booking/test";
 import schema from "./schema";
-import { api } from "./_generated/api";
 
 const modules = import.meta.glob("./**/*.ts");
-
-test("a booked slot disappears", async () => {
-  const t = convexTest(schema, modules);
-  bookingComponent.register(t); // defaults to the name "booking"
-
-  // … seed resources/event types through your own API, then:
-  const slots = await t.query(api.booking.getDaySlots, {
-    resourceId: "room-1",
-    date: "2026-03-17",
-    eventLength: 60,
-  });
-  expect(slots.length).toBeGreaterThan(0);
-});
+const t = convexTest(schema, modules);
+bookingComponent.register(t); // default component name: "booking"
 ```
 
-`register(t, name?)` takes the component name as its second argument if you
-mounted it as something other than `booking`. The default export also exposes
-`schema` and `modules` if you need them directly. `@mrfinch/booking/test` points
-at TypeScript source, so it needs a bundler-based test runner (Vitest) — the
-component's own suite runs with `vitest run --typecheck` in the `edge-runtime`
-environment.
+Pass a second argument to `register(t, name)` if you mounted it under another
+name. The `/test` entry point contains TypeScript source; use a bundler-based
+runner such as Vitest. Test your host authorization as well as booking lifecycles.
 
-## Features
+## Development
 
-- **Real-time Presence** - Slot locking prevents double bookings
-- **Multi-Duration Support** - Flexible booking lengths (30min, 1h, 2h, 5h)
-- **O(1) Availability Queries** - Scales to millions of bookings
-- **ACID Transactions** - Race-condition free via Convex
-- **Multi-Resource Booking** - Book rooms, equipment, or people
-- **Schedule-aware Availability** - Weekly hours, date overrides, split shifts, IANA timezones
+The [demo and documentation](https://github.com/Finchmedia/convex-booking) live in
+a separate repository. In this component repository, run:
 
-## Links
-
-- [Documentation](https://convexbooking.dev/docs)
-- [Demo](https://convexbooking.dev)
-- [GitHub](https://github.com/Finchmedia/booking-component)
-- [Issues](https://github.com/Finchmedia/booking-component/issues)
+```sh
+npm ci --strict-peer-deps
+npm run build
+npm test
+npm run typecheck
+npm run lint
+```
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE)

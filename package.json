@@ -9,7 +9,7 @@
   "bugs": {
     "url": "https://github.com/Finchmedia/booking-component/issues"
   },
-  "version": "0.3.2",
+  "version": "0.4.0",
   "license": "Apache-2.0",
   "keywords": [
     "convex",
@@ -32,11 +32,7 @@
     "test:watch": "vitest --typecheck --clearScreen false",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:coverage": "vitest run --coverage --coverage.reporter=text",
-    "prepublishOnly": "npm run clean && npm run build",
-    "preversion": "npm run clean && npm ci && run-p test lint typecheck",
-    "alpha": "npm version prerelease --preid alpha && npm publish --tag alpha && git push --tags",
-    "release": "npm version patch && npm publish && git push --tags",
-    "version": "vim -c 'normal o' -c 'normal o## '$npm_package_version CHANGELOG.md && prettier -w CHANGELOG.md && git add CHANGELOG.md"
+    "prepublishOnly": "npm run clean && npm run build && npm run test && npm run typecheck && npm run lint"
   },
   "files": [
     "dist",
@@ -72,13 +68,12 @@
     }
   },
   "peerDependencies": {
-    "@hookform/resolvers": ">=3.3.0",
-    "convex": "^1.29.0",
-    "convex-helpers": "^0.1.106",
-    "lucide-react": ">=0.400.0",
+    "@hookform/resolvers": "^5.9.1",
+    "convex": "^1.46.0",
+    "convex-helpers": "^0.1.124",
+    "lucide-react": "^1.47.0",
     "react": "^18.0.0 || ^19.0.0",
-    "react-hook-form": "^7.50.0",
-    "zod": ">=3.22.0"
+    "react-hook-form": "^7.88.0"
   },
   "peerDependenciesMeta": {
     "@hookform/resolvers": {
@@ -95,50 +90,48 @@
     },
     "react-hook-form": {
       "optional": true
-    },
-    "zod": {
-      "optional": true
     }
   },
   "devDependencies": {
-    "@convex-dev/eslint-plugin": "^1.0.0",
+    "@convex-dev/eslint-plugin": "^5.0.0",
     "@edge-runtime/vm": "^5.0.0",
-    "@eslint/eslintrc": "^3.3.1",
-    "@eslint/js": "9.39.1",
-    "@hookform/resolvers": "^3.9.0",
-    "@types/node": "^20.19.25",
-    "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "chokidar-cli": "3.0.0",
-    "convex": "1.29.3",
-    "convex-helpers": "^0.1.106",
-    "convex-test": "0.0.40",
-    "cpy-cli": "^6.0.0",
-    "eslint": "9.39.1",
-    "eslint-plugin-react": "^7.37.5",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "globals": "^16.5.0",
-    "lucide-react": "^0.454.0",
-    "npm-run-all2": "8.0.4",
-    "path-exists-cli": "2.0.0",
-    "pkg-pr-new": "^0.0.60",
-    "prettier": "3.6.2",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "react-hook-form": "^7.54.0",
-    "typescript": "5.9.3",
-    "typescript-eslint": "8.47.0",
-    "vite": "6.4.1",
-    "vitest": "3.2.4",
-    "zod": "^3.24.0"
+    "@eslint/eslintrc": "^3.3.7",
+    "@eslint/js": "10.0.1",
+    "@hookform/resolvers": "^5.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^24.13.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "chokidar-cli": "^3.0.0",
+    "convex": "1.46.0",
+    "convex-helpers": "^0.1.124",
+    "convex-test": "0.0.59",
+    "cpy-cli": "^7.0.0",
+    "eslint": "10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.12.0",
+    "happy-dom": "^20.14.5",
+    "lucide-react": "^1.47.0",
+    "npm-run-all2": "^9.0.3",
+    "path-exists-cli": "^2.0.0",
+    "pkg-pr-new": "^0.0.88",
+    "prettier": "^3.9.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-hook-form": "^7.88.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
   },
   "types": "./dist/client/index.d.ts",
   "module": "./dist/client/index.js",
   "dependencies": {
-    "@convex-dev/resend": "^0.2.0",
-    "date-fns": "^4.1.0",
-    "date-fns-tz": "^3.2.0"
+    "@convex-dev/resend": "^0.2.8",
+    "date-fns": "^4.4.0",
+    "date-fns-tz": "^3.2.0",
+    "zod": "^4.6.5"
   }
 }

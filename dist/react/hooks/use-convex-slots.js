@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../context";
 import { getSessionId } from "../utils/session";
@@ -49,6 +49,15 @@ function hasPresenceConflict(slotTime, durationMinutes, presence, currentUserId)
 }
 export const useConvexSlots = (resourceId, eventLength, slotInterval, allDurationOptions, enabled = true, timezone = Intl.DateTimeFormat().resolvedOptions().timeZone) => {
     const api = useBookingAPI();
+    // Refresh time outside render so an open calendar drops elapsed slots even
+    // when neither inventory nor presence changes.
+    const [now, setNow] = useState(() => Date.now());
+    useEffect(() => {
+        if (!enabled)
+            return;
+        const timer = setInterval(() => setNow(Date.now()), 30_000);
+        return () => clearInterval(timer);
+    }, [enabled]);
     const [dateRange, setDateRange] = useState(null);
     const [selectedDateStr, setSelectedDateStr] = useState(null);
     // Smart default: use the minimum duration so the slot grid offers maximum booking flexibility
@@ -90,7 +99,6 @@ export const useConvexSlots = (resourceId, eventLength, slotInterval, allDuratio
         if (!daySlots) {
             return { available: [], reserved: [] };
         }
-        const now = Date.now();
         // Map and filter out past slots (slots that have already passed)
         const formatted = daySlots
             .map((slot) => ({
@@ -107,7 +115,7 @@ export const useConvexSlots = (resourceId, eventLength, slotInterval, allDuratio
         }
         // No presence conflicts - all slots available
         return { available: formatted, reserved: [] };
-    }, [daySlots, datePresence, eventLength, currentUserId]);
+    }, [daySlots, datePresence, eventLength, currentUserId, now]);
     const availableSlots = processedSlots.available;
     const reservedSlots = processedSlots.reserved;
     // Loading: waiting for initial data

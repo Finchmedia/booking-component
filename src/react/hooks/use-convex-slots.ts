@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../context";
 import { getSessionId } from "../utils/session";
@@ -82,6 +82,14 @@ export const useConvexSlots = (
   timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone
 ): UseConvexSlotsResult => {
   const api = useBookingAPI();
+  // Refresh time outside render so an open calendar drops elapsed slots even
+  // when neither inventory nor presence changes.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [enabled]);
   const [dateRange, setDateRange] = useState<{
     from: string;
     to: string;
@@ -147,8 +155,6 @@ export const useConvexSlots = (
       return { available: [], reserved: [] };
     }
 
-    const now = Date.now();
-
     // Map and filter out past slots (slots that have already passed)
     const formatted = (daySlots as any[])
       .map((slot) => ({
@@ -180,7 +186,7 @@ export const useConvexSlots = (
 
     // No presence conflicts - all slots available
     return { available: formatted, reserved: [] };
-  }, [daySlots, datePresence, eventLength, currentUserId]);
+  }, [daySlots, datePresence, eventLength, currentUserId, now]);
 
   const availableSlots = processedSlots.available;
   const reservedSlots = processedSlots.reserved;

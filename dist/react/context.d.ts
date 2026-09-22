@@ -152,7 +152,7 @@ export interface BookingProviderProps {
  * }
  * ```
  */
-export declare function BookingProvider({ publicApi, adminApi, children, }: BookingProviderProps): import("react/jsx-runtime").JSX.Element;
+export declare function BookingProvider({ publicApi, adminApi, children, }: BookingProviderProps): import("react").JSX.Element;
 /**
  * Hook to access the booking API from within a BookingProvider.
  *
