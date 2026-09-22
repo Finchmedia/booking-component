@@ -80,11 +80,11 @@ const listOverrides = (scheduleId: Id<"schedules">) =>
 const effectiveSlots = async (scheduleId: string, date: string) =>
   (await t.query(api.schedules.getEffectiveAvailability, { scheduleId, date })).availableSlots;
 
-/** Malformed "HH:MM" inputs: everything the TIME_RE `^([01]\d|2[0-3]):([0-5]\d)$` rejects. */
+/** Malformed "HH:MM" inputs, invalid for both starts and ends. */
 const MALFORMED_TIMES = [
   "garbage",
   "9:00", // hours not zero-padded
-  "24:00", // hour out of range (the classic "end of day" spelling)
+  "24:15", // only the exact end-of-day boundary 24:00 is valid as an end
   "09:60", // minutes out of range — NOT the 15-minute-grid branch
   "", // empty string
   "0900", // separator missing

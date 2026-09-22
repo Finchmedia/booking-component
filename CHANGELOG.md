@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — 22 September 2026
+
+### Fixed
+
+- Weekly schedules and date overrides accept `24:00` as an end time, allowing
+  availability through midnight, including the final 23:30–00:00 booking.
+  Start times remain within the day; invalid, inverted and overlapping windows
+  are still rejected. No API or dependency changes are required.
+
 ## 0.4.0 — 22 September 2026
 
 ### Upgrading

@@ -14,12 +14,13 @@ import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-/** Parses "HH:MM" (00:00–23:59, minutes on the 15-minute grid) to minutes since midnight. */
-function parseTimeStrict(time: string, field: string): number {
+/** Parses grid-aligned "HH:MM"; only window ends may use 24:00 for the end of this day. */
+function parseTimeStrict(time: string, field: string, isEnd = false): number {
+  if (isEnd && time === "24:00") return 24 * 60;
   const match = TIME_RE.exec(time);
   if (!match) {
     throw new Error(
-      `Invalid ${field} "${time}": expected "HH:MM" between 00:00 and 23:59`
+      `Invalid ${field} "${time}": expected "HH:MM" between 00:00 and 23:59${isEnd ? ' (or "24:00" for end of day)' : ""}`
     );
   }
   const hours = Number(match[1]);
@@ -45,7 +46,7 @@ function assertNonOverlappingWindows(
 ): void {
   const parsed = windows.map((window, index) => ({
     start: parseTimeStrict(window.startTime, `${label} startTime`),
-    end: parseTimeStrict(window.endTime, `${label} endTime`),
+    end: parseTimeStrict(window.endTime, `${label} endTime`, true),
     index,
   }));
   for (const window of parsed) {
