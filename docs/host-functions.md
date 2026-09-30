@@ -46,6 +46,11 @@ export const getDaySlots = query({
   another booking. Neither value appears in results or logs.
 - `getMonthAvailability` takes the same argument. Forward it there too, so the month view offers
   the day of the booking being moved.
+- `BookingProvider`'s `availabilityContext` (`@mrfinch/booking/react`) makes the Calendar send
+  `eventTypeId` and, while the Booker reschedules, `rescheduleContext` to both queries. Declare
+  both as optional in the argument validators of both wrappers, as above, and deploy them before a
+  page turns the prop on: a validator without them rejects every slot query. `BookingProvider`
+  checks `publicApi` for both at compile time (`PublicBookingAPIWithAvailabilityContext`).
 - Never forward `excludeBookingUid` from client arguments: it frees a booking from its UID alone.
   Pass it only from code that has authorized the move itself, such as an administrator's screen.
   Passing both arguments throws `INVALID_INPUT`.

@@ -239,13 +239,18 @@ token matches it, and otherwise ignores it. Never turn it into
 `excludeBookingUid`, which trusts any UID and is meant for trusted server
 code, and never log or return either value.
 
-To turn it on, add both arguments to the two functions, pass
-`rescheduleContext` on as below, and deploy them before the page that sets
-`availabilityContext`: until then their validators reject the new arguments.
-The Booker takes the token from `originalBooking.managementToken`, which
-rescheduling already needs. If these functions accept `excludeBookingUid` from
-the browser today, remove it: with it any caller can make any booking's time
-show as free.
+Before you set `availabilityContext`, declare
+`eventTypeId: v.optional(v.string())` and
+`rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`
+in the argument validators of both host slot wrappers, `getDaySlots` and
+`getMonthAvailability`, pass `rescheduleContext` on as below, and deploy them
+before the page that sets the prop: a validator without them rejects every
+slot query the Calendar sends.
+[Host functions](https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md#slot-queries-while-rescheduling)
+shows the complete wrapper. The Booker takes the token from
+`originalBooking.managementToken`, which rescheduling already needs. If these
+functions accept `excludeBookingUid` from the browser today, remove it: with
+it any caller can make any booking's time show as free.
 
 ```ts
 export const getDaySlots = query({

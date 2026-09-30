@@ -190,7 +190,10 @@ export interface BookingProviderProps {
   /**
    * Off (the default): getDaySlots and getMonthAvailability receive the same
    * arguments as in 0.4.x. Set it to send the availability context; see
-   * {@link BookingProviderPropsWithAvailabilityContext}.
+   * {@link BookingProviderPropsWithAvailabilityContext}. Before you set it,
+   * your host slot wrappers must declare `eventTypeId` and `rescheduleContext`
+   * in their argument validators, deployed ahead of the page (see
+   * {@link https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md#slot-queries-while-rescheduling | docs/host-functions.md, "Slot queries while rescheduling"}).
    */
   availabilityContext?: false;
 
@@ -205,9 +208,15 @@ export interface BookingProviderProps {
  * apply the event type's own schedule and policy and offer times that overlap
  * the booking being moved. Presence functions never receive the token.
  *
- * `publicApi` must then declare both arguments as optional in those two
- * functions ({@link PublicBookingAPIWithAvailabilityContext}); a host that
- * lacks them is a type error here instead of a validator error in the browser.
+ * Before you turn `availabilityContext` on, your host slot wrappers
+ * (getDaySlots and getMonthAvailability) must declare `eventTypeId` and
+ * `rescheduleContext` as optional in their argument validators, deployed
+ * before the page that turns it on: a validator without them rejects every
+ * slot query. `publicApi` is checked for both
+ * ({@link PublicBookingAPIWithAvailabilityContext}), so a host that lacks them
+ * is a type error here instead of a validator error in the browser. The
+ * wrapper is in
+ * {@link https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md#slot-queries-while-rescheduling | docs/host-functions.md, "Slot queries while rescheduling"}.
  */
 export interface BookingProviderPropsWithAvailabilityContext
   extends Omit<BookingProviderProps, "publicApi" | "availabilityContext"> {
