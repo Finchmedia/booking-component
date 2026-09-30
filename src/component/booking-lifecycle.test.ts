@@ -300,3 +300,137 @@ describe("rescheduleBooking records its actor", () => {
     expect(await actors(t, movedByToken._id)).toEqual(["->confirmed:system"]);
   });
 });
+
+// ============================================
+// PARITY ACROSS CANCEL-LIKE PATHS
+// ============================================
+
+type Extra = { reason?: string; actor?: string };
+type CancelPath = {
+  /** Row kinds the path accepts (bundles hold a pool quantity too). */
+  kinds: RowKind[];
+  to: "cancelled" | "declined";
+  run: (t: T, booking: Doc<"bookings">, extra: Extra) => Promise<unknown>;
+  /** History actor and reason when the caller passes none (pinned per path). */
+  defaults: { by: string | undefined; reason: string | undefined };
+};
+
+const CANCEL_PATHS: Record<string, CancelPath> = {
+  cancelReservation: {
+    kinds: ["confirmed", "bundle"],
+    to: "cancelled",
+    run: (t, booking, { reason, actor }) =>
+      t.mutation(api.public.cancelReservation, { reservationId: booking._id, reason, cancelledBy: actor }),
+    defaults: { by: "unknown", reason: undefined },
+  },
+  cancelBookingByToken: {
+    kinds: ["confirmed", "bundle"],
+    to: "cancelled",
+    run: (t, booking, { reason }) =>
+      t.mutation(api.public.cancelBookingByToken, { uid: booking.uid, token: booking.managementToken!, reason }),
+    defaults: { by: "user", reason: "Cancelled by booker" },
+  },
+  cancelMultiResourceBooking: {
+    kinds: ["confirmed", "bundle"],
+    to: "cancelled",
+    run: (t, booking, { reason, actor }) =>
+      t.mutation(api.multi_resource.cancelMultiResourceBooking, { bookingId: booking._id, reason, cancelledBy: actor }),
+    defaults: { by: "unknown", reason: undefined },
+  },
+  "transitionBookingState -> cancelled": {
+    kinds: ["confirmed", "bundle"],
+    to: "cancelled",
+    run: (t, booking, { reason, actor }) =>
+      t.mutation(api.hooks.transitionBookingState, { bookingId: booking._id, toStatus: "cancelled", reason, changedBy: actor }),
+    defaults: { by: undefined, reason: undefined },
+  },
+  "transitionBookingState -> declined": {
+    kinds: ["pending"],
+    to: "declined",
+    run: (t, booking, { reason, actor }) =>
+      t.mutation(api.hooks.transitionBookingState, { bookingId: booking._id, toStatus: "declined", reason, changedBy: actor }),
+    defaults: { by: undefined, reason: undefined },
+  },
+  expireProvisionalBooking: {
+    kinds: ["provisional"],
+    to: "cancelled",
+    run: (t, booking, { reason }) => t.mutation(api.public.expireProvisionalBooking, { bookingId: booking._id, reason }),
+    defaults: { by: "system", reason: "Provisional booking expired" },
+  },
+  "rescheduleBooking (original)": {
+    kinds: ["confirmed", "bundle"],
+    to: "cancelled",
+    run: (t, booking, { reason, actor }) =>
+      t.mutation(api.public.rescheduleBooking, {
+        bookingId: booking._id,
+        newStart: at("14:00"),
+        newEnd: at("15:00"),
+        reason,
+        changedBy: actor,
+      }),
+    defaults: { by: "system", reason: "Rescheduled to new time" },
+  },
+};
+
+const PATH_CASES = Object.entries(CANCEL_PATHS).flatMap(([name, path]) =>
+  path.kinds.map((kind) => [name, kind] as const)
+);
+
+describe("every cancel-like path ends a booking the same way", () => {
+  test.each(PATH_CASES)("%s on a %s row", async (name, kind) => {
+    const path = CANCEL_PATHS[name];
+    const { t } = setup({ now: T0 });
+    const { create } = await seedWorld(t);
+    const { booking, resourceId } = await create[kind]();
+    const before = await lifecycleOf(t, booking._id);
+    // CONTROL: 10:00–11:00 is held (bundles: two pool units as well).
+    expect(await getBusySlots(t, resourceId, TUESDAY)).toEqual(TEN_TO_ELEVEN);
+
+    vi.setSystemTime(T1);
+    await path.run(t, booking, {});
+
+    expect(await lifecycleOf(t, booking._id)).toEqual({
+      status: path.to,
+      cancelledAt: T1,
+      updatedAt: T1,
+      cancellationReason: path.defaults.reason,
+      history: [
+        ...before.history,
+        { from: booking.status, to: path.to, by: path.defaults.by, reason: path.defaults.reason, at: T1 },
+      ],
+    });
+    // The booking's own slots and pool units are free (a move holds 14:00–15:00 instead).
+    const busy = (await getBusySlots(t, resourceId, TUESDAY)) ?? [];
+    expect(busy.filter((slot) => TEN_TO_ELEVEN.includes(slot))).toEqual([]);
+    const units = await poolUnits(t);
+    expect(TEN_TO_ELEVEN.map((slot) => units[String(slot)] ?? 0)).toEqual([0, 0, 0, 0]);
+  });
+
+  test("given the same reason and actor, the four paths that take both record the same metadata", async () => {
+    const { t } = setup({ now: T0 });
+    const { seed } = await seedWorld(t);
+    const names = [
+      "cancelReservation",
+      "cancelMultiResourceBooking",
+      "transitionBookingState -> cancelled",
+      "rescheduleBooking (original)",
+    ];
+    const results: Record<string, unknown> = {};
+    for (const [i, name] of names.entries()) {
+      vi.setSystemTime(T0);
+      const booking = await book(t, seed, at(`0${i + 5}:00`), at(`0${i + 6}:00`));
+      vi.setSystemTime(T1);
+      await CANCEL_PATHS[name].run(t, booking, { reason: "Room closed", actor: "admin-1" });
+      const { history, ...row } = await lifecycleOf(t, booking._id);
+      results[name] = { ...row, last: history[history.length - 1] };
+    }
+    const expected = {
+      status: "cancelled",
+      cancelledAt: T1,
+      updatedAt: T1,
+      cancellationReason: "Room closed",
+      last: { from: "confirmed", to: "cancelled", by: "admin-1", reason: "Room closed", at: T1 },
+    };
+    expect(results).toEqual(Object.fromEntries(names.map((name) => [name, expected])));
+  });
+});

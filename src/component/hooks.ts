@@ -4,7 +4,7 @@ import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { FunctionHandle } from "convex/server";
-import { releaseAllSlotsForBooking } from "./slot_helpers";
+import { terminateBooking } from "./booking_lifecycle";
 import {
   bookingHistoryDoc,
   hookDoc,
@@ -378,41 +378,34 @@ export const transitionBookingState = mutation({
 
     const now = Date.now();
 
-    // Record history
-    await ctx.db.insert("booking_history", {
-      bookingId: args.bookingId,
-      fromStatus: currentStatus,
-      toStatus: args.toStatus,
-      changedBy: args.changedBy,
-      reason: args.reason,
-      timestamp: now,
-    });
+    if (args.toStatus === "cancelled" || args.toStatus === "declined") {
+      // Both end the booking: give the held slots back (per booking_item for
+      // bundles, pooled resources included), record history and stamp the
+      // cancellation fields — as every other cancel path does. Previously a
+      // declined booking (and a cancellation through this state machine)
+      // kept its slots busy forever, so the time could never be rebooked.
+      await terminateBooking(ctx, booking, {
+        to: args.toStatus,
+        reason: args.reason,
+        changedBy: args.changedBy,
+        now,
+      });
+    } else {
+      // Record history
+      await ctx.db.insert("booking_history", {
+        bookingId: args.bookingId,
+        fromStatus: currentStatus,
+        toStatus: args.toStatus,
+        changedBy: args.changedBy,
+        reason: args.reason,
+        timestamp: now,
+      });
 
-    // Update booking
-    const updates: Record<string, unknown> = {
-      status: args.toStatus,
-      updatedAt: now,
-    };
-
-    // Both "cancelled" and "declined" end the booking: stamp the cancellation
-    // fields and give the held slots back. Previously a declined booking (and
-    // a cancellation through this state machine) kept its slots busy forever,
-    // so the time could never be rebooked.
-    const releasesSlots =
-      args.toStatus === "cancelled" || args.toStatus === "declined";
-
-    if (releasesSlots) {
-      updates.cancelledAt = now;
-      updates.cancellationReason = args.reason;
-    }
-
-    await ctx.db.patch(args.bookingId, updates);
-
-    if (releasesSlots) {
-      // Single-resource bookings: daily_availability of booking.resourceId.
-      // Multi-resource bookings: per booking_item (quantity_availability for
-      // pooled resources) — the same logic as cancelMultiResourceBooking.
-      await releaseAllSlotsForBooking(ctx, booking);
+      // Update booking
+      await ctx.db.patch(args.bookingId, {
+        status: args.toStatus,
+        updatedAt: now,
+      });
     }
 
     // Capture notification data before a later mutation can change this booking.

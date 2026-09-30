@@ -202,6 +202,12 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - The 0.3.1 entry no longer says `cancelReservation`'s result matches
   `cancelBooking` (which does not exist) and `cancelMultiResourceBooking`
   (which returns `{ success }` only).
+- The seven ways a booking ends (`cancelReservation`, `cancelBookingByToken`,
+  `cancelMultiResourceBooking`, `transitionBookingState` to `cancelled` or
+  `declined`, `expireProvisionalBooking` and the original of a move) share one
+  implementation for inventory release, history and the cancellation fields.
+  Each keeps its checks, error texts, default actor and reason, idempotency
+  and hook payload.
 
 ### Tests
 
@@ -215,6 +221,9 @@ The internal email mutations keep their names and arguments, so jobs queued by
   against an `Intl`-only oracle), input validation, zone validation, the new
   schedule arguments and the audit. The time-dependent ones run under several
   process time zones.
+- Link-integrity and lifecycle suites: duplicate link rows, cancellation
+  metadata per row kind, and a parity table across the cancel-like paths
+  (single and bundle rows, pool units included).
 
 ## 0.4.2 — 23 September 2026
 

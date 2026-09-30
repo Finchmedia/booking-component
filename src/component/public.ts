@@ -23,7 +23,6 @@ import {
     assertTimeZone,
 } from "./input_validation";
 import type { Doc } from "./_generated/dataModel";
-import { releaseAllSlotsForBooking } from "./slot_helpers";
 import {
   assertSingleResourceSupported,
   holdsActiveInventory,
@@ -846,24 +845,11 @@ export const expireProvisionalBooking = mutation({
       return { success: false, reason: `Booking is ${booking.status}` };
     }
 
-    const now = Date.now();
-
-    await ctx.db.insert("booking_history", {
-      bookingId: args.bookingId,
-      fromStatus: "provisional",
-      toStatus: "cancelled",
-      changedBy: "system",
+    await terminateBooking(ctx, booking, {
+      to: "cancelled",
       reason: args.reason ?? "Provisional booking expired",
-      timestamp: now,
-    });
-
-    await releaseAllSlotsForBooking(ctx, booking);
-
-    await ctx.db.patch(args.bookingId, {
-      status: "cancelled",
-      cancelledAt: now,
-      cancellationReason: args.reason ?? "Provisional booking expired",
-      updatedAt: now,
+      changedBy: "system",
+      now: Date.now(),
     });
 
     return { success: true };
@@ -1281,39 +1267,27 @@ export const cancelBookingByToken = mutation({
       throw new Error(`Cannot cancel booking with status: ${booking.status}`);
     }
 
-    const now = Date.now();
+    const reason = args.reason || "Cancelled by booker";
 
-    // 3. Record history
-    await ctx.db.insert("booking_history", {
-      bookingId: booking._id,
-      fromStatus: booking.status,
-      toStatus: "cancelled",
+    // 3–5. Release every item (pooled add-ons and legacy bookings included),
+    // record history and stamp the cancellation.
+    await terminateBooking(ctx, booking, {
+      to: "cancelled",
+      reason,
       changedBy: "user",
-      reason: args.reason || "Cancelled by booker",
-      timestamp: now,
+      now: Date.now(),
     });
-
-    // 4. Update booking
-    await ctx.db.patch(booking._id, {
-      status: "cancelled",
-      cancelledAt: now,
-      cancellationReason: args.reason || "Cancelled by booker",
-      updatedAt: now,
-    });
-
-    // 5. Release every item, including pooled add-ons and legacy bookings.
-    await releaseAllSlotsForBooking(ctx, booking);
 
     // 6. Trigger booking.cancelled hook
     await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
       eventType: "booking.cancelled",
-      emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason: args.reason || "Cancelled by booker" }),
+      emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason }),
       organizationId: booking.organizationId,
       payload: {
         bookingId: booking._id,
         booking: { ...booking, status: "cancelled" },
         previousStatus: booking.status,
-        reason: args.reason || "Cancelled by booker",
+        reason,
         bookerEmail: booking.bookerEmail,
         bookerName: booking.bookerName,
         eventTitle: booking.eventTitle,
@@ -1354,12 +1328,15 @@ async function moveBooking(
   // reinterpret it after a host has changed the resource into a pool.
   if (items.length === 0) await assertSingleResourceSupported(ctx, original.resourceId);
 
-  // Read-your-writes lets overlapping moves reuse only the original's inventory.
-  // Any destination conflict aborts this mutation and restores ALL old items.
-  await releaseAllSlotsForBooking(ctx, original);
+  // The original ends first: read-your-writes lets overlapping moves reuse
+  // only its inventory. Any destination conflict aborts this mutation and
+  // restores the original with ALL its items.
+  const now = Date.now();
+  const reason = args.reason ?? "Rescheduled to new time";
+  const changedBy = args.changedBy ?? "system";
+  await terminateBooking(ctx, original, { to: "cancelled", reason, changedBy, now });
   await reserveResourceSlots(ctx, resources, args.newStart, args.newEnd);
 
-  const now = Date.now();
   const newUid = `bk_${now}_${Math.random().toString(36).slice(2, 9)}`;
   const newBookingId = await ctx.db.insert("bookings", {
     uid: newUid,
@@ -1390,16 +1367,6 @@ async function moveBooking(
       quantity: item.quantity,
     });
   }
-  const reason = args.reason ?? "Rescheduled to new time";
-  const changedBy = args.changedBy ?? "system";
-  await ctx.db.insert("booking_history", {
-    bookingId: original._id,
-    fromStatus: original.status,
-    toStatus: "cancelled",
-    changedBy,
-    reason,
-    timestamp: now,
-  });
   await ctx.db.insert("booking_history", {
     bookingId: newBookingId,
     fromStatus: "",
@@ -1407,12 +1374,6 @@ async function moveBooking(
     changedBy,
     reason: `Rescheduled from ${original.uid}`,
     timestamp: now,
-  });
-  await ctx.db.patch(original._id, {
-    status: "cancelled",
-    cancelledAt: now,
-    cancellationReason: reason,
-    updatedAt: now,
   });
   const booking = await ctx.db.get(newBookingId);
   if (!booking) throw new Error("Booking not found after write");

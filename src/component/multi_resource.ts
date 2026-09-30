@@ -4,7 +4,7 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, assertValidRange } from "./utils";
-import { releaseAllSlotsForBooking } from "./slot_helpers";
+import { terminateBooking } from "./booking_lifecycle";
 import {
   holdsActiveInventory,
   reserveResourceSlots,
@@ -415,28 +415,14 @@ export const cancelMultiResourceBooking = mutation({
       throw new Error(`Cannot cancel booking with status: ${booking.status}`);
     }
 
-    // Release slots for each booked resource (quantity_availability for pooled
-    // resources, daily_availability otherwise). Shared with the state-machine
-    // cancel/decline path so both leave the availability tables identical.
-    await releaseAllSlotsForBooking(ctx, booking);
-
-    // Update booking status
-    const now = Date.now();
-    await ctx.db.patch(args.bookingId, {
-      status: "cancelled",
-      cancelledAt: now,
-      cancellationReason: args.reason,
-      updatedAt: now,
-    });
-
-    // Record in history
-    await ctx.db.insert("booking_history", {
-      bookingId: args.bookingId,
-      fromStatus: booking.status,
-      toStatus: "cancelled",
-      changedBy: args.cancelledBy ?? "unknown",
+    // Release every booked resource (quantity_availability for pooled
+    // resources, daily_availability otherwise), record history and stamp the
+    // cancellation — shared with every other cancel path.
+    await terminateBooking(ctx, booking, {
+      to: "cancelled",
       reason: args.reason,
-      timestamp: now,
+      changedBy: args.cancelledBy ?? "unknown",
+      now: Date.now(),
     });
 
     // Trigger booking.cancelled hook
