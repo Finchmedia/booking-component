@@ -612,7 +612,7 @@ async function bookingIntegrityIssue(
   if (eventTypeOrganizationId !== undefined && booking.organizationId !== eventTypeOrganizationId) {
     const fillable =
       booking.organizationId === undefined &&
-      "organizationId" in (await corroboratedOrganization(db, booking, eventType, find.resource));
+      "organizationId" in (await corroboratedOrganization(db, booking, eventType, find.resource, loadItems));
     found.push(fillable ? "organizationMissing" : "organizationMismatch");
   }
   if (holdsActiveInventory(booking.status) && (await find.resource(booking.resourceId))?.isFungible === true) {

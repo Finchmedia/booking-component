@@ -51,8 +51,9 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
 - New bookings (`createBooking`, `createProvisionalBooking`,
   `createMultiResourceBooking`) reject a `timezone` `Intl` does not accept and
   a booker email that fails the built-in mail's syntax screen (one `@`, a
-  dotted domain, no spaces) with `INVALID_INPUT`, before any other check (N4,
-  N5, D15); the text does not repeat the address. Check both in your booking
+  domain of 1–63-character labels, no spaces) with `INVALID_INPUT`, before
+  any other check (N4, N5, D15); the text does not repeat the address. Check
+  both in your booking
   form (`isSendableAddress` from `@mrfinch/booking/emails` is that screen).
   Stored bookings keep working. Recipient verification stays host policy.
 - `createEventType` and `updateEventType` check the settings they are given
@@ -170,7 +171,8 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
   `crossOrganization`, and link a resource of the event type's organization
   instead; `booking_integrity` lists stored bookings of another
   organization, and those without one that `backfillBookingOrganizations`
-  lists in `needsReview`, as `organizationMismatch`.
+  lists in `needsReview` for a missing or foreign resource, as
+  `organizationMismatch`.
 - `getMonthAvailability` and `getDaySlots` need complete schedule arguments
   (F12): `resourceTimezone` alone, `availableSlots` without
   `resourceTimezone` or `scheduleId`, and a `resourceTimezone` other than the

@@ -367,22 +367,25 @@ export type UncorroboratedOrganization =
  * another organization later; the resources, owners of the booked
  * inventory, corroborate it. backfillBookingOrganizations, the audit's
  * booking_integrity and withEventTypeOrganization share this rule. Reads
- * only, never throws.
+ * only, never throws. `loadItems` lets a caller that also needs the items
+ * read them once.
  */
 export async function corroboratedOrganization(
   db: DatabaseReader,
   booking: Doc<"bookings">,
   eventType: Doc<"event_types"> | null,
   resource: (id: string) => Promise<Doc<"resources"> | null>,
+  loadItems: () => Promise<Doc<"booking_items">[]> = () =>
+    db
+      .query("booking_items")
+      .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+      .collect(),
 ): Promise<{ organizationId: string } | UncorroboratedOrganization> {
   if (!eventType) return { reason: "event_type_missing" };
   const organizationId = eventType.organizationId;
   if (organizationId === undefined) return { reason: "event_type_without_organization" };
 
-  const items = await db
-    .query("booking_items")
-    .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
-    .collect();
+  const items = await loadItems();
   for (const resourceId of new Set([booking.resourceId, ...items.map((item) => item.resourceId)])) {
     const resourceOrganizationId = (await resource(resourceId))?.organizationId;
     if (resourceOrganizationId === undefined) {
