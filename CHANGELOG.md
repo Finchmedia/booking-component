@@ -112,8 +112,9 @@
   one-click reschedule; the slot hold ends after a successful booking or reschedule and
   a failed one-click reschedule. A new `eventTypeId`, `resourceId` or
   `originalBooking.uid` starts a fresh flow, which shows the confirmation of a
-  submission still pending then; a late `originalBooking` uses its own duration and
-  zone. A completed reschedule offers no "Book Another"; `reuseBookerInfo={false}`
+  submission still pending then unless a newer one was sent: only the submission
+  sent last is shown, older ones reach `onBookingComplete`. A late
+  `originalBooking` uses its own duration and zone. A completed reschedule offers no "Book Another"; `reuseBookerInfo={false}`
   shows the original contact details read-only; confirmation and success follow the
   12h/24h choice and the browser locale.
 - Accessibility: durations are a native radio group; form fields are labelled and expose

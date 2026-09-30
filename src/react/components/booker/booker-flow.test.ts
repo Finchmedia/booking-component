@@ -334,11 +334,12 @@ describe("Booker identity reset (O10)", () => {
       expect(onBookingComplete.mock.calls[1][0]).toMatchObject({ bookerName: "Ada Lovelace", resourceId: "r", start: Date.parse(SLOT_A) });
     });
 
-    it("CONTROL: the newer confirmation replaces the older one when they resolve in order", async () => {
+    it("keeps the newer request's form when the older one resolves first, then shows its confirmation", async () => {
       const onBookingComplete = vi.fn();
       const { older, newer } = await startOverlap(onBookingComplete);
       await older();
-      expect(screen.getByText("Ada Lovelace")).toBeTruthy();
+      expect(screen.queryByText("You're booked!")).toBeNull();
+      expect(screen.getByRole("heading", { name: "Enter Details" })).toBeTruthy(); // the newer request's form, still sending
       await newer();
       expect(screen.getByText("You're booked!")).toBeTruthy();
       expect(screen.getByText("Grace Hopper")).toBeTruthy();
@@ -346,6 +347,33 @@ describe("Booker identity reset (O10)", () => {
       expect(onBookingComplete).toHaveBeenCalledTimes(2);
       expect(onBookingComplete.mock.calls.map(([booking]) => (booking as Booking).bookerName))
         .toEqual(["Ada Lovelace", "Grace Hopper"]);
+    });
+
+    it("shows the newer request's failure when the older one succeeded first", async () => {
+      const onBookingComplete = vi.fn();
+      const onBookingError = vi.fn();
+      const resolvers: Array<() => void> = [];
+      mocks.create
+        .mockImplementationOnce((args) => new Promise((resolve) => { resolvers.push(() => resolve(echoBooking(args))); }))
+        .mockImplementationOnce(() => new Promise((_resolve, reject) => { resolvers.push(() => reject(new Error("slot taken"))); }));
+      const view = renderBooker({ onBookingComplete, onBookingError });
+      fireEvent.click(slotButton(SLOT_A));
+      fillContact("Ada Lovelace");
+      submitForm();
+      await settle();
+      view.rerender({ resourceId: "r-other", onBookingComplete, onBookingError });
+      fireEvent.click(slotButton(SLOT_B));
+      fillContact("Grace Hopper");
+      submitForm();
+      await settle();
+      await act(async () => resolvers[0]()); // the older booking was made
+      await act(async () => resolvers[1]()); // the newer one fails
+      expect(screen.queryByText("You're booked!")).toBeNull();
+      expect(screen.getByRole("alert").textContent).toBe("Something went wrong. Please try again.");
+      expect(submitButton()).toBeTruthy();
+      expect(onBookingComplete).toHaveBeenCalledTimes(1);
+      expect(onBookingComplete.mock.calls[0][0]).toMatchObject({ bookerName: "Ada Lovelace", resourceId: "r" });
+      expect(onBookingError).toHaveBeenCalledTimes(1);
     });
   });
 
