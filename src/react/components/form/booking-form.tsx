@@ -8,7 +8,7 @@ import {
   bookingFormSchema,
   type BookingFormValues,
 } from "../../utils/validation.js";
-import { formatDate, formatTimeDisplay } from "../../utils/formatting.js";
+import { formatDateTime } from "../../utils/formatting.js";
 import type { BookingFormData } from "../../types.js";
 
 // Define a local interface for EventType to match EventMetaPanel's expectation
@@ -146,8 +146,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
             {isRescheduling ? "New time: " : ""}
-            {formatDate(selectedSlot, timezone, locale)} at{" "}
-            {formatTimeDisplay(selectedSlot, timeFormat, timezone, locale)}
+            {/* One Intl format: the locale joins date and time ("at", "um", "à") */}
+            {formatDateTime(Date.parse(selectedSlot), timezone, timeFormat, locale)}
           </p>
         </div>
 

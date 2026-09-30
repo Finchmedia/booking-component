@@ -79,6 +79,9 @@ const ORIGINAL: Booking = {
 
 let api: Record<string, string>;
 
+const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const locale = () => Intl.DateTimeFormat().resolvedOptions().locale;
+
 function renderBooker(props: Partial<BookerProps> = {}) {
   const tree = (next: Partial<BookerProps>) =>
     createElement(ConvexProvider, { client },
@@ -241,6 +244,65 @@ describe("Booker identity reset (O10)", () => {
     }
   });
 
+  it("keeps ids containing '|' apart: ('a', 'b|c') and ('a|b', 'c') are different flows", () => {
+    const view = renderBooker({ eventTypeId: "a", resourceId: "b|c" });
+    fireEvent.click(slotButton(SLOT_A));
+    // CONTROL: new props with the same ids keep the flow
+    view.rerender({ eventTypeId: "a", resourceId: "b|c", title: "Other title" });
+    expect(screen.getByRole("button", { name: "Confirm Booking" })).toBeTruthy();
+    view.rerender({ eventTypeId: "a|b", resourceId: "c" });
+    expect(screen.queryByRole("button", { name: "Confirm Booking" })).toBeNull();
+    expect(slotButton(SLOT_A)).toBeTruthy(); // back on the calendar
+    expect(leftSlot(SLOT_A)).toBe(true);
+  });
+
+  it("shows the confirmation of a booking that was still being sent when the identity changed", async () => {
+    for (const onBookingComplete of [undefined, vi.fn()]) {
+      let complete = () => {};
+      mocks.create.mockReset();
+      mocks.create.mockImplementation(
+        (args) => new Promise((resolve) => { complete = () => resolve(echoBooking(args)); })
+      );
+      const view = renderBooker({ onBookingComplete });
+      fireEvent.click(slotButton(SLOT_A));
+      fillContact();
+      submitForm();
+      await settle();
+      view.rerender({ resourceId: "r-other", onBookingComplete });
+      expect(slotButton(SLOT_A)).toBeTruthy(); // the new resource's calendar
+      await act(async () => complete());
+      expect(screen.getByText("You're booked!")).toBeTruthy();
+      expect(screen.getByText("Ada Lovelace")).toBeTruthy(); // the booking that was made
+      expect(screen.queryByRole("button", { name: formatTime(SLOT_B, "24h", zone()) })).toBeNull();
+      if (onBookingComplete) {
+        expect(onBookingComplete).toHaveBeenCalledTimes(1);
+        expect(onBookingComplete.mock.calls[0][0]).toMatchObject({ resourceId: "r", start: Date.parse(SLOT_A) });
+      }
+      // "Book Another" continues with the new resource
+      fireEvent.click(screen.getByRole("button", { name: "Book Another" }));
+      fireEvent.click(slotButton(SLOT_B));
+      fillContact();
+      submitForm();
+      await settle();
+      expect(mocks.create).toHaveBeenCalledTimes(2);
+      expect(mocks.create.mock.calls[1][0]).toMatchObject({ resourceId: "r-other", start: Date.parse(SLOT_B) });
+      cleanup();
+    }
+  });
+
+  it("CONTROL: a confirmation already shown gives way to a fresh flow on an identity change", async () => {
+    mocks.create.mockImplementation(async (args) => echoBooking(args));
+    const view = renderBooker();
+    fireEvent.click(slotButton(SLOT_A));
+    fillContact();
+    submitForm();
+    await settle();
+    expect(screen.getByText("You're booked!")).toBeTruthy();
+    view.rerender({ resourceId: "r-other" });
+    expect(screen.queryByText("You're booked!")).toBeNull();
+    expect(slotButton(SLOT_A)).toBeTruthy();
+  });
+
   it("reschedules with the original's duration and zone when originalBooking arrives after mount", async () => {
     mocks.queries[API.getEventType] = { ...EVENT, lengthInMinutes: 30, lengthInMinutesOptions: [30, 60, 90] };
     mocks.reschedule.mockImplementation(async (args) => movedBooking(args));
@@ -252,7 +314,7 @@ describe("Booker identity reset (O10)", () => {
       const view = renderBooker({ originalBooking: late ? undefined : tokyo });
       if (late) view.rerender({ originalBooking: tokyo });
       fireEvent.click(slotButton(SLOT_A, "Asia/Tokyo")); // slots are labelled in the original's zone
-      expect(screen.getByText(new RegExp(` at ${formatTime(SLOT_A, "24h", "Asia/Tokyo")}$`))).toBeTruthy();
+      expect(screen.getByText(new RegExp(`\\s${formatTime(SLOT_A, "24h", "Asia/Tokyo")}$`))).toBeTruthy();
       submitForm();
       await settle();
       const { newStart, newEnd } = mocks.reschedule.mock.calls[0][0] as { newStart: number; newEnd: number };
@@ -300,6 +362,25 @@ describe("Booker reschedule success (O10)", () => {
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Book Another" }));
     expect(slotButton(SLOT_B)).toBeTruthy();
+  });
+});
+
+describe("Booker confirmation after the event type is gone", () => {
+  it("keeps the confirmation when getEventType returns null after the booking", async () => {
+    mocks.create.mockImplementation(async (args) => echoBooking(args));
+    const view = renderBooker();
+    fireEvent.click(slotButton(SLOT_A));
+    fillContact();
+    submitForm();
+    await settle();
+    mocks.queries[API.getEventType] = null;
+    view.rerender({});
+    expect(screen.getByText("You're booked!")).toBeTruthy();
+    expect(screen.getByText("Session")).toBeTruthy(); // the last known title
+    expect(screen.getByText("Ada Lovelace")).toBeTruthy();
+    // CONTROL: leaving the confirmation reports the deleted event type
+    fireEvent.click(screen.getByRole("button", { name: "Book Another" }));
+    expect(screen.getByRole("alert").textContent).toContain("has been deleted");
   });
 });
 
@@ -390,21 +471,21 @@ describe("Booker reschedule confirmation (N11)", () => {
 });
 
 describe("Booker time format and locale (N18)", () => {
-  const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const locale = () => Intl.DateTimeFormat().resolvedOptions().locale;
-
   it.each(["24h", "12h"] as const)("confirm and success steps follow the calendar's %s format and locale", async (format) => {
     mocks.create.mockImplementation(async (args) => echoBooking(args));
     renderBooker();
     if (format === "12h") fireEvent.click(screen.getByRole("button", { name: "12h" }));
     const label = slotButton(SLOT_A, zone(), format).textContent!;
     fireEvent.click(slotButton(SLOT_A, zone(), format));
-    // Same wording as the calendar: the browser's locale, not a fixed en-US
-    const date = new Date(SLOT_A).toLocaleDateString(locale(), {
-      weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: zone(),
+    // Same wording as the calendar: the browser's locale, not a fixed en-US, and
+    // date and time joined by the locale, not by an English "at"
+    const dateTime = new Date(SLOT_A).toLocaleString(locale(), {
+      weekday: "long", month: "long", day: "numeric", year: "numeric",
+      hour: format === "24h" ? "2-digit" : "numeric", minute: "2-digit", hour12: format === "12h", timeZone: zone(),
     });
     const heading = screen.getByRole("heading", { name: "Enter Details" }).nextElementSibling!.textContent!;
-    expect(heading).toBe(`${date} at ${label}`);
+    expect(heading).toBe(dateTime);
+    expect(heading.endsWith(label)).toBe(true);
     fillContact();
     submitForm();
     await settle();

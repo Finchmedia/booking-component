@@ -398,3 +398,75 @@ describe("Booker in-flight guards", () => {
     });
   });
 });
+
+// The project compiles without Node types, so reach the process events through a narrow type.
+const nodeProcess = (globalThis as unknown as {
+  process: {
+    on(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+    off(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+  };
+}).process;
+
+describe("Booker host callback errors", () => {
+  const hostBug = () => { throw new Error("host bug"); };
+  const loggedAsFailure = () =>
+    vi.mocked(console.error).mock.calls.some(([first]) => /failed:$/.test(String(first)));
+
+  it("a throwing onBookingComplete keeps the confirmation and is not reported as a failure", async () => {
+    mocks.create.mockImplementation(async (args) => echoBooking(args));
+    mocks.reschedule.mockImplementation(async (args) => movedBooking(args));
+    for (const reschedule of [false, true]) {
+      vi.mocked(console.error).mockClear();
+      const onBookingComplete = vi.fn(hostBug);
+      const onBookingError = vi.fn();
+      if (reschedule) {
+        renderBooker({ originalBooking: ORIGINAL, reuseBookerInfo: true, onBookingComplete, onBookingError });
+        fireEvent.click(slotButton(SLOT_A, "UTC"));
+      } else {
+        renderBooker({ onBookingComplete, onBookingError });
+        fireEvent.click(slotButton(SLOT_A));
+        fillContact();
+        submitForm();
+      }
+      await settle();
+      expect(screen.getByText(reschedule ? "Booking Rescheduled!" : "You're booked!")).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(onBookingComplete).toHaveBeenCalledTimes(1);
+      expect(onBookingError).not.toHaveBeenCalled();
+      expect(loggedAsFailure()).toBe(false);
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining("onBookingComplete"), expect.any(Error));
+      cleanup();
+    }
+  });
+
+  it("a throwing onBookingError still shows the alert and leaves no unhandled rejection", async () => {
+    const rejections: unknown[] = [];
+    const record = (reason: unknown) => { rejections.push(reason); };
+    nodeProcess.on("unhandledRejection", record);
+    try {
+      mocks.create.mockRejectedValue(new Error("Server Error"));
+      mocks.reschedule.mockRejectedValue(new Error("Server Error"));
+      for (const flow of ["create", "reschedule form", "one-click reschedule"] as const) {
+        const onBookingError = vi.fn(hostBug);
+        if (flow === "create") {
+          renderBooker({ onBookingError });
+          fireEvent.click(slotButton(SLOT_A));
+          fillContact();
+          submitForm();
+        } else {
+          renderBooker({ originalBooking: ORIGINAL, reuseBookerInfo: flow === "one-click reschedule", onBookingError });
+          fireEvent.click(slotButton(SLOT_A, "UTC"));
+          if (flow === "reschedule form") submitForm();
+        }
+        await settle();
+        await settle();
+        expect(screen.getByRole("alert").textContent).toContain("Something went wrong. Please try again.");
+        expect(onBookingError).toHaveBeenCalledTimes(1);
+        cleanup();
+      }
+    } finally {
+      nodeProcess.off("unhandledRejection", record);
+    }
+    expect(rejections).toEqual([]);
+  });
+});

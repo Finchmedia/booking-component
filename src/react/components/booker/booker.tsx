@@ -45,7 +45,10 @@ export interface BookerProps {
   organizerAvatar?: string;
   /** Current logged-in user for prefilling name/email in the form */
   currentUser?: CurrentUser;
-  /** Callback when booking is successfully created */
+  /**
+   * Callback when booking is successfully created. An error it throws is
+   * logged; the booking is not reported as failed.
+   */
   onBookingComplete?: (booking: Booking) => void;
   /**
    * Callback to reset event type selection (for embedded Booker). Used when the
@@ -94,14 +97,55 @@ function bookingLocation(locations: EventType["locations"]): { type: string; val
   return address ? { type: "address", value: address } : { type: "address" };
 }
 
+/** A completed submission and what its success screen shows, fixed when it completed. */
+interface Completion {
+  booking: Booking;
+  eventType: { title: string; description?: string; lengthInMinutes: number };
+  isRescheduling: boolean;
+  timeFormat: "12h" | "24h";
+}
+
+/**
+ * Calls a host callback. What it throws is logged: a host bug must neither turn
+ * a booking into a reported failure nor escape as an unhandled rejection.
+ */
+function callHost(name: string, callback: () => void) {
+  try {
+    callback();
+  } catch (error) {
+    console.error(`Booker: ${name} threw:`, error);
+  }
+}
+
 /**
  * A new event type, resource or original booking starts a fresh flow: the keyed
  * inner component resets step, slot, duration and calendar state, and releases
- * any held slot.
+ * any held slot. The key is a JSON array, so no id can collide with another
+ * pair ("a", "b|c" vs "a|b", "c").
+ *
+ * Completed submissions are held here, outside the keyed flow, so a submission
+ * still pending when the flow is replaced is not lost: when it succeeds, the
+ * flow mounted by then shows the success screen for the booking that was made,
+ * with its own event type and time format, and onBookingComplete is called
+ * once. A failure after the replacement is only logged and passed to
+ * onBookingError, because nothing was booked and the user has moved on.
  */
 export function Booker(props: BookerProps) {
-  const identity = `${props.eventTypeId}|${props.resourceId}|${props.originalBooking?.uid ?? ""}`;
-  return <BookerFlow key={identity} {...props} />;
+  const identity = JSON.stringify([
+    props.eventTypeId,
+    props.resourceId,
+    props.originalBooking?.uid ?? "",
+  ]);
+  const [completion, setCompletion] = useState<Completion | null>(null);
+  return (
+    <BookerFlow key={identity} {...props} completion={completion} onCompletion={setCompletion} />
+  );
+}
+
+interface BookerFlowProps extends BookerProps {
+  /** The latest submission any flow of this Booker completed */
+  completion: Completion | null;
+  onCompletion: (completion: Completion) => void;
 }
 
 function BookerFlow({
@@ -120,7 +164,9 @@ function BookerFlow({
   onBookingError,
   originalBooking,
   reuseBookerInfo = false,
-}: BookerProps) {
+  completion,
+  onCompletion,
+}: BookerFlowProps) {
   const api = useBookingAPI();
 
   // Detect reschedule mode
@@ -129,9 +175,6 @@ function BookerFlow({
   // Step state
   const [bookingStep, setBookingStep] = useState<BookingStep>("event-meta");
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
-  const [completedBooking, setCompletedBooking] = useState<Booking | null>(
-    null
-  );
 
   // Calendar state (persists across navigation)
   const [timezone, setTimezone] = useState<string>(
@@ -170,6 +213,17 @@ function BookerFlow({
     phase: BookingPhase;
     message: string;
   } | null>(null);
+
+  // Each new completion replaces the current step with its success screen: this
+  // flow's own, or one a replaced flow sent after an identity change. One that
+  // predates this flow was already shown by the flow it belongs to.
+  const [shownCompletion, setShownCompletion] = useState(completion);
+  if (completion !== shownCompletion) {
+    setShownCompletion(completion);
+    setSelectedSlot(null); // The booking replaces the advisory hold
+    setBookingError(null);
+    setBookingStep("success");
+  }
 
   // Fetch event type, resource, and link state from DB
   const eventType = useQuery(api.getEventType, { eventTypeId }) as
@@ -227,7 +281,26 @@ function BookerFlow({
   ) => {
     console.error(phase === "reschedule" ? "Reschedule failed:" : "Booking failed:", error);
     setBookingError({ phase, message });
-    onBookingError?.(error, { phase });
+    callHost("onBookingError", () => onBookingError?.(error, { phase }));
+  };
+
+  // A completed submission goes to the Booker, so its success screen survives
+  // this flow being replaced meanwhile and keeps the event type it was made for
+  // even if that later resolves to null. Host callbacks run after the mutation,
+  // outside its error handling.
+  const completeBooking = (result: unknown) => {
+    const booking = result as Booking;
+    onCompletion({
+      booking,
+      eventType: {
+        title: eventType?.title ?? booking.eventTitle,
+        description: eventType?.description,
+        lengthInMinutes: selectedDuration,
+      },
+      isRescheduling,
+      timeFormat,
+    });
+    callHost("onBookingComplete", () => onBookingComplete?.(booking));
   };
 
   // Rescheduling needs the mutation reference and the original's token. A
@@ -254,29 +327,26 @@ function BookerFlow({
     inFlight.current = true;
     setIsSubmitting(true);
 
+    let newBooking;
     try {
       const newStart = new Date(newSlot).getTime();
       const newEnd = newStart + selectedDuration * 60 * 1000;
 
-      const newBooking = await rescheduleBookingByToken({
+      newBooking = await rescheduleBookingByToken({
         uid: target.uid,
         token: target.token,
         newStart,
         newEnd,
       });
-
-      const completedBookingData = newBooking as unknown as Booking;
-      setCompletedBooking(completedBookingData);
-      setSelectedSlot(null); // The booking replaces the advisory hold
-      setBookingStep("success");
-      onBookingComplete?.(completedBookingData);
     } catch (error) {
       setSelectedSlot(null); // Release the hold on the slot that was not booked
       reportError("reschedule", error);
+      return;
     } finally {
       inFlight.current = false;
       setIsSubmitting(false);
     }
+    completeBooking(newBooking);
   };
 
   // Step 1: Calendar slot selection (captures BOTH slot AND duration atomically)
@@ -314,11 +384,10 @@ function BookerFlow({
     setIsSubmitting(true);
     setBookingError(null);
 
+    let booking;
     try {
       const start = new Date(selectedSlot).getTime();
       const end = start + selectedDuration * 60 * 1000;
-
-      let booking;
 
       if (target) {
         // RESCHEDULE PATH: Call reschedule mutation (form was shown for confirmation)
@@ -340,15 +409,6 @@ function BookerFlow({
           location: bookingLocation(eventType.locations),
         });
       }
-
-      // Cast the result to Booking type
-      const completedBookingData = booking as unknown as Booking;
-      setCompletedBooking(completedBookingData);
-      setSelectedSlot(null); // The booking replaces the advisory hold
-      setBookingStep("success");
-
-      // Trigger callback if provided
-      onBookingComplete?.(completedBookingData);
     } catch (error) {
       const isAuthError =
         error instanceof ConvexError &&
@@ -356,11 +416,8 @@ function BookerFlow({
 
       // New bookings hand authentication to the host when it can sign users in
       if (isAuthError && !isRescheduling && onAuthRequired) {
-        onAuthRequired({
-          slot: selectedSlot,
-          duration: selectedDuration,
-          eventTypeId,
-        });
+        const slotData = { slot: selectedSlot, duration: selectedDuration, eventTypeId };
+        callHost("onAuthRequired", () => onAuthRequired(slotData));
         return;
       }
 
@@ -369,10 +426,12 @@ function BookerFlow({
         error,
         resolveBookingErrorMessage(error, isAuthError ? SIGN_IN_MESSAGE : undefined)
       );
+      return;
     } finally {
       inFlight.current = false;
       setIsSubmitting(false);
     }
+    completeBooking(booking);
   };
 
   // Back to calendar
@@ -386,7 +445,6 @@ function BookerFlow({
   const handleBookAnother = () => {
     setBookingStep("event-meta");
     setSelectedSlot(null);
-    setCompletedBooking(null);
   };
 
   // Reset calendar state (for duration_invalid error)
@@ -408,8 +466,9 @@ function BookerFlow({
     };
   }, [eventType, selectedDuration]);
 
-  // Show loading state if event type is still loading
-  if (eventType === undefined) {
+  // Show loading state if event type is still loading; a success screen needs
+  // no event type
+  if (eventType === undefined && bookingStep !== "success") {
     return <CalendarSkeleton />;
   }
 
@@ -524,14 +583,14 @@ function BookerFlow({
           )}
 
           {/* Step 3: Success Screen */}
-          {bookingStep === "success" && completedBooking && displayedEventType && (
+          {bookingStep === "success" && completion && (
             <div className="bg-card rounded-xl border border-border overflow-hidden shadow-2xl">
               <BookingSuccess
-                booking={completedBooking}
-                eventType={displayedEventType}
+                booking={completion.booking}
+                eventType={completion.eventType}
                 onBookAnother={handleBookAnother}
-                isRescheduling={isRescheduling}
-                timeFormat={timeFormat}
+                isRescheduling={completion.isRescheduling}
+                timeFormat={completion.timeFormat}
                 locale={locale}
               />
             </div>

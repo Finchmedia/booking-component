@@ -43,26 +43,30 @@ function renderSuccess(props: Partial<ComponentProps<typeof BookingSuccess>> = {
 }
 
 describe("BookingForm and BookingSuccess time format and locale (N18)", () => {
-  it("BookingForm shows the selected time in the requested format and locale", () => {
-    renderForm();
-    expect(screen.getByText("Wednesday, September 1, 2027 at 5:00 PM")).toBeTruthy(); // default unchanged
+  // The locale joins date and time; no English "at" in other languages
+  const expected = [
+    [undefined, undefined, /^Wednesday, September 1, 2027 at 5:00\sPM$/], // defaults unchanged
+    ["en-US", "12h", /^Wednesday, September 1, 2027 at 5:00\sPM$/],
+    ["en-US", "24h", /^Wednesday, September 1, 2027 at 17:00$/],
+    ["de-DE", "12h", /^Mittwoch, 1\. September 2027 um 5:00\sPM$/],
+    ["de-DE", "24h", /^Mittwoch, 1\. September 2027 um 17:00$/],
+  ] as const;
+
+  it.each(expected)("BookingForm shows the selected time in locale %s, format %s", (locale, timeFormat, text) => {
+    renderForm({ locale, ...(timeFormat ? { timeFormat } : {}) });
+    const heading = screen.getByRole("heading", { name: "Enter Details" }).nextElementSibling!.textContent!;
+    expect(heading).toMatch(text);
+    if (locale === "de-DE") expect(heading).not.toContain(" at ");
     cleanup();
-    renderForm({ timeFormat: "24h" });
-    expect(screen.getByText("Wednesday, September 1, 2027 at 17:00")).toBeTruthy();
-    cleanup();
-    renderForm({ timeFormat: "24h", locale: "de-DE" });
-    expect(screen.getByText("Mittwoch, 1. September 2027 at 17:00")).toBeTruthy();
+    // A reschedule prefixes the same text
+    renderForm({ locale, ...(timeFormat ? { timeFormat } : {}), isRescheduling: true });
+    expect(screen.getByRole("heading", { name: "Confirm Reschedule" }).nextElementSibling!.textContent!)
+      .toBe(`New time: ${heading}`);
   });
 
-  it("BookingSuccess shows the booking time in the requested format and locale", () => {
-    renderSuccess();
-    expect(screen.getByText("Wednesday, September 1, 2027 at 5:00 PM")).toBeTruthy(); // default unchanged
-    cleanup();
-    renderSuccess({ timeFormat: "24h" });
-    expect(screen.getByText("Wednesday, September 1, 2027 at 17:00")).toBeTruthy();
-    cleanup();
-    renderSuccess({ timeFormat: "12h", locale: "de-DE" });
-    expect(screen.getByText(/^Mittwoch, 1\. September 2027 um 5:00\sPM$/)).toBeTruthy();
+  it.each(expected)("BookingSuccess shows the booking time in locale %s, format %s", (locale, timeFormat, text) => {
+    renderSuccess({ locale, timeFormat });
+    expect(screen.getByText(text)).toBeTruthy();
   });
 });
 
