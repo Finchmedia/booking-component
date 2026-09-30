@@ -159,10 +159,19 @@ describe("cancelReservation", () => {
     });
     const cancelled = await t.query(api.public.getBooking, { bookingId: reservationId });
     expect(cancelled!.status).toBe("cancelled");
-    // The legacy path only patches `status` — no cancelledAt / reason / history.
-    expect(cancelled!.cancelledAt).toBeUndefined();
+    // Since 0.4.3 the legacy row is stamped like every other cancellation:
+    // cancelledAt, updatedAt and one history row (actor "unknown", no reason).
+    expect(cancelled!.cancelledAt).toBe(FIXED_NOW);
+    expect(cancelled!.updatedAt).toBe(FIXED_NOW);
     expect(cancelled!.cancellationReason).toBeUndefined();
-    expect(await history(reservationId)).toEqual([]);
+    expect(
+      (await history(reservationId)).map(({ fromStatus, toStatus, changedBy, reason }) => ({
+        fromStatus,
+        toStatus,
+        changedBy,
+        reason,
+      }))
+    ).toEqual([{ fromStatus: "confirmed", toStatus: "cancelled", changedBy: "unknown", reason: undefined }]);
     // The row survives as an empty bitmap (not deleted, not null).
     expect(await busy()).toEqual([]);
     expect(await availability(AT("09:00"), AT("10:00"))).toBe(true);
@@ -178,6 +187,7 @@ describe("cancelReservation", () => {
       alreadyCancelled: true,
     });
     expect(await busy()).toEqual(range(36, 40));
+    expect(await history(reservationId)).toHaveLength(1);
     expect((await t.query(api.public.getBooking, { bookingId: successor!._id }))?.status).toBe(
       "confirmed"
     );

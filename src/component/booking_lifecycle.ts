@@ -1,8 +1,9 @@
-import type { QueryCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { assertValidRange, getRequiredSlots } from "./utils";
 import { assertSingleResourceSupported } from "./inventory_helpers";
 import { isLinked } from "./resource_event_types";
+import { releaseAllSlotsForBooking } from "./slot_helpers";
 
 // ============================================
 // BOOKING LIFECYCLE
@@ -82,4 +83,35 @@ export async function assertSingleBookable(
   }
 
   return { eventType, requiredSlots };
+}
+
+/**
+ * Ends an active booking (provisional, pending or confirmed; the caller has
+ * checked): releases everything it holds, records one history row and stamps
+ * status, cancelledAt, updatedAt and cancellationReason.
+ *
+ * Releases from the pre-cancel snapshot BEFORE patching the status:
+ * releaseAllSlotsForBooking returns early for terminal statuses, so a
+ * re-read of the patched row would silently keep the inventory busy.
+ */
+export async function terminateBooking(
+  ctx: MutationCtx,
+  booking: Doc<"bookings">,
+  opts: { to: "cancelled" | "declined"; reason?: string; changedBy?: string; now: number },
+): Promise<void> {
+  await releaseAllSlotsForBooking(ctx, booking);
+  await ctx.db.insert("booking_history", {
+    bookingId: booking._id,
+    fromStatus: booking.status,
+    toStatus: opts.to,
+    changedBy: opts.changedBy,
+    reason: opts.reason,
+    timestamp: opts.now,
+  });
+  await ctx.db.patch(booking._id, {
+    status: opts.to,
+    cancelledAt: opts.now,
+    cancellationReason: opts.reason,
+    updatedAt: opts.now,
+  });
 }

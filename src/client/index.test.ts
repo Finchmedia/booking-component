@@ -14,6 +14,8 @@ export const {
   getEffectiveAvailability,
   getDaySlots,
   createBooking,
+  cancelReservation,
+  getBookingHistory,
   getDailyAvailability,
   heartbeat,
   sweepOrphanedHolds,
@@ -31,6 +33,8 @@ const testApi = (
       getEffectiveAvailability: typeof getEffectiveAvailability;
       getDaySlots: typeof getDaySlots;
       createBooking: typeof createBooking;
+      cancelReservation: typeof cancelReservation;
+      getBookingHistory: typeof getBookingHistory;
       getDailyAvailability: typeof getDailyAvailability;
       heartbeat: typeof heartbeat;
       sweepOrphanedHolds: typeof sweepOrphanedHolds;
@@ -169,6 +173,28 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     });
     expect(byId.map((slot) => slot.time)).toEqual(await daySlots(t));
     expect(byId).toHaveLength(8);
+  });
+
+  test("cancelReservation via the booking wrapper forwards reason and cancelledBy", async () => {
+    await seedThroughWrappers(t);
+    const booking = await bookTenToEleven(t);
+
+    expect(
+      await t.mutation(testApi.cancelReservation, {
+        reservationId: booking._id,
+        reason: "Double booked",
+        cancelledBy: "admin-1",
+      })
+    ).toEqual({ success: true, alreadyCancelled: false });
+    const history: Array<{ toStatus: string; changedBy?: string; reason?: string }> = await t.query(
+      testApi.getBookingHistory,
+      { bookingId: booking._id }
+    );
+    expect(history[history.length - 1]).toMatchObject({
+      toStatus: "cancelled",
+      changedBy: "admin-1",
+      reason: "Double booked",
+    });
   });
 
   test("audit via the maintenance wrapper", async () => {

@@ -415,6 +415,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {
+          cancelledBy?: string;
+          reason?: string;
           resendOptions?: {
             apiKey: string;
             baseUrl?: string;
@@ -866,6 +868,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         {
           bookingId: string;
+          changedBy?: string;
           newEnd: number;
           newStart: number;
           reason?: string;

@@ -14,7 +14,7 @@ import {
 } from "./utils";
 import { isAvailable } from "./availability";
 import { getScheduleByExternalId, getScheduleDaySlots } from "./schedules";
-import { assertSingleBookable } from "./booking_lifecycle";
+import { assertSingleBookable, terminateBooking } from "./booking_lifecycle";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import {
     assertDateOrder,
@@ -771,6 +771,8 @@ export const getBooking = query({
 export const cancelReservation = mutation({
     args: {
         reservationId: v.id("bookings"),
+        reason: v.optional(v.string()),
+        cancelledBy: v.optional(v.string()), // History actor; default "unknown"
         // Resend config passed from main app (components can't access process.env)
         resendOptions: v.optional(bookingEmailOptionsValidator),
     },
@@ -790,15 +792,19 @@ export const cancelReservation = mutation({
         if (!holdsActiveInventory(booking.status)) {
             throw new Error(`Cannot cancel booking with status: ${booking.status}`);
         }
-        await releaseAllSlotsForBooking(ctx, booking);
 
-        // 3. Update booking status
-        await ctx.db.patch(args.reservationId, { status: "cancelled" });
+        // 3. Release, record history and stamp the cancellation
+        await terminateBooking(ctx, booking, {
+            to: "cancelled",
+            reason: args.reason,
+            changedBy: args.cancelledBy ?? "unknown",
+            now: Date.now(),
+        });
 
-        // 4. Trigger booking.cancelled hook
+        // 4. Trigger booking.cancelled hook (v1 payload unchanged: no reason)
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
-            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions),
+            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason: args.reason }),
             organizationId: booking.organizationId,
             payload: {
                 bookingId: args.reservationId,
@@ -1330,6 +1336,7 @@ async function moveBooking(
     newStart: number;
     newEnd: number;
     reason?: string;
+    changedBy?: string;
     resendOptions?: BookingEmailOptions;
   },
 ): Promise<Doc<"bookings">> {
@@ -1384,11 +1391,12 @@ async function moveBooking(
     });
   }
   const reason = args.reason ?? "Rescheduled to new time";
+  const changedBy = args.changedBy ?? "system";
   await ctx.db.insert("booking_history", {
     bookingId: original._id,
     fromStatus: original.status,
     toStatus: "cancelled",
-    changedBy: "system",
+    changedBy,
     reason,
     timestamp: now,
   });
@@ -1396,7 +1404,7 @@ async function moveBooking(
     bookingId: newBookingId,
     fromStatus: "",
     toStatus: original.status,
-    changedBy: "system",
+    changedBy,
     reason: `Rescheduled from ${original.uid}`,
     timestamp: now,
   });
@@ -1443,6 +1451,7 @@ export const rescheduleBooking = mutation({
     newStart: v.number(),
     newEnd: v.number(),
     reason: v.optional(v.string()),
+    changedBy: v.optional(v.string()), // History actor of the move; default "system"
     resendOptions: v.optional(bookingEmailOptionsValidator),
   },
   returns: bookingDoc,

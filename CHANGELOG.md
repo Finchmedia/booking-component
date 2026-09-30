@@ -153,8 +153,27 @@ The internal email mutations keep their names and arguments, so jobs queued by
   lists name each item once, and booking writes no link row. The next link,
   unlink or replace call for the pair collapses them, and unlink removes every
   row. Unknown ids in the replace mutations are still skipped silently.
+- `cancelReservation` records the cancellation like the other cancel paths:
+  one `booking_history` row (from the previous status to `cancelled`),
+  `cancelledAt` and `updatedAt` set to the time of the call, and
+  `cancellationReason`. It only changed the status, so the history showed no
+  cancellation, `updatedAt` kept its creation time and booker pages that show
+  cancellation details from these fields showed none. This applies to every
+  row it accepts, legacy `createReservation` rows included. Inventory release,
+  the `booking.cancelled` hook payload and the idempotent repeat
+  (`alreadyCancelled: true`, nothing written) are unchanged. Hosts that read
+  the history see the extra row for new cancellations only; earlier ones are
+  not backfilled.
 
 ### Added
+
+- `cancelReservation` accepts an optional `reason` and `cancelledBy` (the
+  history actor, `"unknown"` when omitted, as in
+  `cancelMultiResourceBooking`); the reason also reaches the cancellation
+  email's `emailContext.reason`. The `makeInternalBookingAPI` wrapper passes
+  both through. `rescheduleBooking` accepts an optional `changedBy` for the
+  history rows of the move (the original's cancellation and the new
+  booking's creation), `"system"` when omitted as before.
 
 - `presence.sweepOrphanedHolds({ cursor?, limit, dryRun })`, a component
   mutation, and the matching `makeInternalBookingAPI` wrapper: the one-time
@@ -180,6 +199,9 @@ The internal email mutations keep their names and arguments, so jobs queued by
   test-only helpers in `src/testing/`, under `src/` and `dist/` alike.
   Previously only `*.test.ts` was excluded, so a `.test.tsx` file would have
   shipped. No published runtime file changes.
+- The 0.3.1 entry no longer says `cancelReservation`'s result matches
+  `cancelBooking` (which does not exist) and `cancelMultiResourceBooking`
+  (which returns `{ success }` only).
 
 ### Tests
 
@@ -296,7 +318,8 @@ before bumping.
   to `string` (or narrow at the boundary with a type guard), and delete mirror
   types that only existed to compensate for `any`.
 - **`cancelReservation` returns `{ success: boolean, alreadyCancelled: boolean }`**
-  instead of `null`, matching `cancelBooking` and `cancelMultiResourceBooking`.
+  instead of `null`. (`cancelBookingByToken` and `cancelMultiResourceBooking`
+  return `{ success }` only.)
   Cancelling an already-cancelled reservation reports
   `{ success: true, alreadyCancelled: true }` without releasing slots again; a
   missing reservation still throws.
@@ -335,8 +358,7 @@ before bumping.
 ### Changed
 
 - `cancelReservation` returns `{ success: boolean, alreadyCancelled: boolean }`
-  instead of `null`, matching `cancelBooking` and `cancelMultiResourceBooking`
-  (see _Upgrading_).
+  instead of `null` (see _Upgrading_).
 - `createBooking`, `createProvisionalBooking`, `rescheduleBooking`,
   `rescheduleBookingByToken` and `createMultiResourceBooking` return the booking
   document, never `null`.

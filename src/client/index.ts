@@ -265,11 +265,15 @@ export function makeInternalBookingAPI(component: ComponentApi) {
     cancelReservation: internalMutationGeneric({
       args: {
         reservationId: v.string(),
+        reason: v.optional(v.string()),
+        cancelledBy: v.optional(v.string()),
         resendOptions: v.optional(bookingEmailOptionsValidator),
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.public.cancelReservation, {
           reservationId: args.reservationId,
+          reason: args.reason,
+          cancelledBy: args.cancelledBy,
           resendOptions: args.resendOptions,
         });
       },
