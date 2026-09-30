@@ -41,9 +41,30 @@
   Existing bookings are not moved. `maintenance.audit` with
   `check: "f10_weekday"` lists upcoming bookings that lie outside the hours of
   their own weekday on such dates, so you can review them.
+- On fall-back days, zones east of UTC now offer a repeated wall-clock time
+  at its first occurrence (see Fixed). Bookings already made at the second
+  occurrence (Berlin 02:00–02:45 winter time, 01:00Z–01:45Z) are kept and
+  still block their slots; only the starts offered from now on change.
 - Schedule, resource and event-type writes reject a time zone that `Intl`
   does not accept. Rows stored with one stay readable and can still be
-  edited; a patch that sets a valid zone repairs them.
+  edited; a patch that sets a valid zone repairs them. For a schedule stored
+  with one, the availability queries with `scheduleId` but no
+  `resourceTimezone` take the legacy path instead of throwing and log a
+  warning naming the schedule (see Fixed).
+- Schedules and date overrides stored before 0.3.0 can hold windows that end
+  past 24:00, such as `25:00`. Their hours now end with the day:
+  `getEffectiveAvailability` returns only the indices 0–95 for them, and no
+  offered booking runs past midnight. Until 0.4.2 it also returned 96 and
+  above, and the day view could offer bookings that ended the next day.
+- Date overrides stored with an unpadded date such as `2027-3-9`, which
+  `createDateOverride` accepted until 0.4.2, are no longer found by date:
+  `getDateOverride`, `getEffectiveAvailability` and the availability queries
+  look up the padded form for either spelling, and `createDateOverride` adds
+  a padded row for that day instead of updating the old one. In 0.4.2 only a
+  lookup with the same unpadded spelling found them; the month view never
+  did. Find them with `listDateOverrides` without date bounds (their `date`
+  has a one-digit month or day), recreate them with the padded date and
+  remove the old rows with `deleteDateOverride`.
 - Bundles created by 0.4.2 or earlier without `organizationId` have no
   organization (nor do single bookings from before 0.3.0). Run the new
   `maintenance.backfillBookingOrganizations` once, like the sweep above
@@ -62,6 +83,12 @@
   (`eventTypeId`, `start`) and drops `by_event_type`, a prefix of it. Convex
   builds the new index during the deploy; on a large table allow time for
   the backfill. Host code cannot reference component indexes.
+- Booking documents can carry the new optional `rescheduledToUid` (see
+  Added): every read that returns them, such as `getBooking`,
+  `getBookingByUid`, `listBookings` and `getBookingWithItems`, returns it on
+  originals moved from 0.4.3 on. A host that re-validates these documents
+  with its own object validator listing the booking fields must accept it
+  (`rescheduledToUid: v.optional(v.string())`).
 
 ### Security
 
@@ -156,7 +183,8 @@ them.
   still counts as 15 minutes.
 - Unpadded dates such as `2027-3-9` mean the same day as `2027-03-09` at every
   entry point. `createDateOverride` stores the padded form, which is the one
-  the availability queries look up.
+  the availability queries look up. Overrides stored unpadded before 0.4.3
+  are not matched by date (see Upgrading).
 - `getAvailability` checks one UTC date at a time and stops at the first busy
   one, so a range whose start is taken returns after two reads however long it
   is. It used to build the whole range's slot list first (about a second for
@@ -171,12 +199,19 @@ them.
   bookings, and an empty day fell back to 09:00–17:00 UTC, so closed and fully
   booked days read as open. A `resourceTimezone` that differs from the
   schedule's zone is still used and now logs a warning. Other argument shapes
-  are unchanged.
+  are unchanged, and so is this one for a schedule stored with a zone `Intl`
+  rejects (see the next entry). The month view reads the schedule and its
+  date overrides once per call instead of one override lookup per day.
 - Schedule, resource and event-type writes reject a time zone that `Intl`
   does not accept, such as `Mars/Olympus_Mons`, `UTC+2` or `""`
   (`Invalid time zone "…"`); patches check the zone only when they set one.
-  A schedule stored with such a zone made every availability read for it
-  throw.
+  A host that passes such a zone as `resourceTimezone`, for example the
+  schedule's or resource's own, gets a `RangeError` from every
+  schedule-aware availability read, as before. For a schedule stored with
+  one, `scheduleId` without `resourceTimezone` takes the legacy path instead
+  of throwing: the month view reads the hours as UTC, as in 0.4.2, and the
+  day view offers 09:00–17:00 UTC. Each such call logs
+  `[booking] …: schedule "…" has the invalid time zone "…"`.
 - One malformed recipient address no longer takes other bookers' mail down
   with it. Built-in email to an address that fails a conservative syntax check
   (for example `x@`) is skipped before it is queued: the job returns
@@ -347,8 +382,11 @@ them.
   run.
 - `updateResource`, `updateSchedule`, `updateDateOverride`, `updateHook` and
   `updateEventType` build their patches typed against their tables instead
-  of as `Record<string, unknown>`, so a misspelled or wrongly typed field
-  fails compilation. Behaviour is unchanged.
+  of as `Record<string, unknown>`, so a wrongly typed field fails
+  compilation, and so does a misspelled one except in `updateEventType`.
+  That patch is built from the mutation's arguments, so only their value
+  types are checked; the schema still rejects an unknown column at runtime.
+  Behaviour is unchanged.
 
 ### Tests
 

@@ -1,4 +1,4 @@
-import { assertEventLength, assertSlotIndices } from "./input_validation";
+import { assertEventLength } from "./input_validation";
 
 export const SLOT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 export const SLOTS_PER_DAY = 24 * 4; // 96
@@ -373,7 +373,10 @@ export function generateDaySlots(
  * @param date - ISO date string (e.g., "2025-12-03") in resource's timezone context
  * @param eventLengthMinutes - Event duration in minutes
  * @param intervalMinutes - Step between slots in minutes
- * @param availableSlots - Array of available slot indices in resource's LOCAL timezone (from schedule)
+ * @param availableSlots - Array of available slot indices in resource's LOCAL timezone (from schedule).
+ *   Integers 0–95: getDaySlots rejects other caller input and
+ *   getScheduleDaySlots derives only those, also from rows stored before
+ *   window validation.
  * @param timezone - Resource's IANA timezone (e.g., "Europe/Berlin")
  * @returns Candidates (see SlotCandidate). The UTC instants — and therefore
  *   the daily_availability rows the slots live on — can fall on the UTC date
@@ -389,7 +392,6 @@ export function generateDaySlotsWithTimezone(
     timezone: string
 ): SlotCandidate[] {
     assertEventLength(eventLengthMinutes);
-    assertSlotIndices(availableSlots);
     if (availableSlots.length === 0) {
         return [];
     }
@@ -537,9 +539,10 @@ export function assertValidRange(start: number, end: number): void {
  *
  * WARNING: `availableSlots` and `busySlots` MUST be in the SAME coordinate
  * system. This function does NO timezone conversion. If you pass a schedule's
- * LOCAL wall-clock slot indices (e.g. from computeAvailabilityForDate) while
- * `busySlots` are UTC indices, the comparison is meaningless (e.g. Europe/Berlin
- * days read as free regardless of bookings). For any timezone-aware schedule,
+ * LOCAL wall-clock slot indices (e.g. from getScheduleDaySlots or
+ * getEffectiveAvailability) while `busySlots` are UTC indices, the
+ * comparison is meaningless (e.g. Europe/Berlin days read as free regardless
+ * of bookings). For any timezone-aware schedule,
  * use generateDaySlotsWithTimezone + areSlotsAvailable instead — that is how
  * getMonthAvailability / getDaySlots decide availability. This function is only
  * used by the legacy (schedule-less, hardcoded 9–17 UTC) path.

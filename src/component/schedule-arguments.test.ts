@@ -7,10 +7,15 @@
  * - getDaySlots accepts `scheduleId` and resolves the day's hours and zone.
  * - A `resourceTimezone` that differs from the schedule's zone is still used,
  *   and logged.
+ * - A schedule stored with a zone Intl rejects keeps the legacy answer instead
+ *   of throwing, and that is logged.
  * - Every other partial shape keeps its 0.4.2 answer (pinned below).
+ * - The month view reads the schedule and its overrides once per call.
  */
 import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from "vitest";
 import { api } from "./_generated/api.js";
+import type { Doc } from "./_generated/dataModel.js";
+import { getMonthAvailability } from "./public.js";
 import {
   berlin,
   book,
@@ -223,5 +228,112 @@ describe("other shapes keep their 0.4.2 answers", () => {
       "SAT {scheduleId: unknown}": LEGACY_UTC,
       "SAT {scheduleId: unknown, resourceTimezone}": BERLIN_DAY, // 09–17 local default
     });
+  });
+});
+
+describe("a schedule stored with a zone Intl rejects (before 0.4.3)", () => {
+  test("scheduleId alone keeps the legacy answer and logs instead of throwing", async () => {
+    const { t, seed } = await fixture();
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seed.scheduleDocId, { timezone: "Mars/Olympus_Mons" });
+    });
+    // The month view's 0.4.2 answer: the hours read as UTC, a closed day
+    // falls back to 09–17 UTC.
+    expect(await month(t, seed, { scheduleId: seed.scheduleId })).toEqual({ TUE: true, WED: true, SAT: true });
+    // The day view gets no zone for the hours: the legacy window.
+    expect(await day(t, seed, TUE, { scheduleId: seed.scheduleId })).toEqual(LEGACY_UTC);
+    expect(await day(t, seed, SAT, { scheduleId: seed.scheduleId })).toEqual(LEGACY_UTC);
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn.mock.calls[0][0]).toBe(
+      '[booking] getMonthAvailability: schedule "sch-1" has the invalid time zone "Mars/Olympus_Mons"; using the legacy path. Set a valid zone with updateSchedule.'
+    );
+    expect(warn.mock.calls[1][0]).toContain('[booking] getDaySlots: schedule "sch-1" has the invalid time zone');
+
+    // CONTROL: a caller's zone is still used.
+    expect(await month(t, seed, { scheduleId: seed.scheduleId, resourceTimezone: TZ })).toEqual({
+      TUE: true,
+      WED: false,
+      SAT: false,
+    });
+
+    // CONTROL: repaired, the schedule's zone applies again, silently.
+    await t.mutation(api.schedules.updateSchedule, { id: seed.scheduleId, timezone: TZ });
+    warn.mockClear();
+    expect(await month(t, seed, { scheduleId: seed.scheduleId })).toEqual({ TUE: true, WED: false, SAT: false });
+    expect(await day(t, seed, TUE, { scheduleId: seed.scheduleId })).toEqual(BERLIN_DAY);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("month view reads", () => {
+  type MonthArgs = (typeof api.public.getMonthAvailability)["_args"];
+  const handler = (
+    getMonthAvailability as unknown as { _handler: (ctx: any, args: MonthArgs) => Promise<Record<string, boolean>> }
+  )._handler;
+
+  /** `ctx` whose db counts the queries (index ranges) it opens per table. */
+  function countingQueries(ctx: any) {
+    const queries: Record<string, number> = {};
+    const db = new Proxy(ctx.db, {
+      get(target, prop) {
+        if (prop === "query") {
+          return (table: string) => {
+            queries[table] = (queries[table] ?? 0) + 1;
+            return target.query(table);
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    return { ctx: { ...ctx, db }, queries };
+  }
+
+  test("a 42-day { scheduleId } query reads the schedule and its overrides once", async () => {
+    const { t, seed } = await fixture();
+    const THU = "2027-03-11";
+    const override = (date: string) =>
+      t.mutation(api.schedules.createDateOverride, { scheduleId: seed.scheduleDocId, date, type: "unavailable" });
+    await override("2027-03-17"); // a Wednesday
+    await override("2027-05-05"); // outside the range
+    // Two stored rows for one day: the first wins, as in the day view.
+    await t.run(async (ctx) => {
+      const rows: Array<Omit<Doc<"date_overrides">, "_id" | "_creationTime">> = [
+        { scheduleId: seed.scheduleDocId, date: THU, type: "custom", customHours: [{ startTime: "13:00", endTime: "14:00" }] },
+        { scheduleId: seed.scheduleDocId, date: THU, type: "unavailable" },
+      ];
+      for (const row of rows) await ctx.db.insert("date_overrides", row);
+    });
+
+    const measure = async (dateTo: string) => {
+      const args: MonthArgs = {
+        resourceId: seed.resourceId,
+        dateFrom: "2027-03-01",
+        dateTo,
+        eventLength: 60,
+        slotInterval: 60,
+        scheduleId: seed.scheduleId,
+      };
+      const measured = await t.run(async (ctx) => {
+        const counted = countingQueries(ctx);
+        return { result: await handler(counted.ctx, args), queries: counted.queries };
+      });
+      // The registered query (validators included) returns the same.
+      expect(measured.result).toEqual(await t.query(api.public.getMonthAvailability, args));
+      return measured;
+    };
+
+    const week = await measure("2027-03-07");
+    const sixWeeks = await measure("2027-04-11");
+    expect(Object.keys(week.result)).toHaveLength(7);
+    expect(Object.keys(sixWeeks.result)).toHaveLength(42);
+    for (const { queries } of [week, sixWeeks]) {
+      expect(queries.schedules).toBe(1);
+      expect(queries.date_overrides).toBe(1);
+    }
+    // CONTROL: the overrides apply, and month and day agree on the day with two rows.
+    expect(sixWeeks.result).toMatchObject({ [TUE]: true, [WED]: false, "2027-03-17": false, [THU]: true, [SAT]: false });
+    expect(await getEffectiveSlots(t, seed.scheduleId, THU)).toEqual(range(52, 56));
+    expect(await day(t, seed, THU, { scheduleId: seed.scheduleId })).toEqual(["12:00Z"]);
   });
 });

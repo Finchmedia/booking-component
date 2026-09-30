@@ -168,7 +168,10 @@ endpoints to authorized host wrappers.
   `scheduleId` means 09:00–17:00 in `resourceTimezone`, or UTC without one.
   These fallbacks can open days the schedule keeps closed. A
   `resourceTimezone` that differs from the schedule's timezone is used and
-  logged.
+  logged. Without `resourceTimezone`, a schedule stored before 0.4.3 with a
+  timezone `Intl` rejects is read as if no timezone were given (its hours as
+  UTC in the month view, the legacy window in the day view), and that is
+  logged; set a valid zone with `updateSchedule`.
 - **Booking lists:** `listBookings({ resourceId })` lists the bookings whose
   primary resource is `resourceId`. A bundle's primary resource is its first
   item; its other resources, pools included, do not list it, although their

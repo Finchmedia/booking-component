@@ -196,3 +196,92 @@ describe("midnight boundary validation", () => {
     );
   });
 });
+
+describe("rows stored before window validation (0.3.0) that end past 24:00", () => {
+  const WEDNESDAY = "2027-03-10";
+  const EVENING = [{ dayOfWeek: 2, startTime: "20:00", endTime: "24:00" }];
+
+  test("month and day views keep working and offer the starts inside the day", async () => {
+    const { t } = setup();
+    // CONTROL: the same hours ending at 24:00, stored through the API.
+    const valid = await seedResourceWithSchedule(t, {
+      scheduleId: "sch-valid",
+      resourceId: "res-valid",
+      eventTypeId: "et-valid",
+      weeklyHours: EVENING,
+    });
+    await t.mutation(api.schedules.createDateOverride, {
+      scheduleId: valid.scheduleDocId,
+      date: WEDNESDAY,
+      type: "custom",
+      customHours: [{ startTime: "22:00", endTime: "24:00" }],
+    });
+    // Legacy rows: a weekly window and an override ending at "25:00".
+    const legacy = await seedResourceWithSchedule(t, {
+      scheduleId: "sch-legacy",
+      resourceId: "res-legacy",
+      eventTypeId: "et-legacy",
+      weeklyHours: EVENING,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(legacy.scheduleDocId, {
+        weeklyHours: [{ dayOfWeek: 2, startTime: "20:00", endTime: "25:00" }],
+      });
+      await ctx.db.insert("date_overrides", {
+        scheduleId: legacy.scheduleDocId,
+        date: WEDNESDAY,
+        type: "custom",
+        customHours: [{ startTime: "22:00", endTime: "25:00" }],
+      });
+    });
+
+    // The quarter hours past 24:00 are dropped.
+    expect(await getEffectiveSlots(t, legacy.scheduleId, TUESDAY)).toEqual(range(80, 96));
+    expect(await getEffectiveSlots(t, legacy.scheduleId, WEDNESDAY)).toEqual(range(88, 96));
+
+    const views = async (seed: typeof valid) => {
+      const month = await t.query(api.public.getMonthAvailability, {
+        resourceId: seed.resourceId,
+        dateFrom: TUESDAY,
+        dateTo: "2027-03-11",
+        eventLength: 60,
+        slotInterval: 60,
+        scheduleId: seed.scheduleId,
+      });
+      const days: Record<string, string[]> = {};
+      for (const date of [TUESDAY, WEDNESDAY]) {
+        const byId = await t.query(api.public.getDaySlots, {
+          resourceId: seed.resourceId,
+          date,
+          eventLength: 60,
+          slotInterval: 60,
+          scheduleId: seed.scheduleId,
+        });
+        // The Booker's flow: effective hours, then the complete day query.
+        const host = await t.query(
+          api.public.getDaySlots,
+          daySlotsArgs(seed, date, await getEffectiveSlots(t, seed.scheduleId, date)),
+        );
+        expect(byId, date).toEqual(host);
+        days[date] = host.map((slot) => slot.time);
+      }
+      return { month, days };
+    };
+
+    const expected = await views(valid);
+    expect(expected).toEqual({
+      month: { [TUESDAY]: true, [WEDNESDAY]: true, "2027-03-11": false },
+      days: {
+        [TUESDAY]: ["20:00", "21:00", "22:00", "23:00"].map((time) =>
+          new Date(zoned(TUESDAY, time, valid.timezone)).toISOString(),
+        ),
+        [WEDNESDAY]: ["22:00", "23:00"].map((time) =>
+          new Date(zoned(WEDNESDAY, time, valid.timezone)).toISOString(),
+        ),
+      },
+    });
+    // Without the clamp, the 0–95 index check failed these reads with
+    // "Invalid availableSlots index 96".
+    expect(await views(legacy)).toEqual(expected);
+  });
+});

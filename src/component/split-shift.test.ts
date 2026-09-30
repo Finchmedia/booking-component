@@ -262,7 +262,7 @@ describe("generateDaySlotsWithTimezone: DST transition days (Europe/Berlin)", ()
     }
   });
 
-  test("the offset in force AFTER the change is used on both days", () => {
+  test("daytime windows on transition days use the offset in force at that time", () => {
     // 2026-03-29 is CEST (UTC+2) from 03:00 local on; 2026-10-25 is CET (UTC+1).
     expect(
       generateDaySlotsWithTimezone(SPRING_FORWARD, 60, 60, slotWindow("09:00", "10:00"), TZ)
@@ -275,12 +275,13 @@ describe("generateDaySlotsWithTimezone: DST transition days (Europe/Berlin)", ()
     expect(new Set(startsOf(allDay)).size).toBe(allDay.length);
   });
 
-  // wallClockToUTC() re-reads the zone offset at the guessed instant (two-pass,
-  // like date-fns-tz). Reading it at the NAIVE instant only — the previous
-  // behaviour — converted the hour before a DST change with the post-change
-  // offset: 01:00 CET on the spring day came back as 2026-03-28T23:00Z (the
-  // instant of 00:00 CET), 01:00 CEST on the fall day as 2026-10-25T00:00Z
-  // (= 02:00 local).
+  // wallClockToUTC() computes one candidate instant from each offset in force a
+  // day before and a day after the naive instant, keeps the candidates that
+  // read as the wall clock and returns the earlier. Reading the offset at the
+  // NAIVE instant only — an earlier behaviour — converted the hour before a
+  // DST change with the post-change offset: 01:00 CET on the spring day came
+  // back as 2026-03-28T23:00Z (the instant of 00:00 CET), 01:00 CEST on the
+  // fall day as 2026-10-25T00:00Z (= 02:00 local).
   test("the hour before a DST change maps to the right UTC instant", () => {
     // Spring forward: 01:00 CET is 2026-03-29T00:00Z.
     expect(wallClockToUTC(SPRING_FORWARD, "01:00", TZ)).toBe(zoned(SPRING_FORWARD, "01:00", TZ));

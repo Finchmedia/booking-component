@@ -2,9 +2,10 @@
 /**
  * Configuration writes reject time zones that Intl does not accept (PR-54a).
  *
- * A schedule stored with such a zone made every availability read for it
- * throw. Patches check the zone only when they carry one, and rows stored
- * before 0.4.3 stay readable and editable.
+ * Every schedule-aware availability read that uses such a zone throws.
+ * Patches check the zone only when they carry one, and rows stored before
+ * 0.4.3 stay readable and editable (availability reads of such a schedule:
+ * schedule-arguments.test.ts).
  */
 import { describe, expect, test } from "vitest";
 import { api } from "./_generated/api.js";

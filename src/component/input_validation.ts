@@ -52,8 +52,8 @@ export function isValidTimeZone(timeZone: string): boolean {
 }
 
 /**
- * Rejects a time zone that Intl does not accept. Every availability read for a
- * schedule stored with such a zone would throw.
+ * Rejects a time zone that Intl does not accept. Every schedule-aware
+ * availability read that uses such a zone would throw.
  */
 export function assertTimeZone(timeZone: string): void {
   if (!isValidTimeZone(timeZone)) {

@@ -2,8 +2,12 @@
  * Patch objects are typed against their tables (PR-43): the update mutations
  * build `Partial<WithoutSystemFields<Doc<"table">>>` instead of
  * `Record<string, unknown>`, so a misspelled or wrongly typed field fails
- * compilation. The @ts-expect-error lines are checked by `npm run typecheck`
- * (as in function-paths.test.ts); a line that stops failing fails the check.
+ * compilation where the patch is written field by field. updateEventType
+ * assigns its (non-literal) arguments to that type, which checks their value
+ * types only: an extra argument name is not caught at compile time, and the
+ * schema rejects an unknown column at runtime. The @ts-expect-error lines are
+ * checked by `npm run typecheck` (as in function-paths.test.ts); a line that
+ * stops failing fails the check.
  */
 import { test } from "vitest";
 import type { WithoutSystemFields } from "convex/server";
