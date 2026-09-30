@@ -482,7 +482,7 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   generated references and passthrough wrappers, so a component result
   change that breaks them fails `npm run typecheck`.
 
-## 0.4.3 — Unreleased
+## 0.4.3 — 30 September 2026
 
 ### Upgrading
 

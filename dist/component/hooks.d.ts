@@ -28,6 +28,12 @@ export declare const getHook: import("convex/server").RegisteredQuery<"public", 
     enabled: boolean;
     createdAt: number;
 } | null>>;
+/**
+ * Registers a host function, given as a handle from `createFunctionHandle`,
+ * for one lifecycle event (organization-scoped or global). The handle runs
+ * with every matching payload, management token and booker details included,
+ * so keep registration server-side and administrator-only.
+ */
 export declare const registerHook: import("convex/server").RegisteredMutation<"public", {
     organizationId?: string | undefined;
     eventType: string;
@@ -82,10 +88,7 @@ export declare const triggerHooks: import("convex/server").RegisteredMutation<"i
     } | undefined;
     eventType: string;
     payload: any;
-}, Promise<{
-    triggeredCount: number;
-    emailsSent: boolean;
-}>>;
+}, Promise<null>>;
 export declare const transitionBookingState: import("convex/server").RegisteredMutation<"public", {
     reason?: string | undefined;
     changedBy?: string | undefined;

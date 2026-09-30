@@ -7,7 +7,12 @@ export const CalendarDayButton = React.memo(({ day, onDateSelect }) => {
             onDateSelect(day.date);
         }
     }, [day.disabled, day.date, onDateSelect]);
-    return (_jsx("div", { className: "relative w-full pt-[100%]", children: _jsxs("button", { onClick: handleClick, disabled: day.disabled, className: `absolute inset-0 flex items-center justify-center rounded-md text-base font-medium transition-all ${day.isSelected
+    return (_jsx("div", { className: "relative w-full pt-[100%]", children: _jsxs("button", { onClick: handleClick, disabled: day.disabled, "aria-label": day.date.toLocaleDateString(undefined, {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+            }), "aria-pressed": day.isSelected, "aria-current": day.isToday ? "date" : undefined, className: `absolute inset-0 flex items-center justify-center rounded-md text-base font-medium transition-all ${day.isSelected
                 ? "bg-accent text-foreground ring-1 ring-foreground" // Stronger border for selection
                 : day.isToday
                     ? "bg-accent text-foreground ring-1 ring-muted-foreground"

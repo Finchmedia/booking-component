@@ -1,5 +1,5 @@
 import React from "react";
-import type { BookingSlot } from "../../types";
+import type { BookingSlot } from "../../types.js";
 interface TimeSlotsPanelProps {
     selectedDate: Date | null;
     availableSlots: BookingSlot[];
@@ -9,6 +9,7 @@ interface TimeSlotsPanelProps {
     onTimeFormatChange: (format: "12h" | "24h") => void;
     onSlotSelect: (slotTime: string) => void;
     timezone: string;
+    disabled?: boolean;
 }
 export declare const TimeSlotsPanel: React.FC<TimeSlotsPanelProps>;
 export {};

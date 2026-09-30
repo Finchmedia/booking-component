@@ -17,6 +17,7 @@ export interface Booking {
     start: number;
     end: number;
     timezone: string;
+    /** "rescheduled" is deprecated: it is never stored; a moved booking is "cancelled". */
     status: "provisional" | "pending" | "confirmed" | "cancelled" | "completed" | "declined" | "rescheduled";
     bookerName: string;
     bookerEmail: string;
@@ -98,6 +99,10 @@ export interface PresenceRecord {
     user: string;
     updated: number;
 }
+/**
+ * @deprecated Never produced by the package. Use ValidationError from
+ * useBookingValidation.
+ */
 export type BookingValidationError = {
     type: "event_type_not_found";
 } | {
@@ -112,6 +117,10 @@ export type BookingValidationError = {
     type: "duration_invalid";
     validDurations: number[];
 };
+/**
+ * @deprecated Never produced by the package. Use ValidationResult from
+ * useBookingValidation.
+ */
 export interface BookingValidationResult {
     status: "loading" | "valid" | "error";
     error?: BookingValidationError;

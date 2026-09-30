@@ -3,7 +3,7 @@ import { createBookingEmailContext } from "./emails/context.js";
 import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { releaseAllSlotsForBooking } from "./slot_helpers";
+import { terminateBooking } from "./booking_lifecycle";
 import { bookingHistoryDoc, hookDoc, successResult, } from "./validators";
 // ============================================
 // HOOK EVENT TYPES
@@ -18,6 +18,20 @@ export const HOOK_EVENTS = [
     "booking.rescheduled",
     "presence.timeout",
 ];
+/**
+ * Whether `value` is a Convex function handle (`createFunctionHandle` output).
+ * The scheduler runs any other string as a function path of THIS component,
+ * so a hook could name the component's own functions. Mirrors Convex's
+ * internal `isFunctionHandle`; a test pins real `createFunctionHandle` output.
+ */
+function isFunctionHandle(value) {
+    return value.startsWith("function://");
+}
+function assertFunctionHandle(value) {
+    if (!isFunctionHandle(value)) {
+        throw new Error(`Invalid hook functionHandle "${value}": expected a function handle from createFunctionHandle`);
+    }
+}
 // ============================================
 // HOOK QUERIES
 // ============================================
@@ -62,6 +76,12 @@ export const getHook = query({
 // ============================================
 // HOOK MUTATIONS
 // ============================================
+/**
+ * Registers a host function, given as a handle from `createFunctionHandle`,
+ * for one lifecycle event (organization-scoped or global). The handle runs
+ * with every matching payload, management token and booker details included,
+ * so keep registration server-side and administrator-only.
+ */
 export const registerHook = mutation({
     args: {
         eventType: v.string(),
@@ -74,6 +94,7 @@ export const registerHook = mutation({
         if (!HOOK_EVENTS.includes(args.eventType)) {
             throw new Error(`Invalid hook event type: ${args.eventType}. Valid types: ${HOOK_EVENTS.join(", ")}`);
         }
+        assertFunctionHandle(args.functionHandle);
         return await ctx.db.insert("hooks", {
             eventType: args.eventType,
             functionHandle: args.functionHandle,
@@ -91,6 +112,9 @@ export const updateHook = mutation({
     },
     returns: v.id("hooks"),
     handler: async (ctx, args) => {
+        if (args.functionHandle !== undefined) {
+            assertFunctionHandle(args.functionHandle);
+        }
         const hook = await ctx.db.get(args.hookId);
         if (!hook) {
             throw new Error("Hook not found");
@@ -128,7 +152,8 @@ export const triggerHooks = internalMutation({
         // Resend config passed from main app (components can't access process.env)
         resendOptions: v.optional(bookingEmailOptionsValidator),
     },
-    returns: v.object({ triggeredCount: v.number(), emailsSent: v.boolean() }),
+    // Only ever scheduled, and scheduled jobs keep no result: nothing to report.
+    returns: v.null(),
     handler: async (ctx, args) => {
         const payload = args.payload;
         // ========================================
@@ -285,6 +310,12 @@ export const triggerHooks = internalMutation({
         });
         // Trigger each hook
         for (const hook of hooks) {
+            // Rows registered before handles were checked may hold any string, which
+            // would run a function of this component by name. unregisterHook removes them.
+            if (!isFunctionHandle(hook.functionHandle)) {
+                console.error(`Skipped hook ${hook._id}: functionHandle is not a function handle`);
+                continue;
+            }
             try {
                 const handle = hook.functionHandle;
                 await ctx.scheduler.runAfter(0, handle, args.payload);
@@ -294,7 +325,7 @@ export const triggerHooks = internalMutation({
                 console.error(`Failed to trigger hook ${hook._id}:`, error);
             }
         }
-        return { triggeredCount: hooks.length, emailsSent: true };
+        return null;
     },
 });
 // ============================================
@@ -329,35 +360,34 @@ export const transitionBookingState = mutation({
             throw new Error(`Invalid state transition: ${currentStatus} -> ${args.toStatus}. Allowed: ${allowedTransitions.join(", ") || "none"}`);
         }
         const now = Date.now();
-        // Record history
-        await ctx.db.insert("booking_history", {
-            bookingId: args.bookingId,
-            fromStatus: currentStatus,
-            toStatus: args.toStatus,
-            changedBy: args.changedBy,
-            reason: args.reason,
-            timestamp: now,
-        });
-        // Update booking
-        const updates = {
-            status: args.toStatus,
-            updatedAt: now,
-        };
-        // Both "cancelled" and "declined" end the booking: stamp the cancellation
-        // fields and give the held slots back. Previously a declined booking (and
-        // a cancellation through this state machine) kept its slots busy forever,
-        // so the time could never be rebooked.
-        const releasesSlots = args.toStatus === "cancelled" || args.toStatus === "declined";
-        if (releasesSlots) {
-            updates.cancelledAt = now;
-            updates.cancellationReason = args.reason;
+        if (args.toStatus === "cancelled" || args.toStatus === "declined") {
+            // Both end the booking: give the held slots back (per booking_item for
+            // bundles, pooled resources included), record history and stamp the
+            // cancellation fields — as every other cancel path does. Previously a
+            // declined booking (and a cancellation through this state machine)
+            // kept its slots busy forever, so the time could never be rebooked.
+            await terminateBooking(ctx, booking, {
+                to: args.toStatus,
+                reason: args.reason,
+                changedBy: args.changedBy,
+                now,
+            });
         }
-        await ctx.db.patch(args.bookingId, updates);
-        if (releasesSlots) {
-            // Single-resource bookings: daily_availability of booking.resourceId.
-            // Multi-resource bookings: per booking_item (quantity_availability for
-            // pooled resources) — the same logic as cancelMultiResourceBooking.
-            await releaseAllSlotsForBooking(ctx, booking);
+        else {
+            // Record history
+            await ctx.db.insert("booking_history", {
+                bookingId: args.bookingId,
+                fromStatus: currentStatus,
+                toStatus: args.toStatus,
+                changedBy: args.changedBy,
+                reason: args.reason,
+                timestamp: now,
+            });
+            // Update booking
+            await ctx.db.patch(args.bookingId, {
+                status: args.toStatus,
+                updatedAt: now,
+            });
         }
         // Capture notification data before a later mutation can change this booking.
         const emailKind = args.toStatus === "confirmed"

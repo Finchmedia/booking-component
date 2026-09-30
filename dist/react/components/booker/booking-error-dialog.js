@@ -1,16 +1,40 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import React from "react";
+import React, { useEffect, useId, useRef } from "react";
+import { getRecoveryAction } from "./recovery.js";
+const TITLE = "Booking No Longer Available";
 /**
- * Blocking error dialog for mid-booking validation failures.
- * Uses a modal overlay to force user action.
+ * Error for mid-booking validation failures.
  *
- * Recovery actions:
- * - event_deleted / event_deactivated / resource_unlinked → onEventTypeReset callback
- * - resource_deleted / resource_deactivated → onNavigate callback with path
- * - duration_invalid → onReset callback
+ * With the callback for the error's recovery it is a modal alert dialog whose
+ * action (and Escape) performs the recovery:
+ * - event_deleted / event_deactivated / resource_unlinked → onEventTypeReset()
+ * - resource_deleted / resource_deactivated → onNavigate(recoveryPath), a deprecated path
+ * - duration_invalid → onReset()
+ *
+ * Without that callback there is no exit to offer, so it renders a non-modal
+ * inline alert and leaves the rest of the page reachable.
  */
 export function BookingErrorDialog({ error, onReset, onEventTypeReset, onNavigate, }) {
+    const titleId = useId();
+    const messageId = useId();
+    const dialogRef = useRef(null);
+    const actionRef = useRef(null);
+    const action = getRecoveryAction(error, { onReset, onEventTypeReset, onNavigate });
+    const isModal = !!action;
+    // Open as a modal (inert background, Escape as cancel) and focus the action
+    useEffect(() => {
+        const dialog = dialogRef.current;
+        if (!isModal || !dialog)
+            return;
+        if (!dialog.open)
+            dialog.showModal();
+        actionRef.current?.focus();
+        return () => {
+            if (dialog.open)
+                dialog.close();
+        };
+    }, [isModal]);
     const getActionLabel = () => {
         switch (error.type) {
             case "event_deleted":
@@ -26,19 +50,21 @@ export function BookingErrorDialog({ error, onReset, onEventTypeReset, onNavigat
                 return "Continue";
         }
     };
-    const handleAction = () => {
-        if (error.recoveryPath === "reset") {
-            onReset?.();
-        }
-        else if (error.type === "event_deleted" ||
-            error.type === "event_deactivated" ||
-            error.type === "resource_unlinked") {
-            onEventTypeReset?.();
-        }
-        else {
-            onNavigate?.(error.recoveryPath);
-        }
-    };
-    return (_jsxs("div", { className: "fixed inset-0 z-50 flex items-center justify-center", children: [_jsx("div", { className: "fixed inset-0 bg-background/80 backdrop-blur-sm" }), _jsx("div", { className: "relative z-50 w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg", children: _jsxs("div", { className: "space-y-4", children: [_jsxs("div", { className: "space-y-2", children: [_jsx("h2", { className: "text-lg font-semibold text-foreground", children: "Booking No Longer Available" }), _jsx("p", { className: "text-sm text-muted-foreground", children: error.message })] }), _jsx("div", { className: "flex justify-end", children: _jsx("button", { onClick: handleAction, className: "px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors", children: getActionLabel() }) })] }) })] }));
+    if (!action) {
+        return (_jsxs("div", { role: "alert", className: "mb-4 space-y-2 rounded-lg border border-border bg-card p-6", children: [_jsx("h2", { className: "text-lg font-semibold text-foreground", children: TITLE }), _jsx("p", { className: "text-sm text-muted-foreground", children: error.message })] }));
+    }
+    return (_jsx("dialog", { ref: dialogRef, role: "alertdialog", "aria-modal": "true", "aria-labelledby": titleId, "aria-describedby": messageId, 
+        // Escape: the error persists, so perform the recovery instead of closing
+        onCancel: (event) => {
+            event.preventDefault();
+            action();
+        }, 
+        // A browser may close it without a cancelable "cancel" (a repeated Escape
+        // without user activation); while the error is shown it reopens
+        onClose: () => {
+            const dialog = dialogRef.current;
+            if (dialog?.isConnected && !dialog.open)
+                dialog.showModal();
+        }, className: "w-full max-w-md rounded-lg border border-border bg-card p-6 text-foreground shadow-lg backdrop:bg-background/80 backdrop:backdrop-blur-sm", children: _jsxs("div", { className: "space-y-4", children: [_jsxs("div", { className: "space-y-2", children: [_jsx("h2", { id: titleId, className: "text-lg font-semibold text-foreground", children: TITLE }), _jsx("p", { id: messageId, className: "text-sm text-muted-foreground", children: error.message })] }), _jsx("div", { className: "flex justify-end", children: _jsx("button", { ref: actionRef, type: "button", onClick: action, className: "px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors", children: getActionLabel() }) })] }) }));
 }
 //# sourceMappingURL=booking-error-dialog.js.map

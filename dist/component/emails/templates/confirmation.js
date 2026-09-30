@@ -1,39 +1,15 @@
 // ============================================
 // BOOKING CONFIRMATION EMAIL TEMPLATE
 // ============================================
+import { formatDateTimeFull, formatTimeShort } from "../helpers.js";
+import { html, raw } from "../html.js";
 import { EMAIL_BASE_STYLES, EMAIL_LIGHT_MODE_STYLES, ICON_STYLES, BUTTON_STYLES, SECONDARY_BUTTON_STYLES } from "../styles.js";
 export function generateBookingConfirmationHTML(details) {
-    const startDate = new Date(details.start);
-    const endDate = new Date(details.end);
-    const formatOptions = {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: details.timezone,
-        timeZoneName: "short",
-    };
-    const formattedStart = startDate.toLocaleString("en-US", formatOptions);
-    const formattedEnd = endDate.toLocaleString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: details.timezone,
-        timeZoneName: "short",
-    });
-    // Generate management URLs if available
-    const managementUrl = details.bookingUid && details.managementToken && details.baseUrl
-        ? `${details.baseUrl}/book/booking/${details.bookingUid}?token=${encodeURIComponent(details.managementToken)}`
-        : null;
-    const rescheduleUrl = managementUrl
-        ? `${details.baseUrl}/book/booking/${details.bookingUid}/reschedule?token=${encodeURIComponent(details.managementToken)}`
-        : null;
-    const cancelUrl = managementUrl
-        ? `${details.baseUrl}/book/booking/${details.bookingUid}/cancel?token=${encodeURIComponent(details.managementToken)}`
-        : null;
+    const formattedStart = formatDateTimeFull(details.start, details.timezone);
+    const formattedEnd = formatTimeShort(details.end, details.timezone);
+    const links = details.links;
     const iconStyles = ICON_STYLES.success;
-    return `
+    return html `
 <!DOCTYPE html>
 <html>
 <head>
@@ -42,20 +18,20 @@ export function generateBookingConfirmationHTML(details) {
     <meta name="color-scheme" content="dark light">
     <title>Booking Confirmed</title>
     <style>
-        ${EMAIL_BASE_STYLES}
+        ${raw(EMAIL_BASE_STYLES)}
         .icon-circle {
-            background-color: ${iconStyles.dark.circleBackground};
+            background-color: ${raw(iconStyles.dark.circleBackground)};
         }
         .icon {
-            color: ${iconStyles.dark.iconColor};
+            color: ${raw(iconStyles.dark.iconColor)};
         }
-        ${EMAIL_LIGHT_MODE_STYLES}
+        ${raw(EMAIL_LIGHT_MODE_STYLES)}
         @media (prefers-color-scheme: light) {
             .icon-circle {
-                background-color: ${iconStyles.light.circleBackground};
+                background-color: ${raw(iconStyles.light.circleBackground)};
             }
             .icon {
-                color: ${iconStyles.light.iconColor};
+                color: ${raw(iconStyles.light.iconColor)};
             }
         }
     </style>
@@ -79,18 +55,18 @@ export function generateBookingConfirmationHTML(details) {
                 <p class="event-time">${formattedStart} - ${formattedEnd}</p>
             </div>
 
-            ${managementUrl ? `
+            ${links ? html `
             <div style="text-align: center; margin: 24px 0;">
-                <a href="${managementUrl}" style="${BUTTON_STYLES.viewBooking}">
+                <a href="${links.view}" style="${BUTTON_STYLES.viewBooking}">
                     View Booking
                 </a>
             </div>
             <div style="text-align: center; margin: 16px 0;">
-                <a href="${rescheduleUrl}" style="${SECONDARY_BUTTON_STYLES.primary}">Reschedule</a>
+                <a href="${links.reschedule}" style="${SECONDARY_BUTTON_STYLES.primary}">Reschedule</a>
                 <span style="display: inline-block; width: 12px;"></span>
-                <a href="${cancelUrl}" style="${SECONDARY_BUTTON_STYLES.outlined}">Cancel Booking</a>
+                <a href="${links.cancel}" style="${SECONDARY_BUTTON_STYLES.outlined}">Cancel Booking</a>
             </div>
-            ` : `<p class="help-text">If you need to make changes to your booking, please contact us.</p>`}
+            ` : html `<p class="help-text">If you need to make changes to your booking, please contact us.</p>`}
         </div>
 
         <div class="footer">
@@ -99,6 +75,6 @@ export function generateBookingConfirmationHTML(details) {
     </div>
 </body>
 </html>
-    `.trim();
+    `.toString().trim();
 }
 //# sourceMappingURL=confirmation.js.map

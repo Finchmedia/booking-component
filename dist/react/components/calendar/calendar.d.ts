@@ -20,6 +20,8 @@ interface CalendarProps {
     onTimezoneChange: (timezone: string) => void;
     timeFormat: "12h" | "24h";
     onTimeFormatChange: (format: "12h" | "24h") => void;
+    /** Optional: disables slot selection, e.g. while a reschedule is being sent */
+    disabled?: boolean;
 }
 export declare const Calendar: React.FC<CalendarProps>;
 export {};

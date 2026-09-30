@@ -1,8 +1,8 @@
 "use client";
 import { useMutation } from "convex/react";
 import { useEffect, useState } from "react";
-import { useBookingAPI } from "../context";
-import { getSessionId } from "../utils/session";
+import { useBookingAPI } from "../context.js";
+import { getSessionId } from "../utils/session.js";
 /**
  * Maintains advisory presence on one or more slots by sending periodic heartbeats.
  * Creates presence records at 15-minute quantum intervals for complete coverage.

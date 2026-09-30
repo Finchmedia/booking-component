@@ -1,7 +1,7 @@
 // Format date for display (e.g. "Friday, November 22, 2024")
-export const formatDate = (dateStr, timezone) => {
+export const formatDate = (dateStr, timezone, locale = "en-US") => {
     const date = new Date(dateStr);
-    return date.toLocaleDateString("en-US", {
+    return date.toLocaleDateString(locale, {
         weekday: "long",
         month: "long",
         day: "numeric",
@@ -10,9 +10,9 @@ export const formatDate = (dateStr, timezone) => {
     });
 };
 // Format time for display (e.g. "9:30 AM")
-export const formatTimeDisplay = (timeStr, format, timezone) => {
+export const formatTimeDisplay = (timeStr, format, timezone, locale = "en-US") => {
     const date = new Date(timeStr);
-    return date.toLocaleTimeString("en-US", {
+    return date.toLocaleTimeString(locale, {
         hour: format === "24h" ? "2-digit" : "numeric",
         minute: "2-digit",
         hour12: format === "12h",
@@ -30,16 +30,17 @@ export const formatDuration = (milliseconds) => {
         return `${hours}h`;
     return `${hours}h ${remainingMinutes}min`;
 };
-// Format full date time
-export const formatDateTime = (timestamp, timezone) => {
+// Format full date time; without a time format the locale's convention applies
+export const formatDateTime = (timestamp, timezone, timeFormat, locale = "en-US") => {
     const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    return date.toLocaleString(locale, {
         weekday: "long",
         month: "long",
         day: "numeric",
         year: "numeric",
-        hour: "numeric",
+        hour: timeFormat === "24h" ? "2-digit" : "numeric",
         minute: "2-digit",
+        hour12: timeFormat ? timeFormat === "12h" : undefined,
         timeZone: timezone,
     });
 };

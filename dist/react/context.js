@@ -4,25 +4,109 @@ import { jsx as _jsx } from "react/jsx-runtime";
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useMemo } from "react";
 // ============================================
+// OPERATION OWNERSHIP
+// Each operation belongs to one gateway. Generated Convex APIs are proxies
+// that report no members and return a reference for any name, so operations
+// are routed by these lists, never by `in` or truthiness on the gateways.
+// ============================================
+/** @internal Every PublicBookingAPI operation, resolved from publicApi. */
+export const PUBLIC_OPERATIONS = [
+    "getEventType",
+    "getEventTypeBySlug",
+    "listEventTypes",
+    "getAvailability",
+    "getMonthAvailability",
+    "getDaySlots",
+    "createBooking",
+    "getBooking",
+    "getBookingByUid",
+    "getBookingByToken",
+    "cancelBookingByToken",
+    "rescheduleBookingByToken",
+    "getResource",
+    "listResources",
+    "getEventTypesForResource",
+    "hasResourceEventTypeLink",
+    "getEffectiveAvailability",
+    "heartbeat",
+    "leave",
+    "getPresence",
+    "getDatePresence",
+];
+/** @internal Every AdminBookingAPI operation, resolved from adminApi. */
+export const ADMIN_OPERATIONS = [
+    "createEventType",
+    "updateEventType",
+    "deleteEventType",
+    "toggleEventTypeActive",
+    "createReservation",
+    "listBookings",
+    "cancelReservation",
+    "createResource",
+    "updateResource",
+    "deleteResource",
+    "toggleResourceActive",
+    "getResourcesForEventType",
+    "getResourceIdsForEventType",
+    "getEventTypeIdsForResource",
+    "linkResourceToEventType",
+    "unlinkResourceFromEventType",
+    "setResourcesForEventType",
+    "setEventTypesForResource",
+    "getSchedule",
+    "listSchedules",
+    "getDefaultSchedule",
+    "createSchedule",
+    "updateSchedule",
+    "deleteSchedule",
+    "listDateOverrides",
+    "createDateOverride",
+    "deleteDateOverride",
+    "checkMultiResourceAvailability",
+    "createMultiResourceBooking",
+    "getBookingWithItems",
+    "cancelMultiResourceBooking",
+    "registerHook",
+    "unregisterHook",
+    "transitionBookingState",
+    "getBookingHistory",
+    "getActivePresenceCount",
+];
+// A new interface member fails to compile until it is listed
+/* eslint-disable @typescript-eslint/no-unused-vars -- compile-time checks only */
+const _allPublicListed = true;
+const _allAdminListed = true;
+/* eslint-enable @typescript-eslint/no-unused-vars */
+const PUBLIC_KEYS = new Set(PUBLIC_OPERATIONS);
+const ADMIN_KEYS = new Set(ADMIN_OPERATIONS);
+// ============================================
 // CONTEXT
 // ============================================
 const BookingContext = createContext(null);
 /**
  * Provider component that makes the booking API available to all child components.
- * Implements dependency injection pattern for separating public and admin APIs.
  *
- * ## Two-Gateway Architecture
+ * ## Two gateways
  *
- * This provider merges two API gateways:
- * - **publicApi** (required): Functions for anonymous browsing and booking
- * - **adminApi** (optional): Functions requiring authentication
+ * - **publicApi** (required): your host's public booking functions
+ * - **adminApi** (optional): your host's administration functions
  *
- * Components access both through a single `useBookingAPI()` hook.
- * The app controls authorization by deciding which functions to provide.
+ * Components access both through a single `useBookingAPI()` hook. Each
+ * operation resolves from the gateway that owns it: PublicBookingAPI names
+ * from publicApi, AdminBookingAPI names from adminApi. A hand-built adminApi
+ * that defines a public name itself still overrides it.
+ *
+ * The provider only chooses which function references the UI calls. It is not
+ * access control: any client can call any exported Convex function directly.
+ * Authorization is enforced by your host Convex functions, which check the
+ * caller before calling the component. Booking reads must check the management
+ * token or the caller's ownership and must not return `managementToken` to
+ * anonymous callers. See the README's "Backend integration" section and the
+ * authorization guide (https://convexbooking.dev/docs/authentication).
  *
  * @example
  * ```tsx
- * // Public booking pages (no auth required)
+ * // Public booking pages
  * import { BookingProvider, Booker } from "@mrfinch/booking/react";
  * import { api } from "./convex/_generated/api";
  *
@@ -37,7 +121,7 @@ const BookingContext = createContext(null);
  *
  * @example
  * ```tsx
- * // Admin pages (auth required)
+ * // Admin pages: the host's admin functions check the caller's role
  * import { BookingProvider } from "@mrfinch/booking/react";
  * import { api } from "./convex/_generated/api";
  *
@@ -54,16 +138,24 @@ export function BookingProvider({ publicApi, adminApi, children, }) {
     // Merge public and admin APIs using Proxy to preserve Convex's dynamic function references
     // Note: Spreading Proxy objects (like api.public) doesn't work - it loses the Proxy behavior
     const mergedApi = useMemo(() => {
+        // Without adminApi every name resolves from publicApi (admin names: deprecated)
         if (!adminApi)
             return publicApi;
-        // Use Proxy to delegate to both APIs
         return new Proxy(publicApi, {
             get(target, prop) {
-                // Check adminApi first (admin overrides public if overlap)
-                if (adminApi && prop in adminApi) {
-                    return adminApi[prop];
+                if (PUBLIC_KEYS.has(prop)) {
+                    // A plain-object adminApi's own property still overrides, as before;
+                    // generated proxies have none, so they never shadow publicApi
+                    return Object.prototype.hasOwnProperty.call(adminApi, prop)
+                        ? adminApi[prop]
+                        : target[prop];
                 }
-                return target[prop];
+                if (ADMIN_KEYS.has(prop)) {
+                    // Deprecated fallback for a hand-built adminApi without this operation
+                    return adminApi[prop] ?? target[prop];
+                }
+                // Names outside both interfaces (untyped use) keep the old rule
+                return prop in adminApi ? adminApi[prop] : target[prop];
             },
         });
     }, [publicApi, adminApi]);
@@ -72,8 +164,9 @@ export function BookingProvider({ publicApi, adminApi, children, }) {
 /**
  * Hook to access the booking API from within a BookingProvider.
  *
- * Returns the merged API object containing both public and admin functions
- * (if adminApi was provided to the BookingProvider).
+ * Returns the merged API object: public operations from publicApi, admin
+ * operations from adminApi (see BookingProvider). Calling a reference does not
+ * bypass authorization; your host functions decide who may run them.
  *
  * @throws Error if used outside of a BookingProvider
  *
@@ -81,16 +174,16 @@ export function BookingProvider({ publicApi, adminApi, children, }) {
  * ```tsx
  * function MyBookingComponent() {
  *   const api = useBookingAPI();
- *
- *   // Public functions - always available
  *   const eventType = useQuery(api.getEventType, { eventTypeId: "event-1" });
  *   const createBooking = useMutation(api.createBooking);
+ * }
  *
- *   // Admin functions - only available if adminApi was provided
- *   // TypeScript will show these as optional (with ?)
- *   const createResource = api.createResource
- *     ? useMutation(api.createResource)
- *     : null;
+ * // Admin UI: render it only inside a provider that has adminApi, and call
+ * // hooks unconditionally (a generated reference is never undefined).
+ * function CreateResourceButton() {
+ *   const api = useBookingAPI();
+ *   const createResource = useMutation(api.createResource!);
+ *   return <button onClick={() => createResource({ ... })}>Add room</button>;
  * }
  * ```
  */

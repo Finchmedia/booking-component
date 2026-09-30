@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { holdsActiveInventory, usesQuantityInventory, validateResourceCapacity } from "./inventory_helpers";
+import { assertTimeZone } from "./input_validation";
 import { resourceDoc, successResult, successWithAffectedUsers, } from "./validators";
 /** A representation change must never reinterpret an existing active hold. */
 async function assertNoActiveBookings(ctx, resourceId) {
@@ -103,6 +104,7 @@ export const createResource = mutation({
     },
     returns: v.id("resources"),
     handler: async (ctx, args) => {
+        assertTimeZone(args.timezone);
         validateResourceCapacity(args);
         // Check for existing ID
         const existing = await ctx.db
@@ -160,6 +162,9 @@ export const updateResource = mutation({
     },
     returns: v.id("resources"),
     handler: async (ctx, args) => {
+        if (args.timezone !== undefined) {
+            assertTimeZone(args.timezone);
+        }
         const resource = await ctx.db
             .query("resources")
             .withIndex("by_external_id", (q) => q.eq("id", args.id))

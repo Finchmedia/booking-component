@@ -1,5 +1,6 @@
-import { type CurrentUser } from "../form/booking-form";
-import type { Booking } from "../../types";
+import { type CurrentUser } from "../form/booking-form.js";
+import type { Booking } from "../../types.js";
+type BookingPhase = "create" | "reschedule";
 export interface BookerProps {
     /** Event type ID to book */
     eventTypeId: string;
@@ -17,17 +18,39 @@ export interface BookerProps {
     organizerAvatar?: string;
     /** Current logged-in user for prefilling name/email in the form */
     currentUser?: CurrentUser;
-    /** Callback when booking is successfully created */
+    /**
+     * Callback when booking is successfully created. An error it throws is
+     * logged; the booking is not reported as failed.
+     */
     onBookingComplete?: (booking: Booking) => void;
-    /** Callback to reset event type selection (for embedded Booker) */
+    /**
+     * Callback to reset event type selection (for embedded Booker). Used when the
+     * event type is deleted or deactivated or the resource is unlinked.
+     */
     onEventTypeReset?: () => void;
-    /** Callback for navigation (used when resource is deleted/deactivated) */
+    /**
+     * Callback for navigation (used when resource is deleted/deactivated).
+     * `path` is the deprecated recoveryPath (a demo route); navigate to your own
+     * resource page. Without the matching callback the Booker shows the error
+     * inline instead of a blocking dialog.
+     */
     onNavigate?: (path: string) => void;
-    /** Callback when authentication is required (user not signed in) */
+    /**
+     * Callback when authentication is required for a new booking (user not signed in).
+     * Without it, the Booker shows a sign-in message.
+     */
     onAuthRequired?: (slotData: {
         slot: string;
         duration: number;
         eventTypeId: string;
+    }) => void;
+    /**
+     * Called when a booking or reschedule attempt fails, in addition to the error
+     * message the Booker shows. Use it for telemetry or host notifications.
+     * Not called when an authentication error is handed to onAuthRequired.
+     */
+    onBookingError?: (error: unknown, context: {
+        phase: BookingPhase;
     }) => void;
     /**
      * Reschedule mode: Provide the original booking to modify
@@ -35,12 +58,28 @@ export interface BookerProps {
      */
     originalBooking?: Booking;
     /**
-     * Skip the booking form step and reuse original booker info
+     * Skip the confirmation step and reuse original booker info
      * Only applies when originalBooking is provided
      * When true: slot selection → immediate reschedule
-     * When false: slot selection → form (with reschedule messaging) → reschedule
+     * When false: slot selection → read-only confirmation → reschedule
+     * A reschedule always keeps the original contact details.
      */
     reuseBookerInfo?: boolean;
 }
-export declare function Booker({ eventTypeId, resourceId, title, description, showHeader, organizerName, organizerAvatar, currentUser, onBookingComplete, onEventTypeReset, onNavigate, onAuthRequired, originalBooking, reuseBookerInfo, }: BookerProps): import("react").JSX.Element;
+/**
+ * A new event type, resource or original booking starts a fresh flow: the keyed
+ * inner component resets step, slot, duration and calendar state, and releases
+ * any held slot. The key is a JSON array, so no id can collide with another
+ * pair ("a", "b|c" vs "a|b", "c").
+ *
+ * Completed submissions are held here, outside the keyed flow, so a submission
+ * still pending when the flow is replaced is not lost: when it succeeds and no
+ * newer submission was sent meanwhile, the flow mounted by then shows the
+ * success screen for the booking that was made, with its own event type and
+ * time format. onBookingComplete is called once for every booking made, shown
+ * or not. A failure after the replacement is only logged and passed to
+ * onBookingError, because nothing was booked and the user has moved on.
+ */
+export declare function Booker(props: BookerProps): import("react").JSX.Element;
+export {};
 //# sourceMappingURL=booker.d.ts.map
