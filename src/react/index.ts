@@ -65,6 +65,11 @@ export {
   formatDateTime,
 } from "./utils/formatting.js";
 export { bookingFormSchema, type BookingFormValues } from "./utils/validation.js";
+export {
+  allowedDurations,
+  effectiveSlotInterval,
+  type EventTypeDurations,
+} from "./utils/durations.js";
 
 // Main Components
 export { Booker, type BookerProps } from "./components/booker/index.js";

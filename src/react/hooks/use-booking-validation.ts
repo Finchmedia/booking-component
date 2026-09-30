@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { EventType, Resource } from "../types.js";
+import { allowedDurations } from "../utils/durations.js";
 
 export type ValidationErrorType =
   | "event_deleted"
@@ -126,11 +127,7 @@ export function useBookingValidation(
     }
 
     // 5. Selected duration removed from options
-    const availableDurations = eventType.lengthInMinutesOptions?.length
-      ? eventType.lengthInMinutesOptions
-      : [eventType.lengthInMinutes];
-
-    if (!availableDurations.includes(selectedDuration)) {
+    if (!allowedDurations(eventType).includes(selectedDuration)) {
       return {
         status: "error",
         error: {

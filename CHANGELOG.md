@@ -240,6 +240,13 @@
   `generateCalendarDays`. On `useConvexSlots`: `fetchSlotsForDate(date)` for a
   `"YYYY-MM-DD"` date, `fetchMonthSlotsFor(year, month)` with `month` 1-12, and
   `presenceIncomplete`.
+- `allowedDurations(eventType)` and `effectiveSlotInterval(eventType)` from
+  `@mrfinch/booking/react`: the durations the Booker offers
+  (`lengthInMinutesOptions`, or `[lengthInMinutes]`) and the slot grid the
+  Calendar requests (`slotInterval`, or the shortest of `lengthInMinutes` and
+  `lengthInMinutesOptions`). A host function that recomputes offered starts can
+  use `effectiveSlotInterval` to accept every start the Calendar shows. The
+  Calendar, `useConvexSlots` and the Booker use them; the grid is unchanged.
 
 ### Deprecated
 

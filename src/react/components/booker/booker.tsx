@@ -12,6 +12,7 @@ import {
 } from "../../hooks/use-booking-validation.js";
 import { resolveBookingErrorMessage } from "../../utils/booking-error.js";
 import { toLocalMidnight, todayIn } from "../../utils/civil-date.js";
+import { allowedDurations } from "../../utils/durations.js";
 import { Calendar, CalendarSkeleton } from "../calendar/index.js";
 import { BookingForm, type CurrentUser } from "../form/booking-form.js";
 import { BookingSuccess } from "../form/booking-success.js";
@@ -190,22 +191,9 @@ function BookerFlow({
     eventTypeId,
   }) as boolean | null | undefined;
 
-  // Calculate effective slot interval (smart defaulting - same logic as useConvexSlots)
-  const _slotInterval =
-    eventType?.slotInterval ??
-    (eventType?.lengthInMinutesOptions &&
-    eventType.lengthInMinutesOptions.length > 0
-      ? Math.min(
-          ...eventType.lengthInMinutesOptions,
-          eventType.lengthInMinutes
-        )
-      : eventType?.lengthInMinutes);
-
   // Derive a valid default as event data arrives; no effect/state round-trip.
   // Preserve the original duration in reschedule mode for validation to report.
-  const availableDurations = eventType?.lengthInMinutesOptions?.length
-    ? eventType.lengthInMinutesOptions
-    : eventType ? [eventType.lengthInMinutes] : [];
+  const availableDurations = eventType ? allowedDurations(eventType) : [];
   const selectedDuration = bookingStep === "event-meta" && !originalBooking && availableDurations.length > 0 &&
     !availableDurations.includes(requestedDuration)
     ? Math.min(...availableDurations)
@@ -410,11 +398,9 @@ function BookerFlow({
   const handleReset = () => {
     setBookingStep("event-meta");
     setSelectedSlot(null);
-    // Reset to first available duration
-    if (eventType?.lengthInMinutesOptions?.length) {
-      setSelectedDuration(Math.min(...eventType.lengthInMinutesOptions));
-    } else if (eventType) {
-      setSelectedDuration(eventType.lengthInMinutes);
+    // Reset to the shortest available duration
+    if (eventType) {
+      setSelectedDuration(Math.min(...allowedDurations(eventType)));
     }
   };
 

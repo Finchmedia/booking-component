@@ -20,3 +20,8 @@ export {
   formatDateTime,
 } from "./formatting.js";
 export { bookingFormSchema, type BookingFormValues } from "./validation.js";
+export {
+  allowedDurations,
+  effectiveSlotInterval,
+  type EventTypeDurations,
+} from "./durations.js";

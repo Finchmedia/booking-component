@@ -6,6 +6,7 @@ import { useBookingAPI } from "../context.js";
 import { getSessionId } from "../utils/session.js";
 import { formatDateInTimezone } from "../utils/date-utils.js";
 import { isCivilDate, monthGrid } from "../utils/civil-date.js";
+import { effectiveSlotInterval } from "../utils/durations.js";
 import type { TimeSlot, MonthSlots } from "../types.js";
 
 export interface UseConvexSlotsResult {
@@ -110,12 +111,14 @@ export const useConvexSlots = (
   } | null>(null);
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
 
-  // Smart default: use the minimum duration so the slot grid offers maximum booking flexibility
-  const effectiveInterval =
-    slotInterval ??
-    (allDurationOptions && allDurationOptions.length > 0
-      ? Math.min(...allDurationOptions)
-      : eventLength);
+  // Smart default: use the minimum duration so the slot grid offers maximum booking flexibility.
+  // allDurationOptions is [lengthInMinutes, ...lengthInMinutesOptions]; without it, eventLength.
+  const [lengthInMinutes = eventLength, ...lengthInMinutesOptions] = allDurationOptions ?? [];
+  const effectiveInterval = effectiveSlotInterval({
+    slotInterval,
+    lengthInMinutes,
+    lengthInMinutesOptions,
+  });
 
   const monthAvailability = useQuery(
     api.getMonthAvailability,

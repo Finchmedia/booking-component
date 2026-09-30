@@ -12,6 +12,7 @@ import { useConvexSlots } from "../../hooks/use-convex-slots.js";
 import { eventDeletedError } from "../../hooks/use-booking-validation.js";
 import { useIntersectionObserver } from "../../hooks/use-intersection-observer.js";
 import { fromLocalFields, toLocalMidnight, todayIn } from "../../utils/civil-date.js";
+import { effectiveSlotInterval } from "../../utils/durations.js";
 
 interface CalendarProps {
   resourceId: string;
@@ -93,11 +94,9 @@ const CalendarContent: React.FC<
   // Use controlled duration from props
   const eventLength = selectedDuration;
 
-  // Extract slot interval and all duration options for smart defaulting
-  const slotInterval = eventType?.slotInterval;
-  const allDurationOptions = eventType
-    ? [eventType.lengthInMinutes, ...(eventType.lengthInMinutesOptions || [])]
-    : undefined;
+  // One slot grid for every selected duration (the event's slotInterval or its
+  // shortest duration); hosts checking starts use the same helper
+  const slotInterval = effectiveSlotInterval(eventType);
 
   // Intersection observer to detect when calendar becomes visible
   const [calendarRef, _isIntersecting, hasIntersected] =
@@ -118,7 +117,7 @@ const CalendarContent: React.FC<
     resourceId,
     eventLength,
     slotInterval,
-    allDurationOptions,
+    undefined, // allDurationOptions: only used without a slotInterval
     hasIntersected,
     timezone // Days are civil dates; only the deprecated fetchSlots reads the zone
   );
