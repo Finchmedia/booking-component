@@ -109,6 +109,72 @@
   documented host duties; time-dependent suites run under several process time zones.
 - The npm package omits test files and `src/testing/`. Internal refactors (shared cancel
   path, typed patches, `hooks:triggerHooks` returning `null`) change no behaviour.
+- Characterization tests pin the registered component function paths (checked
+  against the generated `ComponentApi`), the v1 hook payload shapes per emitter
+  and stored booking shape, and the entry-point error texts and check order
+  that hosts match. Changing any of them fails the suite and must be deliberate.
+- Time-sensitive tests can run under a chosen process time zone
+  (`src/testing/process-time-zone.ts`).
+- Regression suites for weekdays in 14 zones, DST days (including a sweep
+  against an `Intl`-only oracle), input validation, zone validation, the new
+  schedule arguments and the audit. The time-dependent ones run under several
+  process time zones.
+- Link-integrity and lifecycle suites: duplicate link rows, cancellation
+  metadata per row kind, and a parity table across the cancel-like paths
+  (single and bundle rows, pool units included).
+- A drift test compares the argument validator of every
+  `makeInternalBookingAPI` wrapper with its component function's
+  (`exportArgs()`, nested fields and optional flags included). The only
+  allowed difference is a component `v.id(…)` taken as a string.
+- `listBookings` is compared with a copy of the 0.4.2 implementation over
+  randomized bookings with many equal starts, every selector, status, date
+  and limit combination, with the documents each call reads counted.
+- Canary tests run the nested Resend component's delivery worker: mail waiting
+  for a batch goes out with the newest key, a rejected key of another account
+  fails its whole batch, and one account with several senders sends all mail.
+  A Resend upgrade that changes this fails them.
+- The documented host duties are pinned as current behaviour: eligibility per
+  entry point, `scheduleId: ""`, and omitted or emptied update fields.
+### Fixed
+
+- The Booker shows failed bookings and reschedules in an announced alert: on the
+  details step, and above the calendar for one-click reschedules. The text comes
+  from the host's `ConvexError` data (`data.message`, or string data); other
+  failures show a generic message instead of Convex transport text or
+  "Server Error". `UNAUTHENTICATED` still goes to `onAuthRequired` when supplied;
+  otherwise the Booker asks the user to sign in.
+- A missing management token or `rescheduleBookingByToken` reference is reported
+  as a configuration error instead of a silent no-op or a misleading token message.
+- Repeated submits or slot clicks in the same tick send one mutation. During a
+  one-click reschedule the slots are disabled and a status message is shown.
+- The advisory slot hold ends after a successful booking or reschedule and after
+  a failed one-click reschedule.
+- Changing `eventTypeId`, `resourceId` or `originalBooking.uid` starts a fresh
+  flow. An `originalBooking` that arrives after mount now reschedules with its own
+  duration and time zone.
+- A completed reschedule is final: the success screen no longer offers
+  "Book Another", which targeted the replaced booking.
+- The reschedule confirmation step (`reuseBookerInfo={false}`) shows the original
+  contact details read-only. Its editable fields were never applied.
+- The confirmation and success steps follow the calendar's 12h/24h choice and the
+  browser locale.
+
+### Added
+
+- Optional `onBookingError(error, { phase })` on `Booker`, called in addition to
+  the built-in alert.
+- Optional `submitError`, `readOnlyDetails`, `timeFormat` and `locale` on
+  `BookingForm`; `timeFormat` and `locale` on `BookingSuccess`; `disabled` on
+  `Calendar`, `TimeSlotsPanel` and `TimeSlotButton`. `formatDate`,
+  `formatTimeDisplay` and `formatDateTime` accept an optional locale, and
+  `formatDateTime` an optional time format. Defaults are unchanged.
+
+### Integration
+
+- Hosts that already toast booking errors, for example by wrapping mutations, now
+  show two messages. Remove the wrapper or move it to `onBookingError`. Throw
+  `ConvexError({ code, message })` from host functions to show a specific message.
+- `BookingSuccess` no longer renders "Book Another" when `isRescheduling` is set.
 
 ## 0.4.2 — 23 September 2026
 

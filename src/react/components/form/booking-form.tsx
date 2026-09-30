@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useId } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { EventMetaPanel } from "../calendar/event-meta-panel";
@@ -51,6 +51,18 @@ interface BookingFormProps {
   currentUser?: CurrentUser;
   /** Optional: Show reschedule-specific messaging */
   isRescheduling?: boolean;
+  /** Optional: Submission failure, shown as an alert that describes the submit button */
+  submitError?: string;
+  /**
+   * Optional: Contact details to confirm read-only instead of editable fields.
+   * The Booker passes the original booking's details when rescheduling, because
+   * a reschedule keeps them. Submitting sends these details without validation.
+   */
+  readOnlyDetails?: BookingFormData;
+  /** Optional: 12h/24h format of the selected time (default: "12h") */
+  timeFormat?: "12h" | "24h";
+  /** Optional: BCP 47 locale for the selected date and time (default: "en-US") */
+  locale?: string;
 }
 
 export const BookingForm: React.FC<BookingFormProps> = ({
@@ -63,9 +75,14 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   isSubmitting,
   currentUser,
   isRescheduling = false,
+  submitError,
+  readOnlyDetails,
+  timeFormat = "12h",
+  locale,
 }) => {
+  const submitErrorId = useId();
   // Check if user has prefilled data
-  const isPrefilled = !!(currentUser?.name || currentUser?.email);
+  const isPrefilled = !readOnlyDetails && !!(currentUser?.name || currentUser?.email);
 
   const {
     register,
@@ -84,6 +101,13 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const submitHandler = async (data: BookingFormValues) => {
     await onSubmit(data);
   };
+  // Read-only details are confirmed as they are; there is nothing to validate.
+  const handleFormSubmit = readOnlyDetails
+    ? (event: React.FormEvent) => {
+        event.preventDefault();
+        void onSubmit(readOnlyDetails);
+      }
+    : handleSubmit(submitHandler);
 
   return (
     <div className="flex flex-col md:flex-row h-full">
@@ -106,8 +130,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
             {isRescheduling ? "New time: " : ""}
-            {formatDate(selectedSlot, timezone)} at{" "}
-            {formatTimeDisplay(selectedSlot, "12h", timezone)}
+            {formatDate(selectedSlot, timezone, locale)} at{" "}
+            {formatTimeDisplay(selectedSlot, timeFormat, timezone, locale)}
           </p>
         </div>
 
@@ -136,74 +160,111 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleSubmit(submitHandler)} className="space-y-4">
-          {/* Name Field */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Name *
-            </label>
-            <input
-              {...register("name")}
-              placeholder="John Doe"
-              className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring"
-            />
-            {errors.name && (
-              <p className="text-sm text-destructive">{errors.name.message}</p>
-            )}
-          </div>
+        <form onSubmit={handleFormSubmit} className="space-y-4">
+          {readOnlyDetails ? (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/50 p-4">
+              <dl className="space-y-3 text-sm">
+                {(
+                  [
+                    ["Name", readOnlyDetails.name],
+                    ["Email", readOnlyDetails.email],
+                    ["Phone Number", readOnlyDetails.phone],
+                    ["Additional Notes", readOnlyDetails.notes],
+                  ] as const
+                ).map(([label, value]) =>
+                  value ? (
+                    <div key={label}>
+                      <dt className="font-medium text-foreground">{label}</dt>
+                      <dd className="whitespace-pre-wrap text-muted-foreground">{value}</dd>
+                    </div>
+                  ) : null
+                )}
+              </dl>
+              <p className="text-xs text-muted-foreground">
+                Your contact details stay the same.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Name Field */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Name *
+                </label>
+                <input
+                  {...register("name")}
+                  placeholder="John Doe"
+                  className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring"
+                />
+                {errors.name && (
+                  <p className="text-sm text-destructive">{errors.name.message}</p>
+                )}
+              </div>
 
-          {/* Email Field */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Email *
-            </label>
-            <input
-              {...register("email")}
-              type="email"
-              placeholder="john@example.com"
-              readOnly={!!currentUser?.email}
-              className={`w-full px-3 py-2 rounded-md border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring ${
-                currentUser?.email
-                  ? "bg-muted/50 cursor-not-allowed opacity-75"
-                  : "bg-muted"
-              }`}
-            />
-            {errors.email && (
-              <p className="text-sm text-destructive">{errors.email.message}</p>
-            )}
-          </div>
+              {/* Email Field */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Email *
+                </label>
+                <input
+                  {...register("email")}
+                  type="email"
+                  placeholder="john@example.com"
+                  readOnly={!!currentUser?.email}
+                  className={`w-full px-3 py-2 rounded-md border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring ${
+                    currentUser?.email
+                      ? "bg-muted/50 cursor-not-allowed opacity-75"
+                      : "bg-muted"
+                  }`}
+                />
+                {errors.email && (
+                  <p className="text-sm text-destructive">{errors.email.message}</p>
+                )}
+              </div>
 
-          {/* Phone Field */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Phone Number
-            </label>
-            <input
-              {...register("phone")}
-              type="tel"
-              placeholder="+1 (555) 000-0000"
-              className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring"
-            />
-            {errors.phone && (
-              <p className="text-sm text-destructive">{errors.phone.message}</p>
-            )}
-          </div>
+              {/* Phone Field */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Phone Number
+                </label>
+                <input
+                  {...register("phone")}
+                  type="tel"
+                  placeholder="+1 (555) 000-0000"
+                  className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring"
+                />
+                {errors.phone && (
+                  <p className="text-sm text-destructive">{errors.phone.message}</p>
+                )}
+              </div>
 
-          {/* Notes Field */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Additional Notes
-            </label>
-            <textarea
-              {...register("notes")}
-              placeholder="Please share anything that will help prepare for our meeting."
-              rows={4}
-              className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring resize-none"
-            />
-            {errors.notes && (
-              <p className="text-sm text-destructive">{errors.notes.message}</p>
-            )}
-          </div>
+              {/* Notes Field */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Additional Notes
+                </label>
+                <textarea
+                  {...register("notes")}
+                  placeholder="Please share anything that will help prepare for our meeting."
+                  rows={4}
+                  className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring resize-none"
+                />
+                {errors.notes && (
+                  <p className="text-sm text-destructive">{errors.notes.message}</p>
+                )}
+              </div>
+            </>
+          )}
+
+          {submitError && (
+            <p
+              id={submitErrorId}
+              role="alert"
+              className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              {submitError}
+            </p>
+          )}
 
           {/* Action Buttons */}
           <div className="flex gap-3 pt-4">
@@ -217,6 +278,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
+              aria-describedby={submitError ? submitErrorId : undefined}
               className="flex-1 px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isSubmitting ? (

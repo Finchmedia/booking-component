@@ -69,6 +69,9 @@ export default function BookingPage() {
 The Booker handles date, duration and slot selection, contact details and
 confirmation for one exclusive resource. Use `onBookingComplete(booking)` to
 connect your management pages to the returned booking UID and secret token.
+Failed bookings are shown in the Booker with the message from the `ConvexError`
+your host function throws, or a generic message; `onBookingError(error, { phase })`
+also reports them to your app.
 
 ## Backend integration
 

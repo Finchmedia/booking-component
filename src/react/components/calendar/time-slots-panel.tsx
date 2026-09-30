@@ -13,6 +13,7 @@ interface TimeSlotsPanelProps {
   onTimeFormatChange: (format: "12h" | "24h") => void;
   onSlotSelect: (slotTime: string) => void;
   timezone: string; // User's selected/locked timezone for display
+  disabled?: boolean; // Pause slot selection, e.g. while a reschedule is being sent
 }
 
 export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
@@ -24,6 +25,7 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
   onTimeFormatChange,
   onSlotSelect,
   timezone,
+  disabled = false,
 }) => {
   // Use passed timezone for displaying slot times (may be locked to event type TZ)
   const displayTimezone = timezone;
@@ -112,6 +114,7 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
                   timezone={displayTimezone}
                   onSlotSelect={onSlotSelect}
                   isReserved={slot.isReserved}
+                  disabled={disabled}
                 />
               ))
             )}

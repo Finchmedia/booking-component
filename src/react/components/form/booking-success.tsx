@@ -15,8 +15,15 @@ interface BookingSuccessProps {
   booking: Booking;
   eventType: EventType;
   onBookAnother: () => void;
-  /** Optional: Show reschedule-specific messaging */
+  /**
+   * Optional: Show reschedule-specific messaging. A reschedule is terminal:
+   * the original booking was replaced, so no 'Book Another' action is offered.
+   */
   isRescheduling?: boolean;
+  /** Optional: 12h/24h time format (default: the locale's convention) */
+  timeFormat?: "12h" | "24h";
+  /** Optional: BCP 47 locale for the date and time (default: "en-US") */
+  locale?: string;
 }
 
 export const BookingSuccess: React.FC<BookingSuccessProps> = ({
@@ -24,6 +31,8 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
   eventType,
   onBookAnother,
   isRescheduling = false,
+  timeFormat,
+  locale,
 }) => {
   const isPending = booking.status === "pending";
 
@@ -78,7 +87,7 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
           <div>
             <p className="font-medium text-foreground">{eventType.title}</p>
             <p className="text-sm text-muted-foreground mt-1">
-              {formatDateTime(booking.start, booking.timezone)}
+              {formatDateTime(booking.start, booking.timezone, timeFormat, locale)}
             </p>
             <p className="text-sm text-muted-foreground">
               {formatDuration(booking.end - booking.start)} duration
@@ -100,14 +109,16 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-3">
-        <button
-          className="flex-1 px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
-          onClick={onBookAnother}
-        >
-          Book Another
-        </button>
-      </div>
+      {!isRescheduling && (
+        <div className="flex gap-3">
+          <button
+            className="flex-1 px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
+            onClick={onBookAnother}
+          >
+            Book Another
+          </button>
+        </div>
+      )}
     </div>
   );
 };
