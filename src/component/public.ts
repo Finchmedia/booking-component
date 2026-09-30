@@ -1367,6 +1367,9 @@ async function moveBooking(
       quantity: item.quantity,
     });
   }
+  // Forward link: the original stays "cancelled" but names its successor, so
+  // a move is told apart from a cancellation without reading the reason.
+  await ctx.db.patch(original._id, { rescheduledToUid: newUid });
   await ctx.db.insert("booking_history", {
     bookingId: newBookingId,
     fromStatus: "",

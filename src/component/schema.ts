@@ -189,7 +189,8 @@ export default defineSchema({
     cancelledAt: v.optional(v.number()),
 
     // Relationships
-    rescheduleUid: v.optional(v.string()),
+    rescheduleUid: v.optional(v.string()), // Successor of a move: the original's uid
+    rescheduledToUid: v.optional(v.string()), // Moved original (status "cancelled"): the successor's uid
     cancellationReason: v.optional(v.string()),
   })
     // listBookings ranges on `start` (dateFrom/dateTo) and reads newest-first

@@ -167,14 +167,6 @@ The internal email mutations keep their names and arguments, so jobs queued by
 
 ### Added
 
-- `cancelReservation` accepts an optional `reason` and `cancelledBy` (the
-  history actor, `"unknown"` when omitted, as in
-  `cancelMultiResourceBooking`); the reason also reaches the cancellation
-  email's `emailContext.reason`. The `makeInternalBookingAPI` wrapper passes
-  both through. `rescheduleBooking` accepts an optional `changedBy` for the
-  history rows of the move (the original's cancellation and the new
-  booking's creation), `"system"` when omitted as before.
-
 - `presence.sweepOrphanedHolds({ cursor?, limit, dryRun })`, a component
   mutation, and the matching `makeInternalBookingAPI` wrapper: the one-time
   repair described under Upgrading. It returns the counts `scanned`, `deleted`
@@ -189,6 +181,21 @@ The internal email mutations keep their names and arguments, so jobs queued by
   It returns `issues`, `scanned`, `continueCursor` and `isDone`. For
   `f10_weekday` the schedule is the booking's event type's, else the
   organization's default schedule, as in the reference host.
+- `cancelReservation` accepts an optional `reason` and `cancelledBy` (the
+  history actor, `"unknown"` when omitted, as in
+  `cancelMultiResourceBooking`); the reason also reaches the cancellation
+  email's `emailContext.reason`. The `makeInternalBookingAPI` wrapper passes
+  both through. `rescheduleBooking` accepts an optional `changedBy` for the
+  history rows of the move (the original's cancellation and the new
+  booking's creation), `"system"` when omitted as before.
+- Bookings have an optional `rescheduledToUid`. A move sets it on the
+  original, whose status stays `cancelled`, to the new booking's uid (the new
+  booking still points back through `rescheduleUid`), so a move can be told
+  from a cancellation without reading `cancellationReason`: a custom
+  `rescheduleBooking` reason replaced the default text, and a real
+  cancellation may carry it. Cancellations never set the field, a chain of
+  moves is linked step by step, and hooks are unchanged. Moves made before
+  0.4.3 do not have it.
 
 ### Maintenance and documentation
 

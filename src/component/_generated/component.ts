@@ -262,6 +262,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -318,6 +319,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -470,6 +472,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -545,6 +548,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -616,6 +620,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -648,6 +653,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -680,6 +686,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -820,6 +827,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -898,6 +906,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -941,6 +950,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
