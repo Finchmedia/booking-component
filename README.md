@@ -81,13 +81,17 @@ connect your management pages to the returned booking UID and secret token.
   see one message. `UNAUTHENTICATED` goes to `onAuthRequired` when you pass it;
   otherwise the Booker asks the user to sign in.
 - **Recovery:** if the event type or resource stops being bookable, the Booker
-  explains why. Pass `onEventTypeReset(recovery)` and `onNavigate(path, recovery)`
-  to offer a way back, and map `recovery` (`"select-event-type"` or
-  `"select-resource"`) to your own routes; `path` is a deprecated demo route.
-  With the matching callback the error is a modal alert dialog with focus on
-  its action, and Escape performs the action. Without it, an inline alert
-  replaces the Booker's content and the rest of your page stays usable. An
-  invalid duration resets on its own.
+  explains why. Pass `onEventTypeReset()` and `onNavigate(path)` to offer a way
+  back. `onNavigate` is called when the resource is gone; `path` is a deprecated
+  demo route, so navigate to your own resource page. With the matching callback
+  the error is a modal alert dialog with focus on its action, and Escape
+  performs the action. Without it, an inline alert replaces the Booker's
+  content and the rest of your page stays usable. An invalid duration shows a
+  dialog whose Reset Calendar action is built in (no callback needed). When
+  rescheduling, the error is an inline notice above the calendar and does not
+  block the move; your reschedule function decides. If you use
+  `useBookingValidation` yourself, map `error.recovery` to your own routes
+  instead of the deprecated `recoveryPath`.
 - **Accessibility:** durations are a native radio group, form fields are named
   by their labels and expose required and invalid state, reserved slots keep
   their time in their name, and day buttons name the full date and mark today

@@ -7,11 +7,11 @@ import type {
 /** Host callbacks that can perform a validation error's recovery. */
 export interface RecoveryHandlers {
   /** Called for "reset-duration" */
-  onReset?: (recovery: ValidationRecovery) => void;
+  onReset?: () => void;
   /** Called for "select-event-type" */
-  onEventTypeReset?: (recovery: ValidationRecovery) => void;
+  onEventTypeReset?: () => void;
   /** Called for "select-resource" with the deprecated recoveryPath */
-  onNavigate?: (path: string, recovery: ValidationRecovery) => void;
+  onNavigate?: (path: string) => void;
 }
 
 // Errors built without `recovery` (for example by hosts rendering the dialog)
@@ -36,10 +36,10 @@ export function getRecoveryAction(
   const recovery = error.recovery ?? RECOVERY_BY_TYPE[error.type];
   switch (recovery) {
     case "reset-duration":
-      return onReset && (() => onReset(recovery));
+      return onReset && (() => onReset());
     case "select-event-type":
-      return onEventTypeReset && (() => onEventTypeReset(recovery));
+      return onEventTypeReset && (() => onEventTypeReset());
     case "select-resource":
-      return onNavigate && (() => onNavigate(error.recoveryPath, recovery));
+      return onNavigate && (() => onNavigate(error.recoveryPath));
   }
 }

@@ -14,11 +14,10 @@ const TITLE = "Booking No Longer Available";
  * Error for mid-booking validation failures.
  *
  * With the callback for the error's recovery it is a modal alert dialog whose
- * action (and Escape) performs the recovery. The callback receives the
- * recovery kind:
- * - event_deleted / event_deactivated / resource_unlinked → onEventTypeReset
- * - resource_deleted / resource_deactivated → onNavigate (deprecated path first)
- * - duration_invalid → onReset
+ * action (and Escape) performs the recovery:
+ * - event_deleted / event_deactivated / resource_unlinked → onEventTypeReset()
+ * - resource_deleted / resource_deactivated → onNavigate(recoveryPath), a deprecated path
+ * - duration_invalid → onReset()
  *
  * Without that callback there is no exit to offer, so it renders a non-modal
  * inline alert and leaves the rest of the page reachable.
@@ -86,6 +85,12 @@ export function BookingErrorDialog({
       onCancel={(event) => {
         event.preventDefault();
         action();
+      }}
+      // A browser may close it without a cancelable "cancel" (a repeated Escape
+      // without user activation); while the error is shown it reopens
+      onClose={() => {
+        const dialog = dialogRef.current;
+        if (dialog?.isConnected && !dialog.open) dialog.showModal();
       }}
       className="w-full max-w-md rounded-lg border border-border bg-card p-6 text-foreground shadow-lg backdrop:bg-background/80 backdrop:backdrop-blur-sm"
     >

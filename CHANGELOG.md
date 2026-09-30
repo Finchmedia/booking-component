@@ -176,8 +176,10 @@
   action, and Escape performs the action. Without that callback, an inline alert
   replaces the Booker's content and the rest of the page stays usable; before, a
   full-screen overlay offered a button that did nothing. The error no longer
-  covers the success screen. While it is shown, a new booking cannot continue;
-  reschedules are not blocked by the UI.
+  covers the success screen. While it is shown, a new booking cannot continue.
+  When rescheduling, the error is an inline notice above the calendar and does
+  not block the move; the host's reschedule function decides whether it is
+  allowed.
 - Calendar days no longer shift when the display time zone differs from the
   browser's. A day's label, availability dot, queried date, heading and
   highlight are the same calendar date in every browser zone. Before, a display
@@ -232,9 +234,8 @@
   `formatTimeDisplay` and `formatDateTime` accept an optional locale, and
   `formatDateTime` an optional time format. Defaults are unchanged.
 - `ValidationError.recovery` (`"select-event-type"`, `"select-resource"` or
-  `"reset-duration"`) and the exported `ValidationRecovery` type.
-  `onEventTypeReset` and `onNavigate` on `Booker` and `BookingErrorDialog`
-  receive it as an extra argument.
+  `"reset-duration"`) and the exported `ValidationRecovery` type. The recovery
+  callbacks keep their arguments.
 - `CalendarDay.civilDate` (`"YYYY-MM-DD"`), always set by
   `generateCalendarDays`. On `useConvexSlots`: `fetchSlotsForDate(date)` for a
   `"YYYY-MM-DD"` date, `fetchMonthSlotsFor(year, month)` with `month` 1-12, and
@@ -273,13 +274,12 @@
   location by `location.value`, not by `booking.location &&`. Existing bookings
   keep what they stored, including "Studio A".
 - Pass `onEventTypeReset` and `onNavigate` to offer a way back from
-  configuration errors; without them the Booker shows an inline notice. The
-  callbacks now receive the recovery kind as an extra argument, so wrap
-  callbacks that take optional parameters of their own, such as a state setter.
+  configuration errors; without them the Booker shows an inline notice.
 - Markup changes for CSS and selectors: durations are radio inputs in a
   `fieldset` instead of `li` elements; `BookingErrorDialog` renders a native
   `dialog` (opened with `showModal()`) or an inline `role="alert"` instead of a
-  fixed overlay; the Booker wraps its steps in a `display: contents` element.
+  fixed overlay; the Booker wraps its steps in an element styled
+  `display: contents`.
 - Dates passed to and emitted by `Calendar` (`selectedDate`, `onDateChange`,
   `currentMonth`) and `generateCalendarDays` are day carriers: their local
   calendar fields name the day. The automatic selection emits local midnight of

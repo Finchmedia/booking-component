@@ -8,7 +8,7 @@ import { getFunctionName, type FunctionReference } from "convex/server";
 import { Booker, type BookerProps } from "./booker";
 import { BookingErrorDialog } from "./booking-error-dialog";
 import { BookingProvider, type PublicBookingAPI } from "../../context";
-import { useBookingValidation, type ValidationRecovery } from "../../hooks/use-booking-validation";
+import { useBookingValidation } from "../../hooks/use-booking-validation";
 import { formatTime } from "../../utils/date-utils";
 import type { Booking, EventType, Resource } from "../../types";
 
@@ -183,7 +183,6 @@ describe("Booker validation error without a recovery callback (N10)", () => {
   });
 
   it.each([
-    ["host reschedule page: deactivated event", { originalBooking: ORIGINAL }, { [API.getEventType]: { ...EVENT, isActive: false } }],
     ["host resource page: deactivated resource with only onEventTypeReset", { onEventTypeReset: vi.fn() }, { [API.getResource]: { ...RESOURCE, isActive: false } }],
     ["unlinked resource with only onNavigate", { onNavigate: vi.fn() }, { [API.hasResourceEventTypeLink]: false }],
     ["deleted event type", {}, { [API.getEventType]: null }],
@@ -215,7 +214,7 @@ describe("Booker validation error with a recovery callback (N10)", () => {
     expect(document.activeElement).toBe(action);
 
     fireEvent.click(action);
-    expect(onEventTypeReset).toHaveBeenCalledWith("select-event-type");
+    expect(onEventTypeReset.mock.calls).toEqual([[]]); // no arguments, as in 0.4.2
     // Escape fires "cancel" on a modal dialog: it recovers instead of closing
     const cancel = new Event("cancel", { cancelable: true });
     act(() => { dialog.dispatchEvent(cancel); });
@@ -223,12 +222,13 @@ describe("Booker validation error with a recovery callback (N10)", () => {
     expect(onEventTypeReset).toHaveBeenCalledTimes(2);
   });
 
-  it("resource errors call onNavigate with the deprecated path and the recovery kind", () => {
-    const onNavigate = vi.fn();
+  it("resource errors call onNavigate with only the deprecated path, as in 0.4.2", () => {
+    // Shaped like a router push(url, as?): a second argument would change the URL
+    const onNavigate = vi.fn((_url: string, _as?: string) => {});
     mocks.queries[API.getResource] = { ...RESOURCE, isActive: false };
     renderBooker({ onNavigate });
     fireEvent.click(screen.getByRole("button", { name: "Back to Resources" }));
-    expect(onNavigate).toHaveBeenCalledWith("/book", "select-resource");
+    expect(onNavigate.mock.calls).toEqual([["/book"]]);
   });
 
   it("a new booking cannot proceed under the dialog: slot and submit send nothing", async () => {
@@ -258,18 +258,6 @@ describe("Booker validation error with a recovery callback (N10)", () => {
     expect(mocks.create).toHaveBeenCalledTimes(1);
   });
 
-  it("does not block a reschedule; the backend decides whether the move is allowed", async () => {
-    mocks.reschedule.mockImplementation(async (args: { newStart: number; newEnd: number }) => ({
-      ...ORIGINAL, uid: "bk_moved", start: args.newStart, end: args.newEnd,
-    }));
-    mocks.queries[API.getEventType] = { ...EVENT, isActive: false };
-    renderBooker({ originalBooking: ORIGINAL, reuseBookerInfo: true, onEventTypeReset: vi.fn() });
-    expect(screen.getByRole("alertdialog")).toBeTruthy();
-    fireEvent.click(slotButton(SLOT_A, "UTC"));
-    await settle();
-    expect(mocks.reschedule).toHaveBeenCalledTimes(1);
-  });
-
   it("duration_invalid still resets the calendar with the real dialog", () => {
     mocks.queries[API.getEventType] = { ...EVENT, lengthInMinutes: 30, lengthInMinutesOptions: [30, 60] };
     const view = renderBooker();
@@ -283,6 +271,30 @@ describe("Booker validation error with a recovery callback (N10)", () => {
     fireEvent.click(reset);
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect((screen.getByRole("radio", { name: "30min" }) as HTMLInputElement).checked).toBe(true);
+  });
+});
+
+describe("Booker validation error while rescheduling (N10)", () => {
+  it.each([
+    ["without a callback", {}],
+    ["with onEventTypeReset", { onEventTypeReset: vi.fn() }],
+  ] as const)("%s: an inline notice above the calendar; the reschedule is sent", async (_name, props) => {
+    mocks.reschedule.mockImplementation(async (args: { newStart: number; newEnd: number }) => ({
+      ...ORIGINAL, uid: "bk_moved", start: args.newStart, end: args.newEnd,
+    }));
+    mocks.queries[API.getEventType] = { ...EVENT, isActive: false };
+    renderBooker({ originalBooking: ORIGINAL, reuseBookerInfo: true, ...props });
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain(TITLE);
+    expect(alert.textContent).toContain("This event type has been deactivated");
+    expectNoModal();
+    expectHostLinkReachable();
+    // The flow stays usable; the host's reschedule function decides
+    fireEvent.click(slotButton(SLOT_A, "UTC"));
+    await settle();
+    expect(mocks.reschedule).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Booking Rescheduled!")).toBeTruthy();
+    for (const callback of Object.values(props)) expect(callback).not.toHaveBeenCalled();
   });
 });
 
@@ -319,7 +331,7 @@ describe("BookingErrorDialog used directly (N10)", () => {
     const onNavigate = vi.fn();
     render(createElement(BookingErrorDialog, { error, onNavigate }));
     fireEvent.click(screen.getByRole("button", { name: "Back to Resources" }));
-    expect(onNavigate).toHaveBeenCalledWith("/book", "select-resource");
+    expect(onNavigate.mock.calls).toEqual([["/book"]]);
     expect(screen.getByRole("alertdialog", { name: TITLE })).toBeTruthy();
     cleanup();
     const onEventTypeReset = vi.fn();
@@ -327,6 +339,28 @@ describe("BookingErrorDialog used directly (N10)", () => {
     expect(screen.getByRole("alert").textContent).toContain("Gone.");
     expect(screen.queryByRole("button")).toBeNull();
     expectNoModal();
+  });
+});
+
+describe("BookingErrorDialog closed by the browser (N10)", () => {
+  const error = { type: "resource_deactivated" as const, message: "Gone.", recoveryPath: "/book" };
+
+  it("reopens while the error is shown, and not after it is gone", async () => {
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+    // The callback does not clear the error, as when a host only sets state
+    const view = render(createElement(BookingErrorDialog, { error, onNavigate: vi.fn() }));
+    const dialog = screen.getByRole("alertdialog") as HTMLDialogElement;
+    expect(dialog.open).toBe(true);
+    // For example a repeated Escape without user activation: no "cancel" event
+    act(() => { dialog.close(); });
+    await settle();
+    expect(dialog.open).toBe(true);
+    expect(showModal).toHaveBeenCalledTimes(2);
+    // CONTROL: once the error is gone the dialog is closed and stays closed
+    view.unmount();
+    await settle();
+    expect(dialog.open).toBe(false);
+    expect(showModal).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -348,18 +382,21 @@ describe("useBookingValidation recovery kind (N10)", () => {
 });
 
 describe("Booker recovery callback types (N10)", () => {
-  it("accepts callbacks written for the earlier signatures", () => {
+  it("keeps the 0.4.2 signatures", () => {
     const earlier: BookerProps = {
       eventTypeId: "e", resourceId: "r",
       onEventTypeReset: () => {},
       onNavigate: (path: string) => void path,
     };
-    const current: BookerProps["onNavigate"] = (_path, recovery) => {
-      const kind: ValidationRecovery = recovery;
-      void kind;
+    // Host wrappers typed via BookerProps call them with the 0.4.2 arguments
+    const wrap = (props: BookerProps) => {
+      props.onEventTypeReset?.();
+      props.onNavigate?.("/resources");
     };
     // @ts-expect-error CONTROL: the path is still a string
     const wrong: BookerProps["onNavigate"] = (path: number) => void path;
-    expect([earlier, current, wrong]).toHaveLength(3);
+    // @ts-expect-error CONTROL: no second argument is passed
+    const twoArgs: BookerProps["onNavigate"] = (path: string, kind: string) => void [path, kind];
+    expect([earlier, wrap, wrong, twoArgs]).toHaveLength(4);
   });
 });

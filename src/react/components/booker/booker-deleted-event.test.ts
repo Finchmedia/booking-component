@@ -156,7 +156,7 @@ describe("Booker with a null event type", () => {
     expect(calendarHeading()).toBeNull();
     expect(screen.queryByTestId("boundary")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Back to Event Selection" }));
-    expect(onEventTypeReset).toHaveBeenCalledWith("select-event-type");
+    expect(onEventTypeReset.mock.calls).toEqual([[]]); // no arguments, as in 0.4.2
   });
 
   it("null from the start (unknown id), without a callback: an inline notice", () => {

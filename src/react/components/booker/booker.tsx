@@ -6,10 +6,7 @@ import { ConvexError } from "convex/values";
 import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../../context.js";
 import { useSlotHold } from "../../hooks/use-slot-hold.js";
-import {
-  useBookingValidation,
-  type ValidationRecovery,
-} from "../../hooks/use-booking-validation.js";
+import { useBookingValidation } from "../../hooks/use-booking-validation.js";
 import { resolveBookingErrorMessage } from "../../utils/booking-error.js";
 import { toLocalMidnight, todayIn } from "../../utils/civil-date.js";
 import { allowedDurations } from "../../utils/durations.js";
@@ -52,17 +49,16 @@ export interface BookerProps {
   onBookingComplete?: (booking: Booking) => void;
   /**
    * Callback to reset event type selection (for embedded Booker). Used when the
-   * event type is deleted or deactivated or the resource is unlinked; receives
-   * the recovery kind ("select-event-type").
+   * event type is deleted or deactivated or the resource is unlinked.
    */
-  onEventTypeReset?: (recovery: ValidationRecovery) => void;
+  onEventTypeReset?: () => void;
   /**
    * Callback for navigation (used when resource is deleted/deactivated).
-   * `path` is the deprecated recoveryPath; map `recovery` ("select-resource")
-   * to your own route. Without the matching callback the Booker shows the
-   * error inline instead of a blocking dialog.
+   * `path` is the deprecated recoveryPath (a demo route); navigate to your own
+   * resource page. Without the matching callback the Booker shows the error
+   * inline instead of a blocking dialog.
    */
-  onNavigate?: (path: string, recovery: ValidationRecovery) => void;
+  onNavigate?: (path: string) => void;
   /**
    * Callback when authentication is required for a new booking (user not signed in).
    * Without it, the Booker shows a sign-in message.
@@ -209,7 +205,8 @@ function BookerFlow({
     resourceId
   );
   // Validation errors never cover a completed booking. While one is shown a new
-  // booking cannot proceed; reschedules are not blocked here.
+  // booking cannot proceed. A reschedule is not blocked: the error is an inline
+  // notice above the flow and the host's reschedule function decides.
   const validationError = bookingStep === "success" ? undefined : validation.error;
   const isCreateBlocked = !isRescheduling && !!validationError;
 
@@ -418,12 +415,18 @@ function BookerFlow({
 
   // With a host callback for its recovery a validation error is a modal dialog
   // over the flow; without one it replaces the flow, so the page stays usable.
+  // When rescheduling it is an inline notice above the flow instead.
+  const recoveryHandlers = isRescheduling
+    ? {}
+    : { onReset: handleReset, onEventTypeReset, onNavigate };
   const showFlow =
     !validationError ||
-    !!getRecoveryAction(validationError, { onReset: handleReset, onEventTypeReset, onNavigate });
+    isRescheduling ||
+    !!getRecoveryAction(validationError, recoveryHandlers);
 
   return (
-    <div ref={rootRef} className="contents">
+    // Inline style, so the layout does not depend on the host's CSS build
+    <div ref={rootRef} style={{ display: "contents" }}>
       {/* Optional Header */}
       {showHeader &&
         bookingStep === "event-meta" &&
@@ -442,12 +445,7 @@ function BookerFlow({
 
       {/* Validation error: modal with a recovery action, inline otherwise */}
       {validationError && (
-        <BookingErrorDialog
-          error={validationError}
-          onReset={handleReset}
-          onEventTypeReset={onEventTypeReset}
-          onNavigate={onNavigate}
-        />
+        <BookingErrorDialog error={validationError} {...recoveryHandlers} />
       )}
 
       {showFlow && (
