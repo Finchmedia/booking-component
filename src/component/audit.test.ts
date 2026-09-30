@@ -15,6 +15,7 @@ import { convexTest } from "convex-test";
 import schema from "./schema.js";
 import { api } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
+import { audit as auditQuery } from "./maintenance.js";
 import {
   FIXED_NOW,
   ORG,
@@ -43,6 +44,73 @@ async function auditAll(t: T, check: Check, limit: number) {
     if (page.isDone) return pages;
     cursor = page.continueCursor;
   }
+}
+
+type AuditArgs = (typeof api.maintenance.audit)["_args"];
+type AuditPage = Awaited<ReturnType<typeof audit>>;
+const auditHandler = (auditQuery as unknown as { _handler: (ctx: any, args: AuditArgs) => Promise<AuditPage> })
+  ._handler;
+
+/** `ctx` whose schedules queries count the documents they hand out. */
+function countingScheduleReads(ctx: any): { ctx: any; reads: () => number } {
+  let reads = 0;
+  const counted = (query: object): object =>
+    new Proxy(query, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          const result = value.apply(target, args);
+          if (prop === "collect" || prop === "take") {
+            return result.then((docs: unknown[]) => ((reads += docs.length), docs));
+          }
+          if (prop === "first" || prop === "unique") {
+            return result.then((doc: unknown) => ((reads += doc ? 1 : 0), doc));
+          }
+          const chained = result && typeof result === "object" && typeof result.then !== "function";
+          return chained ? counted(result) : result;
+        };
+      },
+    });
+  const db = new Proxy(ctx.db, {
+    get(target, prop) {
+      if (prop === "query") {
+        return (table: string) => (table === "schedules" ? counted(target.query(table)) : target.query(table));
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { ctx: { ...ctx, db }, reads: () => reads };
+}
+
+/** The f10_weekday page and the schedule documents it read; the registered query returns the same page. */
+async function measured(t: T): Promise<{ page: AuditPage; reads: number }> {
+  const result = await t.run(async (ctx) => {
+    const { ctx: countingCtx, reads } = countingScheduleReads(ctx);
+    const page = await auditHandler(countingCtx, { check: "f10_weekday", limit: 100 });
+    return { page, reads: reads() };
+  });
+  expect(await audit(t, "f10_weekday", 100)).toEqual(result.page);
+  return result;
+}
+
+/** `count` Berlin schedules of ORG without hours, none marked default. */
+async function fillerSchedules(t: T, count: number, prefix: string) {
+  await t.run(async (ctx) => {
+    for (let i = 0; i < count; i++) {
+      await ctx.db.insert("schedules", {
+        id: `sch-${prefix}-${i}`,
+        organizationId: ORG,
+        name: "Filler",
+        timezone: "Europe/Berlin",
+        isDefault: false,
+        weeklyHours: [],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+    }
+  });
 }
 
 describe("f10_weekday", () => {
@@ -154,6 +222,44 @@ describe("f10_weekday", () => {
     expect(page.issues).toEqual([
       { check: "f10_weekday", uid: sunday.uid, start: sunday.start, scheduleId: "sch-default", date: "2027-06-06" },
     ]);
+  });
+
+  test.each([
+    ["the schedule marked default", true],
+    ["the first schedule when none is marked default", false],
+  ])("an organization's default is %s, read once per call however many schedules it has", async (_, marked) => {
+    const { t } = setup();
+    const expected = marked ? "sch-default" : "sch-first";
+    if (marked) await fillerSchedules(t, 1, "before");
+    await t.mutation(api.schedules.createSchedule, {
+      id: expected,
+      organizationId: ORG,
+      name: "Default",
+      timezone: AUCKLAND,
+      isDefault: marked,
+      weeklyHours: [1, 2, 3, 4, 5].map((dayOfWeek) => ({ dayOfWeek, startTime: "09:00", endTime: "17:00" })),
+    });
+    // Two event types without a schedule, one Sunday booking each.
+    const sundays = [];
+    for (const key of ["a", "b"]) {
+      const seed = await seedResource(t, { resourceId: `res-${key}`, eventTypeId: `et-${key}`, timezone: AUCKLAND });
+      sundays.push(await book(t, seed, zoned("2027-06-06", "10:00", AUCKLAND), zoned("2027-06-06", "11:00", AUCKLAND)));
+    }
+    const issues = sundays.map((sunday) => ({
+      check: "f10_weekday", uid: sunday.uid, start: sunday.start, scheduleId: expected, date: "2027-06-06",
+    }));
+
+    await fillerSchedules(t, 1, "after");
+    const few = await measured(t);
+    expect(few.page.issues).toEqual(issues);
+    // One indexed read serves both event types: the default, or no marked
+    // default and then the first schedule.
+    expect(few.reads).toBe(1);
+
+    await fillerSchedules(t, 60, "more");
+    // CONTROL: the organization has 60 more schedules now.
+    expect(await t.query(api.schedules.listSchedules, { organizationId: ORG })).toHaveLength(marked ? 63 : 62);
+    expect(await measured(t)).toEqual(few);
   });
 
   test("a schedule stored with an invalid zone is skipped, not an error", async () => {

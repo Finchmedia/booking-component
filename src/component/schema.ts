@@ -53,7 +53,9 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_external_id", ["id"])
-    .index("by_org", ["organizationId"]),
+    .index("by_org", ["organizationId"])
+    // An organization's default schedule without reading its other schedules.
+    .index("by_org_default", ["organizationId", "isDefault"]),
 
   // Date overrides (holidays, custom hours)
   date_overrides: defineTable({

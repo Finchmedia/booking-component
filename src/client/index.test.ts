@@ -220,6 +220,7 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
       updated: 0,
       skipped: 0,
       mismatches: [],
+      needsReview: [],
       continueCursor: expect.any(String),
       isDone: true,
     });
