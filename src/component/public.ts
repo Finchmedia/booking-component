@@ -912,19 +912,32 @@ export const createEventType = mutation({
       .unique();
 
     const now = Date.now();
-    const data = {
+
+    if (existing) {
+      // An upsert updates the given fields and keeps the others: an omitted
+      // isActive does not reactivate a deactivated event type, and an
+      // omitted organizationId keeps the stored one. It never moves an event
+      // type to another organization; adopting one stored without
+      // organization is allowed.
+      if (
+        existing.organizationId !== undefined &&
+        args.organizationId !== undefined &&
+        args.organizationId !== existing.organizationId
+      ) {
+        throwBookingError(
+          "ORGANIZATION_MISMATCH",
+          `Event type "${args.id}" belongs to another organization than "${args.organizationId}"`
+        );
+      }
+      await ctx.db.patch(existing._id, { ...args, updatedAt: now });
+      return existing._id;
+    }
+    return await ctx.db.insert("event_types", {
       ...args,
       isActive: args.isActive ?? true,
       createdAt: now,
       updatedAt: now,
-    };
-
-    if (existing) {
-      await ctx.db.patch(existing._id, { ...data, createdAt: existing.createdAt });
-      return existing._id;
-    } else {
-      return await ctx.db.insert("event_types", data);
-    }
+    });
   },
 });
 

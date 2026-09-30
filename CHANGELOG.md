@@ -52,6 +52,14 @@
   `getResourcesForEventType`'s resources) and unlink them or move the
   resource; `backfillBookingOrganizations` reports stored bundles whose
   organization differs in `mismatches`.
+- `createEventType` on an existing ID (an upsert) keeps what it is not given
+  (N14): an omitted `isActive` no longer reactivates a deactivated event type
+  (a new one is still active by default), and an omitted `organizationId`
+  keeps the stored one. An ID stored for another organization is rejected
+  with `ORGANIZATION_MISMATCH` instead of being moved, links included, to the
+  caller's organization; adopting an event type stored without organization
+  still works. Provisioning scripts that re-run `createEventType` to
+  reactivate must pass `isActive: true` or call `toggleEventTypeActive`.
 - `deleteResource` and `deleteEventType` delete the links of the deleted ID
   (N12), after their booking check and in the same transaction. A resource
   or event type created again with that ID starts unlinked; link it
