@@ -398,8 +398,10 @@ shows how and lists every check with its repair.
   organization; under an event type without organization its resources
   belong to one organization, and a bundle's `organizationId`, when given, is
   theirs. Hooks and emails about a booking go to its event type's
-  organization: a move, a transition, a cancellation or an expiry first
-  gives a booking stored with another organization or none that one. A
+  organization when every resource it occupies belongs to it: a move, a
+  transition, a cancellation or an expiry first gives a booking stored with
+  another organization or none that one. Otherwise they go to the stored
+  organization. A
   bundle's primary resource is its first item and may be an
   add-on. There is no administrator override: to move, confirm or submit a
   hold after deactivating or unlinking, reactivate or relink first.

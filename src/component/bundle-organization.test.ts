@@ -542,3 +542,136 @@ describe("cancelling, declining, completing and expiring notify the event type's
     });
   });
 });
+
+describe("the event type's organization takes a booking over only when the booking's resources belong to it", () => {
+  /** Version 1 and version 2 probes of each organization for `eventType`. */
+  async function probesOf(t: T, eventType: string, organizationIds: string[]) {
+    for (const organizationId of organizationIds) {
+      await t.mutation(api.hooks.registerHook, { eventType, functionHandle: `function://;probe:${organizationId}`, organizationId });
+      await t.mutation(api.hooks.registerHook, {
+        eventType, functionHandle: `function://;probe-v2:${organizationId}`, organizationId, payloadVersion: 2,
+      });
+    }
+  }
+  /** Moves a resource to another organization, as a 0.4.x link across organizations left it. */
+  const rehomeResource = (t: T, resourceId: string, organizationId: string) =>
+    t.run(async (ctx) => {
+      const resource = await ctx.db.query("resources").withIndex("by_external_id", (q) => q.eq("id", resourceId)).unique();
+      await ctx.db.patch(resource!._id, { organizationId });
+    });
+  /** The stored organization, where the job is routed, what its email context and payloads name, and which probes it reaches. */
+  const outcome = async (t: T, bookingId: Id<"bookings">, event: string) => {
+    const job = await hookJob(t, bookingId, event);
+    return {
+      stored: await storedOrganization(t, bookingId),
+      hook: job.organizationId,
+      email: job.emailContext?.organizationId,
+      v1Booking: job.payload.booking?.organizationId,
+      v2: job.payloadV2.organizationId,
+      probes: await replayHooks(t, job),
+    };
+  };
+  const integrityIssues = async (t: T) =>
+    (await t.query(api.maintenance.audit, { check: "booking_integrity", limit: 100 })).issues;
+
+  test("event type of org-1, resource of org-b: cancelling and completing keep the stored organization and notify only it", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t); // et-1 and res-1 in org-1
+    for (const event of ["booking.cancelled", "booking.completed"]) await probesOf(t, event, ["org-1", "org-b"]);
+    const paths = [
+      {
+        path: "cancelBookingByToken", event: "booking.cancelled", v1Booking: true, email: true,
+        create: (h: number) => book(t, seed, hour(h), hour(h + 1)),
+        end: (booking: Doc<"bookings">) =>
+          t.mutation(api.public.cancelBookingByToken, { uid: booking.uid, token: booking.managementToken! }),
+      },
+      {
+        path: "transition to completed", event: "booking.completed", v1Booking: true, email: false,
+        create: (h: number) => book(t, seed, hour(h), hour(h + 1)),
+        end: (booking: Doc<"bookings">) => transition(t, booking._id, "completed"),
+      },
+      {
+        path: "cancelMultiResourceBooking", event: "booking.cancelled", v1Booking: false, email: true,
+        create: (h: number) => bundle(t, seed.eventTypeId, h),
+        end: (booking: Doc<"bookings">) => t.mutation(api.multi_resource.cancelMultiResourceBooking, { bookingId: booking._id }),
+      },
+    ];
+    const cases: Array<(typeof paths)[number] & { stored: string; booking: Doc<"bookings"> }> = [];
+    for (const stored of ["org-1", "org-b"]) {
+      for (const path of paths) cases.push({ ...path, stored, booking: await path.create(cases.length) });
+    }
+    await t.run(async (ctx) => {
+      for (const { booking, stored } of cases) await ctx.db.patch(booking._id, { organizationId: stored });
+    });
+    await rehomeResource(t, "res-1", "org-b");
+
+    for (const { path, event, v1Booking, email, stored, booking, end } of cases) {
+      const name = `${path}, stored ${stored}`;
+      expect({ name, result: await end(booking) }).toEqual({ name, result: { success: true } });
+      // org-1's hooks receive org-b's booking (and, in version 1, its management token) from none of them.
+      expect({ name, ...(await outcome(t, booking._id, event)) }).toEqual({
+        name,
+        stored,
+        hook: stored,
+        email: email ? stored : undefined,
+        v1Booking: v1Booking ? stored : undefined,
+        v2: stored,
+        probes: [`probe-v2:${stored}`, `probe:${stored}`],
+      });
+    }
+    const uids = (stored: string) => cases.filter((row) => row.stored === stored).map((row) => row.booking.uid).sort();
+    expect((await t.query(api.public.listBookings, { organizationId: "org-1" })).map((b) => b.uid).sort()).toEqual(uids("org-1"));
+    // The audit keeps listing the bookings stored for another organization than the event type's.
+    expect(await integrityIssues(t)).toEqual(
+      cases
+        .filter((row) => row.stored === "org-b")
+        .map((row) => ({ check: "booking_integrity", uid: row.booking.uid, problems: ["organizationMismatch"] }))
+    );
+  });
+
+  test("a bundle with a secondary item of org-b stays where it is stored; one whose items all belong to org-1 is corrected (CONTROL)", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t); // et-1 and res-1 in org-1
+    for (const resourceId of ["res-2", "res-3"]) {
+      await t.mutation(api.resources.createResource, { id: resourceId, organizationId: "org-1", name: resourceId, type: "room", timezone: "UTC" });
+      await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId, eventTypeId: seed.eventTypeId });
+    }
+    await probesOf(t, "booking.cancelled", ["org-1", "org-b", "org-other"]);
+    const bundleOf = (resourceIds: string[], h: number) =>
+      t.mutation(api.multi_resource.createMultiResourceBooking, {
+        eventTypeId: seed.eventTypeId, resources: resourceIds.map((resourceId) => ({ resourceId })),
+        start: hour(h), end: hour(h + 1), timezone: "UTC", booker: BOOKER, location: LOCATION,
+      });
+    const storedForB = await bundleOf(["res-1", "res-2"], 8);
+    const storedForNone = await bundleOf(["res-1", "res-2"], 10);
+    const control = await bundleOf(["res-1", "res-3"], 12);
+    expect([storedForB.resourceId, storedForNone.resourceId, control.resourceId]).toEqual(["res-1", "res-1", "res-1"]);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(storedForB._id, { organizationId: "org-b" });
+      await ctx.db.patch(storedForNone._id, { organizationId: undefined });
+      await ctx.db.patch(control._id, { organizationId: "org-other" });
+    });
+    await rehomeResource(t, "res-2", "org-b"); // the primary res-1 stays in org-1
+
+    for (const booking of [storedForB, storedForNone, control]) {
+      expect(await t.mutation(api.multi_resource.cancelMultiResourceBooking, { bookingId: booking._id })).toEqual({ success: true });
+    }
+    const organizations = (organizationId: string | undefined) => ({
+      stored: organizationId, hook: organizationId, email: organizationId, v1Booking: undefined, v2: organizationId,
+    });
+    expect({
+      storedForB: await outcome(t, storedForB._id, "booking.cancelled"),
+      storedForNone: await outcome(t, storedForNone._id, "booking.cancelled"),
+      control: await outcome(t, control._id, "booking.cancelled"),
+    }).toEqual({
+      storedForB: { ...organizations("org-b"), probes: ["probe-v2:org-b", "probe:org-b"] },
+      storedForNone: { ...organizations(undefined), probes: [] }, // global hooks only, as before
+      control: { ...organizations("org-1"), probes: ["probe-v2:org-1", "probe:org-1"] },
+    });
+    expect((await t.query(api.public.listBookings, { organizationId: "org-1" })).map((b) => b.uid)).toEqual([control.uid]);
+    expect(await integrityIssues(t)).toEqual([
+      { check: "booking_integrity", uid: storedForB.uid, problems: ["organizationMismatch"] },
+      { check: "booking_integrity", uid: storedForNone.uid, problems: ["organizationMismatch"] },
+    ]);
+  });
+});

@@ -1,4 +1,4 @@
-import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { DatabaseReader, MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { assertValidRange, getRequiredSlots } from "./utils";
 import { assertSingleResourceSupported } from "./inventory_helpers";
@@ -34,8 +34,9 @@ import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 // unlinking configuration never ends an existing booking. Legacy
 // createReservation rows (eventTypeId "legacy") keep the legacy path's
 // rules: none beyond the pool guard (see isLegacyReservation). Every
-// lifecycle write that notifies gives the booking its event type's
-// organization first (withEventTypeOrganization).
+// lifecycle write that notifies first gives the booking its event type's
+// organization when all its resources belong to it
+// (withEventTypeOrganization).
 //
 // "single" texts are the ones createBooking has always used; "bundle" texts
 // name the offending ids. bookingRuleProblems reports the same rules for the
@@ -345,25 +346,89 @@ export async function assertSingleBookable(
   return { eventType, requiredSlots };
 }
 
+/** Why the stored rows do not corroborate a booking's organization; see corroboratedOrganization. */
+export type UncorroboratedOrganization =
+  | { reason: "event_type_missing" | "event_type_without_organization" }
+  | { reason: "resource_missing"; eventTypeOrganizationId: string; resourceId: string }
+  | {
+      reason: "resource_organization_differs";
+      eventTypeOrganizationId: string;
+      resourceId: string;
+      resourceOrganizationId: string;
+    };
+
+/**
+ * The organization of a booking's event type when the stored rows
+ * corroborate it, or why they do not: the event type exists and has an
+ * organization, and every resource the booking occupies (its resourceId and
+ * each booking item) exists and belongs to that organization too; the
+ * reason names the first resource that fails. Nothing records the
+ * organization a booking was made for, and an event type can move to
+ * another organization later; the resources, owners of the booked
+ * inventory, corroborate it. backfillBookingOrganizations, the audit's
+ * booking_integrity and withEventTypeOrganization share this rule. Reads
+ * only, never throws.
+ */
+export async function corroboratedOrganization(
+  db: DatabaseReader,
+  booking: Doc<"bookings">,
+  eventType: Doc<"event_types"> | null,
+  resource: (id: string) => Promise<Doc<"resources"> | null>,
+): Promise<{ organizationId: string } | UncorroboratedOrganization> {
+  if (!eventType) return { reason: "event_type_missing" };
+  const organizationId = eventType.organizationId;
+  if (organizationId === undefined) return { reason: "event_type_without_organization" };
+
+  const items = await db
+    .query("booking_items")
+    .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+    .collect();
+  for (const resourceId of new Set([booking.resourceId, ...items.map((item) => item.resourceId)])) {
+    const resourceOrganizationId = (await resource(resourceId))?.organizationId;
+    if (resourceOrganizationId === undefined) {
+      return { reason: "resource_missing", eventTypeOrganizationId: organizationId, resourceId };
+    }
+    if (resourceOrganizationId !== organizationId) {
+      return {
+        reason: "resource_organization_differs",
+        eventTypeOrganizationId: organizationId,
+        resourceId,
+        resourceOrganizationId,
+      };
+    }
+  }
+  return { organizationId };
+}
+
 /**
  * The booking as its notifications describe it, in the organization every
- * hook and email about an existing booking goes to: its event type's when
- * that has one, else the stored one (legacy createReservation rows, whose
- * "legacy" names no event type, event types without organization, deleted
- * event types). A booking stored before 0.5.0 without that organization or
- * with another one is given it here, in the caller's transaction and before
- * hooks and emails are queued, so hook routing, the email context and both
- * payload versions name it. Never rejects: cancelling, declining,
- * completing and expiring always succeed.
+ * hook and email about an existing booking goes to. A booking stored before
+ * 0.5.0 without its event type's organization or with another one is given
+ * it here, in the caller's transaction and before hooks and emails are
+ * queued, only when every resource it occupies belongs to that organization
+ * (corroboratedOrganization); hook routing, the email context and both
+ * payload versions then name it. Otherwise the stored organization stays and
+ * is notified, as in 0.4.x: legacy createReservation rows, deleted event
+ * types or ones without organization, and bookings holding a missing
+ * resource or another organization's (booking_integrity lists the latter as
+ * organizationMismatch). Never rejects: cancelling, declining, completing
+ * and expiring always succeed.
  */
 export async function withEventTypeOrganization(
   ctx: MutationCtx,
   booking: Doc<"bookings">,
 ): Promise<Doc<"bookings">> {
-  const organizationId = (await findEventType(ctx, booking.eventTypeId))?.organizationId ?? booking.organizationId;
-  if (organizationId === booking.organizationId) return booking;
-  await ctx.db.patch(booking._id, { organizationId });
-  return { ...booking, organizationId };
+  const eventType = await findEventType(ctx, booking.eventTypeId);
+  if (eventType?.organizationId === undefined || eventType.organizationId === booking.organizationId) return booking;
+  const corroborated = await corroboratedOrganization(ctx.db, booking, eventType, (id) =>
+    ctx.db
+      .query("resources")
+      .withIndex("by_external_id", (q) => q.eq("id", id))
+      .first()
+  );
+  if (!("organizationId" in corroborated)) return booking;
+  await ctx.db.patch(booking._id, { organizationId: corroborated.organizationId });
+  return { ...booking, organizationId: corroborated.organizationId };
 }
 
 /**

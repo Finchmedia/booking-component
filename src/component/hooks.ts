@@ -459,10 +459,10 @@ export const transitionBookingState = mutation({
         .collect();
       await assertStillBookable(ctx, booking, items);
     }
-    // Every transition notifies the event type's organization only, and
-    // gives the booking that organization when another one or none was
-    // stored before 0.5.0 (legacy rows and event types without organization
-    // keep the stored one).
+    // Every transition notifies the organization withEventTypeOrganization
+    // resolves: the event type's, given to a booking stored before 0.5.0
+    // with another one or none when all its resources belong to it, else
+    // the stored one.
     const notified = await withEventTypeOrganization(ctx, booking);
     const organizationId = notified.organizationId;
 

@@ -30,7 +30,12 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { parseCivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
 import { bookingStatusValidator, isBookingStatus } from "../shared/booking-status.js";
-import { LEGACY_EVENT_TYPE_ID, bookingRuleProblems, isLegacyReservation } from "./booking_lifecycle";
+import {
+  LEGACY_EVENT_TYPE_ID,
+  bookingRuleProblems,
+  corroboratedOrganization,
+  isLegacyReservation,
+} from "./booking_lifecycle";
 import { holdsActiveInventory } from "./inventory_helpers";
 import {
   isLengthOutsideOptions,
@@ -587,8 +592,9 @@ async function linkIssue(
  * organizationId, or none while a resource is missing or belongs to another
  * organization (the backfill lists these in `needsReview` or `mismatches`
  * and leaves them; the booking's next move, transition, cancellation or
- * expiry gives it the event type's organization, see
- * withEventTypeOrganization). Also `poolWithoutItems`: an active booking
+ * expiry gives it the event type's organization only when every resource
+ * it occupies belongs to it, see withEventTypeOrganization, so the others
+ * stay listed here). Also `poolWithoutItems`: an active booking
  * without items on a pool (isFungible), which moves reject.
  */
 async function bookingIntegrityIssue(
@@ -797,7 +803,8 @@ const organizationMismatch = v.object({
 
 /**
  * A booking left without organization because the stored rows do not
- * corroborate one. `resourceId` names the first resource that fails.
+ * corroborate one (corroboratedOrganization). `resourceId` names the first
+ * resource that fails.
  */
 const organizationReview = v.object({
   uid: v.string(),
@@ -815,45 +822,6 @@ const organizationReview = v.object({
 type OrganizationReview = typeof organizationReview.type;
 
 /**
- * The organization a booking without one can take, or why it cannot: its
- * event type must exist and have an organization, and every resource the
- * booking occupies (its resourceId and each booking item) must exist and
- * belong to that organization too. Nothing records the organization a
- * booking was made for, and an event type can move to another organization
- * later; the resources, owners of the booked inventory, corroborate it.
- * The audit's booking_integrity applies the same rule.
- */
-async function corroboratedOrganization(
-  db: DatabaseReader,
-  booking: Doc<"bookings">,
-  eventType: Doc<"event_types"> | null,
-  resource: (id: string) => Promise<Doc<"resources"> | null>
-): Promise<{ organizationId: string } | OrganizationReview> {
-  const review = { uid: booking.uid, eventTypeId: booking.eventTypeId };
-  if (!eventType) return { ...review, reason: "event_type_missing" };
-  const organizationId = eventType.organizationId;
-  if (organizationId === undefined) return { ...review, reason: "event_type_without_organization" };
-
-  const items = await bookingItems(db, booking._id);
-  for (const resourceId of new Set([booking.resourceId, ...items.map((item) => item.resourceId)])) {
-    const resourceOrganizationId = (await resource(resourceId))?.organizationId;
-    if (resourceOrganizationId === undefined) {
-      return { ...review, reason: "resource_missing", eventTypeOrganizationId: organizationId, resourceId };
-    }
-    if (resourceOrganizationId !== organizationId) {
-      return {
-        ...review,
-        reason: "resource_organization_differs",
-        eventTypeOrganizationId: organizationId,
-        resourceId,
-        resourceOrganizationId,
-      };
-    }
-  }
-  return { organizationId };
-}
-
-/**
  * Fills a missing booking organizationId, one page of bookings per call,
  * where the stored rows corroborate it. Until 0.4.3 bundles created without
  * `organizationId` stored none (and single bookings before 0.3.0), so they
@@ -861,9 +829,10 @@ async function corroboratedOrganization(
  *
  * A booking takes its event type's organization only when every resource it
  * occupies (its resourceId and each booking item) exists and belongs to that
- * organization as well. The event type alone is no evidence: it may have
- * moved to another organization since the booking was made, which would then
- * receive the booker's details and management token in its booking list.
+ * organization as well (corroboratedOrganization). The event type alone is
+ * no evidence: it may have moved to another organization since the booking
+ * was made, which would then receive the booker's details and management
+ * token in its booking list.
  *
  * - `updated` counts the rows given their event type's organization
  *   (with `dryRun`, the rows that would be; nothing is written).
@@ -876,8 +845,8 @@ async function corroboratedOrganization(
  * - `mismatches` lists rows whose organization differs from their event
  *   type's. The backfill reports them and never rewrites them in bulk; the
  *   booking's next move, transition, cancellation or expiry gives it the
- *   event type's organization before anyone is notified
- *   (withEventTypeOrganization).
+ *   event type's organization before anyone is notified, under the same
+ *   rule (withEventTypeOrganization).
  *
  * Idempotent: a second run updates nothing. Start without a cursor and pass
  * `continueCursor` back until `isDone`; call it from a host internal mutation.
@@ -937,7 +906,7 @@ export const backfillBookingOrganizations = mutation({
       const result = await corroboratedOrganization(ctx.db, booking, eventType, find.resource);
       if ("reason" in result) {
         skipped++;
-        needsReview.push(result);
+        needsReview.push({ uid: booking.uid, eventTypeId: booking.eventTypeId, ...result });
         continue;
       }
       updated++;

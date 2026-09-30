@@ -958,9 +958,9 @@ export const cancelReservation = mutation({
             throwBookingError("INVALID_STATE", `Cannot cancel booking with status: ${booking.status}`);
         }
 
-        // 3. Notify the event type's organization only (see
-        // withEventTypeOrganization); release, record history and stamp the
-        // cancellation.
+        // 3. Notify the event type's organization when the booking's
+        // resources agree, else the stored one (withEventTypeOrganization);
+        // release, record history and stamp the cancellation.
         const notified = await withEventTypeOrganization(ctx, booking);
         const changedBy = args.cancelledBy ?? "unknown";
         await terminateBooking(ctx, booking, {
@@ -1020,8 +1020,8 @@ export const expireProvisionalBooking = mutation({
       return { success: false, reason: `Booking is ${booking.status}` };
     }
 
-    // No notification, but the expired row is listed for its event type's
-    // organization like every other ended booking.
+    // No notification, but the expired row takes the organization every
+    // other ended booking takes (withEventTypeOrganization).
     await withEventTypeOrganization(ctx, booking);
     await terminateBooking(ctx, booking, {
       to: "cancelled",
@@ -1761,9 +1761,10 @@ export const cancelBookingByToken = mutation({
 
     const reason = args.reason || "Cancelled by booker";
 
-    // 3–5. Notify the event type's organization only (see
-    // withEventTypeOrganization); release every item (pooled add-ons and
-    // legacy bookings included), record history and stamp the cancellation.
+    // 3–5. Notify the event type's organization when the booking's resources
+    // agree, else the stored one (withEventTypeOrganization); release every
+    // item (pooled add-ons and legacy bookings included), record history and
+    // stamp the cancellation.
     const notified = await withEventTypeOrganization(ctx, booking);
     await terminateBooking(ctx, booking, {
       to: "cancelled",
@@ -1833,9 +1834,10 @@ async function moveBooking(
   await assertStillBookable(ctx, original, items);
   // The new row belongs to its event type's organization, as a new booking
   // does: a missing or different organization stored before 0.5.0 is not
-  // carried over (the rules above passed, so every resource belongs to it),
-  // and the cancelled original is given it too. Legacy rows and event types
-  // without organization keep the stored one.
+  // carried over (the rules above passed, so the resources corroborate it,
+  // see withEventTypeOrganization), and the cancelled original is given it
+  // too. Legacy rows and event types without organization keep the stored
+  // one.
   const { organizationId } = await withEventTypeOrganization(ctx, original);
 
   // The original ends first: read-your-writes lets overlapping moves reuse
