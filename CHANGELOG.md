@@ -164,6 +164,18 @@ The internal email mutations keep their names and arguments, so jobs queued by
   (`alreadyCancelled: true`, nothing written) are unchanged. Hosts that read
   the history see the extra row for new cancellations only; earlier ones are
   not backfilled.
+- `createMultiResourceBooking` without `organizationId` stores the event
+  type's organization, as `createBooking` and `createProvisionalBooking` do.
+  Such bundles (the documented recipe omits the argument) had none: they were
+  missing from `listBookings({ organizationId })`, reached only global hooks,
+  and gave custom email renderers no organization, through later moves and
+  cancellations too. Organization-scoped hooks now receive their events. The
+  hook envelope carries `organizationId`, and payloads that include the
+  stored booking (token cancellation, transitions) have the existing
+  "bundle with organization" v1 shape; no payload gains a key. An explicit
+  `organizationId` is still stored as given, also when it differs from the
+  event type's, and an event type without an organization keeps using the
+  argument.
 
 ### Added
 

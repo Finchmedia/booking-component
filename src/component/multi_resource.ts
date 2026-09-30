@@ -194,6 +194,11 @@ export const createMultiResourceBooking = mutation({
       throw new Error(`Event type "${args.eventTypeId}" not found`);
     }
 
+    // The bundle belongs to its event type's organization, as single bookings
+    // do, unless the caller names one (stored as given). Used for the row and
+    // for hook routing alike.
+    const organizationId = args.organizationId ?? eventType.organizationId;
+
     // 2. Check ALL resources are available (fail-fast)
     const requiredSlots = getRequiredSlots(args.start, args.end);
 
@@ -284,7 +289,7 @@ export const createMultiResourceBooking = mutation({
       uid: bookingUid,
       managementToken,
       eventTypeId: args.eventTypeId,
-      organizationId: args.organizationId,
+      organizationId,
       timezone: args.timezone,
       bookerName: args.booker.name,
       bookerEmail: args.booker.email,
@@ -326,7 +331,7 @@ export const createMultiResourceBooking = mutation({
     await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
       eventType: "booking.created",
       emailContext: createBookingEmailContext(eventType.requiresConfirmation ? "pending" : "confirmed", booking, args.resendOptions),
-      organizationId: args.organizationId,
+      organizationId,
       payload: {
         bookingId,
         resourceId: primaryResourceId,

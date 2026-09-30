@@ -78,12 +78,17 @@ async function seedWorld(t: T) {
   const seed = await seedResource(t); // res-1 + et-1, organization org-1
   await seedFungibleResource(t, { eventTypeId: seed.eventTypeId }); // pool-1, capacity 3
   const approval = await seedResource(t, { resourceId: "res-2", eventTypeId: "et-approval", requiresConfirmation: true });
+  // No organization on the event type: bundles for it store none (F7 takes the event type's otherwise).
+  await t.mutation(api.public.createEventType, {
+    id: "et-no-org", slug: "et-no-org", title: "No organization", lengthInMinutes: 60, timezone: "UTC",
+    lockTimeZoneToggle: false, locations: [], minNoticeMinutes: 0, maxFutureMinutes: 365 * 24 * 60,
+  });
 
   const single = (time: string, location: { type: string; value?: string } = LOCATION) =>
     book(t, seed, at(time), at(time) + HOUR, { location });
-  const bundle = (time: string, organizationId?: string) =>
+  const bundle = (time: string, organizationId?: string, eventTypeId = seed.eventTypeId) =>
     t.mutation(api.multi_resource.createMultiResourceBooking, {
-      eventTypeId: seed.eventTypeId,
+      eventTypeId,
       organizationId,
       resources: [{ resourceId: seed.resourceId }, { resourceId: "pool-1", quantity: 2 }],
       start: at(time),
@@ -105,18 +110,19 @@ async function seedWorld(t: T) {
     });
   const pending = (time: string) => book(t, approval, at(time), at(time) + HOUR);
 
-  /** One booking per stored shape, 09:00–16:00 on res-1 (bundles also hold pool-1). */
+  /** One booking per stored shape, 09:00–17:00 on res-1 (bundles also hold pool-1). */
   const stored = async (): Promise<Record<StoredShape, Doc<"bookings">>> => {
     const moved = await single("14:00");
     return {
       "modern single booking": await single("09:00"),
-      "bundle without organization": await bundle("10:00"),
+      "bundle without organization": await bundle("10:00", undefined, "et-no-org"),
       "bundle with organization": await bundle("11:00", ORG),
       "legacy createReservation row": await legacy("12:00"),
       "location without value": await single("13:00", { type: "phone" }),
       "rescheduled booking": await t.mutation(api.public.rescheduleBooking, {
         bookingId: moved._id, newStart: at("15:00"), newEnd: at("16:00"),
       }),
+      "bundle with derived organization": await bundle("16:00"),
     };
   };
   return { single, bundle, legacy, provisional, pending, stored };
@@ -128,7 +134,8 @@ type StoredShape =
   | "bundle with organization"
   | "legacy createReservation row"
   | "location without value"
-  | "rescheduled booking";
+  | "rescheduled booking"
+  | "bundle with derived organization";
 
 /** Emits once per pinned stored shape and compares every capture with its pin. */
 async function expectPerStoredShape(
@@ -174,6 +181,9 @@ const STORED: Record<StoredShape, Record<string, Shape>> = {
   },
   "location without value": { ...STORED_MODERN, location: { type: S } },
   "rescheduled booking": { ...STORED_MODERN, rescheduleUid: S },
+  // Since 0.4.3 (F7) a bundle created without organizationId takes the event
+  // type's, which is the existing "bundle with organization" shape.
+  "bundle with derived organization": STORED_MODERN,
 };
 /** Envelope keys per stored shape: organizationId travels only when the booking has one. */
 const ENVELOPE: Record<StoredShape, string[]> = {
@@ -183,6 +193,7 @@ const ENVELOPE: Record<StoredShape, string[]> = {
   "legacy createReservation row": WITHOUT_ORG,
   "location without value": WITH_ORG,
   "rescheduled booking": WITH_ORG,
+  "bundle with derived organization": WITH_ORG,
 };
 const ALL_STORED = Object.keys(STORED) as StoredShape[];
 
@@ -250,12 +261,16 @@ describe("booking.created", () => {
       createBooking: await emittedBy(t, () => world.single("09:00")),
       "createBooking (requires confirmation)": await emittedBy(t, () => world.pending("09:00")),
       "createMultiResourceBooking without organization": await emittedBy(t, () => world.bundle("10:00")),
+      "createMultiResourceBooking for an event type without organization": await emittedBy(t, () =>
+        world.bundle("14:00", undefined, "et-no-org")),
       "createMultiResourceBooking with organization": await emittedBy(t, () => world.bundle("11:00", ORG)),
       createReservation: await emittedBy(t, () => world.legacy("12:00")),
     }).toStrictEqual({
       createBooking: [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_SINGLE }],
       "createBooking (requires confirmation)": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_SINGLE }],
-      "createMultiResourceBooking without organization": [{ eventType: "booking.created", envelope: WITHOUT_ORG, payload: CREATED_BUNDLE }],
+      // Since 0.4.3 (F7) the event type's organization is used, so the envelope carries it.
+      "createMultiResourceBooking without organization": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_BUNDLE }],
+      "createMultiResourceBooking for an event type without organization": [{ eventType: "booking.created", envelope: WITHOUT_ORG, payload: CREATED_BUNDLE }],
       "createMultiResourceBooking with organization": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_BUNDLE }],
       createReservation: [{ eventType: "booking.created", envelope: WITHOUT_ORG, payload: CREATED_LEGACY }],
     });
