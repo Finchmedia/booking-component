@@ -4,10 +4,10 @@
 
 The contract release: coded errors, one set of booking rules, closed booking
 statuses and checked configuration writes in the component, and a host
-contract that `BookingProvider` checks at compile time. Function paths, the
-arguments of queued jobs and the version 1 hook payloads are unchanged. Each
-breaking change below names what your host has to do; read _Upgrading_ before
-bumping.
+contract that `BookingProvider` checks at compile time. Function paths and
+the version 1 hook payloads are unchanged, and jobs queued by 0.4.x keep
+being accepted. Each breaking change below names what your host has to do;
+read _Upgrading_ before bumping, and its last entry before rolling back.
 
 ### Upgrading
 
@@ -171,7 +171,13 @@ bumping.
   (`SCHEDULE_NOT_FOUND`; `""` still means none), and `deleteSchedule` refuses
   while an event type uses the schedule (new code `SCHEDULE_IN_USE`). Point
   the event types `event_type_config` lists with `scheduleId` to an existing
-  schedule, or clear it; their slot queries throw otherwise.
+  schedule, or clear it, before deploying: from the deploy on,
+  `getMonthAvailability`, `getDaySlots` and `getEffectiveAvailability` throw
+  `SCHEDULE_NOT_FOUND` for them instead of reading 09:00–17:00, so a host
+  that forwards `eventType.scheduleId` sends the Booker to its error
+  boundary until the repair. Without a copy deployment, find them with
+  `listEventTypes` and `getSchedule` for each `scheduleId`; 0.4.x
+  `updateEventType` clears one with `scheduleId: ""`.
 - `deleteResource` and `deleteEventType` delete the deleted ID's links in the
   same transaction (N12), so an ID created again starts unlinked: link it
   explicitly. Links that deletes before 0.5.0 left behind stay;
@@ -255,6 +261,18 @@ bumping.
   next to the keys the components send; the error on `<BookingProvider>` can
   name the opt-in type and a different function. The generated `api.public`
   of the reference host compiles unchanged.
+- `PublicBookingAPI`'s 11 required members are `FunctionReference_future`
+  references (the checked slots) instead of plain
+  `FunctionReference<…, any, any>`. `convex/react`'s `useQuery` and
+  `useMutation` accept them, but a `FunctionReference_future` is not
+  assignable to a plain `FunctionReference`: convex-helpers' cached
+  `useQuery` (the hook `ConvexQueryCacheProvider` serves) and other APIs
+  that take a plain reference reject a member read from a value typed
+  `PublicBookingAPI`, such as a hand-built gateway or
+  `function useX(publicApi: PublicBookingAPI)` (TS2345). Take plain typed
+  references from `useBookingAPI()` or your generated `api` instead, and
+  check a gateway with `api.public satisfies PublicBookingAPI` rather than
+  annotating a variable as `PublicBookingAPI`.
 - The other 10 public operations (`getBooking`, `getBookingByUid`,
   `getBookingByToken`, `cancelBookingByToken`, `getEventTypeBySlug`,
   `listEventTypes`, `getAvailability`, `listResources`,
@@ -265,7 +283,11 @@ bumping.
 - `useBookingAPI()` types the 11 operations with the contract's arguments and
   result views (`EventTypeView`, `ResourceView`, `BookingView`, …) instead of
   `any`. Code that reads other fields through them, such as `eventType.slug`,
-  uses its own generated references instead.
+  uses its own generated references instead. Calls through them must also
+  pass exactly the contract's arguments: `slotInterval` on `getDaySlots` and
+  `getMonthAvailability`, and no `scheduleId`, `excludeBookingUid` or extra
+  `createBooking` field, for example. For other argument shapes, call your
+  own `api.public` references.
 - Admin operations resolve only from `adminApi` and are `undefined` without
   it; `publicApi` no longer stands in for them (deprecated in 0.4.3). A
   plain-object `adminApi` no longer overrides public operations, and names
@@ -278,6 +300,14 @@ bumping.
   `end`, `timezone` and `bookerName`, and every other `Booking` field as
   optional. A callback annotated `(booking: Booking) => …` takes `BookingView`
   or drops the annotation. `BookingSuccess` accepts a `BookingView`.
+- Rolling back to 0.4.x: every 0.5.0 emitter queues `triggerHooks` with a
+  new `payloadV2` argument, and hooks registered with `payloadVersion: 2`
+  store it. 0.4.x's `triggerHooks` validator rejects that argument, so each
+  job still queued when 0.4.x deploys fails and the emails and hooks of its
+  event are lost, and Convex refuses the 0.4.x schema while a hook row has
+  `payloadVersion`. Before redeploying 0.4.x, unregister the hooks
+  registered with `payloadVersion: 2` and let the queued `triggerHooks` jobs
+  finish (they run right after their booking write).
 
 ### Fixed
 

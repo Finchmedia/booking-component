@@ -14,7 +14,12 @@ or the CLI, never from clients.
    notes say: map the error codes your clients see and, for the bookings `booking_eligibility`
    listed on the copy, link every resource your bundles use to its event type, create resources
    for IDs booked without one, and resolve pending requests and provisional holds on deactivated
-   or unlinked configuration. The 0.4.x functions make these repairs.
+   or unlinked configuration. Point every event type whose `scheduleId` names a deleted schedule
+   (`event_type_config` lists it as `scheduleId`) to an existing schedule, or clear it with
+   `scheduleId: ""`: from the deploy on, the slot queries throw `SCHEDULE_NOT_FOUND` for it
+   instead of reading 09:00–17:00, and a Booker that forwards it shows its error boundary. Without
+   a copy, find them with `listEventTypes` and `getSchedule` for each `scheduleId`. The 0.4.x
+   functions make these repairs.
 3. Deploy. Convex checks the stored booking statuses and pool counters against the narrowed
    schema and refuses the deploy while a row holds another value, naming the table and document.
    The component never writes such values, so only rows edited in the dashboard or imported can
