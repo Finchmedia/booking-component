@@ -95,8 +95,38 @@ const _allPublicListed: ListsAllOperations<PublicBookingAPI, typeof PUBLIC_OPERA
 const _allAdminListed: ListsAllOperations<AdminBookingAPI, typeof ADMIN_OPERATIONS> = true;
 /* eslint-enable @typescript-eslint/no-unused-vars */
 
-const PUBLIC_KEYS: ReadonlySet<PropertyKey> = new Set(PUBLIC_OPERATIONS);
-const ADMIN_KEYS: ReadonlySet<PropertyKey> = new Set(ADMIN_OPERATIONS);
+// ============================================
+// RESOLUTION
+// ============================================
+
+/**
+ * The API useBookingAPI() returns: every public operation from publicApi,
+ * every admin operation from adminApi, nothing else. Without adminApi the
+ * admin operations are undefined; an operation a gateway lacks is undefined
+ * too. A gateway never supplies the other gateway's operations.
+ */
+function resolveBookingAPI(
+  publicApi: PublicBookingAPI,
+  adminApi?: Partial<AdminBookingAPI>
+): BookingAPI {
+  const resolved: Partial<Record<keyof BookingAPI, unknown>> = {};
+  for (const key of PUBLIC_OPERATIONS) {
+    const reference = publicApi[key];
+    if (reference !== undefined) resolved[key] = reference;
+  }
+  if (adminApi) {
+    for (const key of ADMIN_OPERATIONS) {
+      const reference = adminApi[key];
+      if (reference !== undefined) resolved[key] = reference;
+    }
+  }
+  // The one cast between the host contract and the components. PublicBookingAPI
+  // types the operations the components call as FunctionReference_future, which
+  // checks host arguments the way Convex validators do; convex-helpers' cached
+  // useQuery accepts only a plain FunctionReference. BookingAPI holds the same
+  // references typed as plain references with the same arguments and result.
+  return resolved as BookingAPI;
+}
 
 // ============================================
 // CONTEXT
@@ -132,12 +162,8 @@ export interface BookingProviderProps {
   /**
    * References to your host's administration functions, usually the generated
    * `api.admin`. Optional - only needed for admin components. Admin operations
-   * resolve from here; public operations resolve from publicApi unless a
-   * hand-built adminApi defines them itself.
-   *
-   * Without adminApi (or without a given operation in a hand-built adminApi),
-   * admin operations resolve from publicApi. This fallback is deprecated and
-   * may be removed in 0.5.0; pass adminApi wherever admin operations are used.
+   * resolve only from here: without adminApi they are `undefined`. adminApi
+   * never supplies public operations, even when it defines the same names.
    *
    * @example
    * // In your convex/admin.ts (each function checks the caller's role):
@@ -162,8 +188,9 @@ export interface BookingProviderProps {
  *
  * Components access both through a single `useBookingAPI()` hook. Each
  * operation resolves from the gateway that owns it: PublicBookingAPI names
- * from publicApi, AdminBookingAPI names from adminApi. A hand-built adminApi
- * that defines a public name itself still overrides it.
+ * from publicApi, AdminBookingAPI names from adminApi. Admin operations are
+ * `undefined` without adminApi, and names outside both interfaces are not
+ * passed through.
  *
  * The provider only chooses which function references the UI calls. It is not
  * access control: any client can call any exported Convex function directly.
@@ -208,40 +235,15 @@ export function BookingProvider({
   adminApi,
   children,
 }: BookingProviderProps) {
-  // Merge public and admin APIs using Proxy to preserve Convex's dynamic function references
-  // Note: Spreading Proxy objects (like api.public) doesn't work - it loses the Proxy behavior
-  const mergedApi = useMemo<BookingAPI>(
-    () => {
-      // The operations the components call are typed as FunctionReference_future
-      // in PublicBookingAPI, which checks host arguments the way Convex
-      // validators do; convex-helpers' cached useQuery accepts only a plain
-      // FunctionReference. BookingAPI holds the same references as plain ones.
-      const target = publicApi as unknown as BookingAPI;
-      // Without adminApi every name resolves from publicApi (admin names: deprecated)
-      if (!adminApi) return target;
-      return new Proxy(target, {
-        get(target, prop) {
-          if (PUBLIC_KEYS.has(prop)) {
-            // A plain-object adminApi's own property still overrides, as before;
-            // generated proxies have none, so they never shadow publicApi
-            return Object.prototype.hasOwnProperty.call(adminApi, prop)
-              ? (adminApi as any)[prop]
-              : (target as any)[prop];
-          }
-          if (ADMIN_KEYS.has(prop)) {
-            // Deprecated fallback for a hand-built adminApi without this operation
-            return (adminApi as any)[prop] ?? (target as any)[prop];
-          }
-          // Names outside both interfaces (untyped use) keep the old rule
-          return prop in adminApi ? (adminApi as any)[prop] : (target as any)[prop];
-        },
-      });
-    },
+  // Resolved from the operation lists: a generated api is a proxy that has no
+  // members to spread and returns a reference for any name
+  const api = useMemo(
+    () => resolveBookingAPI(publicApi, adminApi),
     [publicApi, adminApi]
   );
 
   return (
-    <BookingContext.Provider value={mergedApi}>
+    <BookingContext.Provider value={api}>
       {children}
     </BookingContext.Provider>
   );
@@ -250,10 +252,10 @@ export function BookingProvider({
 /**
  * Hook to access the booking API from within a BookingProvider.
  *
- * Returns the merged API object: public operations from publicApi, admin
- * operations from adminApi (see BookingProvider). The operations the components
- * call are typed with the contract's arguments and result views; the others
- * are untyped. Calling a reference does not bypass authorization; your host
+ * Returns the resolved API: public operations from publicApi, admin operations
+ * from adminApi (see BookingProvider). The operations the components call are
+ * typed with the contract's arguments and result views; the others are
+ * untyped. Calling a reference does not bypass authorization; your host
  * functions decide who may run them.
  *
  * @throws Error if used outside of a BookingProvider
@@ -267,7 +269,7 @@ export function BookingProvider({
  * }
  *
  * // Admin UI: render it only inside a provider that has adminApi, and call
- * // hooks unconditionally (a generated reference is never undefined).
+ * // hooks unconditionally (admin operations are undefined without adminApi).
  * function CreateResourceButton() {
  *   const api = useBookingAPI();
  *   const createResource = useMutation(api.createResource!);

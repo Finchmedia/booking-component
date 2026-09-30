@@ -271,6 +271,12 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   result views (`EventTypeView`, `ResourceView`, `BookingView`, …) instead of
   `any`. Code that reads other fields through them, such as `eventType.slug`,
   uses its own generated references instead.
+- Admin operations resolve only from `adminApi` and are `undefined` without
+  it; `publicApi` no longer stands in for them (deprecated in 0.4.3). A
+  plain-object `adminApi` no longer overrides public operations, and names
+  outside `PublicBookingAPI` and `AdminBookingAPI` are no longer passed
+  through. Pass `adminApi={api.admin}` wherever admin operations are used, and
+  call other functions through your own `api`.
 - `Booking.status` is a `string`, like the stored field, so component and host
   booking documents fit `Booking` without a status guard. An exhaustive
   `switch` over the old union needs a default branch.
@@ -286,6 +292,8 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   kind, visibility, arguments or result do not fit is rejected at compile time.
   Host wrappers with extra optional arguments, broader argument types, the
   component's own documents or redacted results with the view fields pass.
+- `BookingProvider` builds the API from its operation lists: public
+  operations from `publicApi`, admin operations from `adminApi`, nothing else.
 
 ### Added
 

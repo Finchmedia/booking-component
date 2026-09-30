@@ -135,6 +135,10 @@ results that keep those fields. Return `null` from `getEventType` and
 no component calls `getBooking` or `getBookingByUid`, so you need not expose
 them.
 
+`adminApi` supplies the admin operations and nothing else: without it,
+`useBookingAPI().createResource` and the other admin operations are
+`undefined`, and `publicApi` never stands in for them.
+
 ## Backend integration
 
 Browser clients call **your host functions**. Those functions check access and

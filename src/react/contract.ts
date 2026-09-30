@@ -309,7 +309,7 @@ export interface AdminBookingAPI {
 }
 
 /**
- * The API useBookingAPI() returns: public operations from publicApi, admin
- * operations from adminApi (see BookingProvider).
+ * The API useBookingAPI() returns. Public operations come from publicApi;
+ * admin operations come from adminApi and are `undefined` without it.
  */
 export type BookingAPI = UIReferences & OptionalPublicOperations & Partial<AdminBookingAPI>;
