@@ -76,7 +76,12 @@ connect your management pages to the returned booking UID and secret token.
 - **Errors:** a failed booking or reschedule appears in an announced alert, on
   the details step or above the calendar for one-click reschedules. Throw
   `ConvexError({ code, message })` from your host functions to show a specific
-  message; other failures show a generic message, never Convex transport text.
+  message. The component's own errors have that shape too, so one your host
+  function lets through shows the component's text; catch it there to word it
+  for your users. An error with a component `code` but no `message` shows a
+  generic text for that code (for example `SLOT_UNAVAILABLE`: "This time is no
+  longer available. Please choose another time."). Other failures show a
+  generic message, never Convex transport text.
   `onBookingError(error, { phase })` also reports each failure to your app. If
   you already toast mutation errors, move that into `onBookingError` so users
   see one message. `UNAUTHENTICATED` goes to `onAuthRequired` when you pass it;

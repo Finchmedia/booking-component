@@ -284,6 +284,11 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   `end`, `timezone` and `bookerName`, and every other `Booking` field as
   optional. A callback annotated `(booking: Booking) => …` takes `BookingView`
   or drops the annotation. `BookingSuccess` accepts a `BookingView`.
+- The Booker shows the text of a component `ConvexError({ code, message })`
+  that your host function lets through, such as a taken slot. Until 0.4.x the
+  component threw plain errors, for which the Booker showed its generic
+  message. To keep other wording, catch the error in your host function and
+  rethrow your own `ConvexError`.
 
 ### Fixed
 
@@ -308,6 +313,11 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   (below).
 - `useBookingValidation` accepts the views, so a host DTO with the read fields
   is enough.
+- A booking or reschedule error that carries a known component `code` but no
+  `message` shows a generic text for that code, for example "This time is no
+  longer available. Please choose another time." for `SLOT_UNAVAILABLE`,
+  instead of "Something went wrong". `data.message` still comes first; unknown
+  codes and plain errors keep the generic message.
 - `BookingProvider` takes `availabilityContext`, off by default. With it on,
   the Calendar and `useConvexSlots` add `eventTypeId` and, while the Booker
   reschedules, `rescheduleContext: { uid, token }` of the booking being moved

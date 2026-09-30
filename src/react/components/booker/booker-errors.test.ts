@@ -197,6 +197,23 @@ describe("Booker submission errors (F3)", () => {
     expect(submitButton().getAttribute("aria-describedby")).toBe(alert.id);
   });
 
+  it("shows a generic text for a known error code without a message (N3)", async () => {
+    mocks.create.mockRejectedValueOnce(clientError({ code: "SLOT_UNAVAILABLE" }));
+    renderBooker();
+    fireEvent.click(slotButton(SLOT_A));
+    fillContact();
+    submitForm();
+    await settle();
+    expect(screen.getByRole("alert").textContent).toBe("This time is no longer available. Please choose another time.");
+    expect(document.body.textContent).not.toContain("CONVEX");
+
+    // CONTROL: the component's own error carries its text, which wins
+    mocks.create.mockRejectedValueOnce(clientError({ code: "SLOT_UNAVAILABLE", message: "Slot not available" }));
+    submitForm();
+    await settle();
+    expect(screen.getByRole("alert").textContent).toBe("Slot not available");
+  });
+
   it("shows a generic message for a plain server error instead of 'Server Error'", async () => {
     mocks.create.mockRejectedValue(new Error("Server Error"));
     renderBooker();
