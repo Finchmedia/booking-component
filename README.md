@@ -347,9 +347,10 @@ shows how and lists every check with its repair.
   local time that does not exist is not offered, a repeated one means its first
   occurrence, and a window closes when its last existing quarter hour ends, so
   bookings end by then. Before upgrading from 0.4.2 or earlier, check your
-  event-type lengths. After upgrading, run the `maintenance.audit` checks,
-  which also list the stored configuration and bookings 0.5.0 treats
-  differently; see the CHANGELOG and
+  event-type lengths. The `maintenance.audit` checks list the stored
+  configuration and bookings 0.5.0 treats differently, such as bookings it
+  will not move or confirm: run them with 0.5.0 on a copy of your data
+  before upgrading, and on production after; see the CHANGELOG and
   [maintenance](https://github.com/Finchmedia/booking-component/blob/main/docs/maintenance.md).
 - **Bundles and pools:** reserve several resources atomically through the
   [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).

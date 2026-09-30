@@ -15,6 +15,7 @@ export const {
   createResource,
   createEventType,
   linkResourceToEventType,
+  unlinkResourceFromEventType,
   hasResourceEventTypeLink,
   getEffectiveAvailability,
   getDaySlots,
@@ -36,6 +37,7 @@ const testApi = (
       createResource: typeof createResource;
       createEventType: typeof createEventType;
       linkResourceToEventType: typeof linkResourceToEventType;
+      unlinkResourceFromEventType: typeof unlinkResourceFromEventType;
       hasResourceEventTypeLink: typeof hasResourceEventTypeLink;
       getEffectiveAvailability: typeof getEffectiveAvailability;
       getDaySlots: typeof getDaySlots;
@@ -217,6 +219,25 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     await expect(t.query(testApi.audit, { check: "f10_weekday", limit: 0 })).rejects.toThrow(
       "limit must be an integer from 1 to 500"
     );
+  });
+
+  test("booking_eligibility via the maintenance wrapper", async () => {
+    await seedThroughWrappers(t);
+    const booking = await bookTenToEleven(t);
+    // CONTROL: a booking that follows the rules is not listed.
+    expect(await t.query(testApi.audit, { check: "booking_eligibility", limit: 10 })).toMatchObject({ issues: [], scanned: 1 });
+    await t.mutation(testApi.unlinkResourceFromEventType, { resourceId: RESOURCE, eventTypeId: EVENT });
+    expect((await t.query(testApi.audit, { check: "booking_eligibility", limit: 10 })).issues).toEqual([
+      {
+        check: "booking_eligibility",
+        uid: booking.uid,
+        status: "confirmed",
+        start: TEN_BERLIN,
+        eventTypeId: EVENT,
+        resourceIds: [RESOURCE],
+        problems: ["resourceNotLinked"],
+      },
+    ]);
   });
 
   test("listBookingsPage via the booking wrapper: pages across the component boundary", async () => {

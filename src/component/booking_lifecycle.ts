@@ -35,7 +35,8 @@ import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 // rules: none beyond the pool guard.
 //
 // "single" texts are the ones createBooking has always used; "bundle" texts
-// name the offending ids.
+// name the offending ids. bookingRuleProblems reports the same rules for the
+// audit without throwing.
 
 type RuleTexts = "single" | "bundle";
 
@@ -196,6 +197,84 @@ export async function assertStillBookable(
   const organizationId = await assertResourcesBookable(ctx, eventType, resourceIds, texts);
   assertOrganizationOfResources(eventType, booking.organizationId, organizationId, resourceIds[0]);
   return eventType;
+}
+
+/** A booking rule a stored booking fails; see bookingRuleProblems. */
+export type BookingRuleProblem =
+  | "eventTypeMissing"
+  | "eventTypeInactive"
+  | "resourceMissing"
+  | "resourceInactive"
+  | "resourceNotLinked"
+  | "crossOrganization"
+  | "noStandalone";
+
+const RULE_PROBLEMS: readonly BookingRuleProblem[] = [
+  "eventTypeMissing",
+  "eventTypeInactive",
+  "resourceMissing",
+  "resourceInactive",
+  "resourceNotLinked",
+  "crossOrganization",
+  "noStandalone",
+];
+
+/** Configuration reads by external id (the audit caches them per page). */
+export type RuleLookups = {
+  eventType(id: string): Promise<Doc<"event_types"> | null>;
+  resource(id: string): Promise<Doc<"resources"> | null>;
+  linked(resourceId: string, eventTypeId: string): Promise<boolean>;
+};
+
+/**
+ * The rules assertStillBookable applies to `booking` and its resources (its
+ * booking_items, else its resource), as every rule it fails instead of the
+ * first error: what a move or confirmation of the booking would be rejected
+ * for today. Legacy rows fail none. `crossOrganization` covers a resource of
+ * another organization than the event type, resources of two organizations,
+ * and a stored organization that is not the resources' one (event types
+ * without organization). `noStandalone` is reported only when every
+ * resource exists and none is standalone, so that repairing the other
+ * problems would not be enough.
+ */
+export async function bookingRuleProblems(
+  find: RuleLookups,
+  booking: Doc<"bookings">,
+  resourceIds: string[],
+): Promise<BookingRuleProblem[]> {
+  if (booking.eventTypeId === "legacy") return [];
+  const found = new Set<BookingRuleProblem>();
+  const eventType = await find.eventType(booking.eventTypeId);
+  if (!eventType) found.add("eventTypeMissing");
+  else if (!isActiveEventType(eventType)) found.add("eventTypeInactive");
+
+  let hasStandaloneResource = false;
+  let first: Doc<"resources"> | undefined;
+  for (const resourceId of resourceIds) {
+    const resource = await find.resource(resourceId);
+    if (!resource) {
+      found.add("resourceMissing");
+      continue;
+    }
+    if (!isActiveResource(resource)) found.add("resourceInactive");
+    if (isStandaloneResource(resource)) hasStandaloneResource = true;
+    first ??= resource;
+    if (resource.organizationId !== first.organizationId) found.add("crossOrganization");
+    if (!eventType) continue;
+    if (!(await find.linked(resourceId, eventType.id))) found.add("resourceNotLinked");
+    if (!sharesOrganization(resource, eventType)) found.add("crossOrganization");
+  }
+  if (
+    eventType &&
+    eventType.organizationId === undefined &&
+    first !== undefined &&
+    booking.organizationId !== undefined &&
+    booking.organizationId !== first.organizationId
+  ) {
+    found.add("crossOrganization");
+  }
+  if (!hasStandaloneResource && !found.has("resourceMissing")) found.add("noStandalone");
+  return RULE_PROBLEMS.filter((problem) => found.has(problem));
 }
 
 /**

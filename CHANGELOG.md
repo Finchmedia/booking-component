@@ -11,17 +11,22 @@ bumping.
 
 ### Upgrading
 
-- Seven new `maintenance.audit` checks list the stored rows 0.5.0 rejects on
-  write, reads differently or cannot move (PR-38): `event_type_config`,
-  `schedule_config`, `resource_config`, `date_override_config`,
-  `link_integrity`, `booking_integrity` and `booking_status_invalid`, each
-  issue with its `problems`. They only read. Run every check right after
-  deploying, or first on a deployment with a copy of your data, paging with
-  `continueCursor` until `isDone`, and repair what they list as the entries
-  below and [docs/maintenance.md](docs/maintenance.md) describe.
-  `booking_status_invalid` ships with the narrowed schema, so it can only
-  confirm what the deploy itself checks (see the status entry).
-  `makeInternalBookingAPI().audit` takes every check.
+- Eight new `maintenance.audit` checks list the stored rows 0.5.0 rejects on
+  write, reads differently, or will not move or confirm (PR-38):
+  `event_type_config`, `schedule_config`, `resource_config`,
+  `date_override_config`, `link_integrity`, `booking_integrity`,
+  `booking_eligibility` and `booking_status_invalid`, each issue with its
+  `problems`. They only read, and they ship with 0.5.0 (0.4.x has only
+  `f10_weekday` and `event_length_invalid`), so the steps "before upgrading"
+  below need 0.5.0 deployed against a copy of your data: import a snapshot of
+  production into a separate deployment, deploy your host with 0.5.0 there,
+  run every check (paging with `continueCursor` until `isDone`), repair what
+  they list in production with the 0.4.x functions the entries below and
+  [docs/maintenance.md](docs/maintenance.md) name, and run every check on
+  production again right after deploying. `booking_status_invalid` ships
+  with the narrowed schema, so it can only confirm what the deploy itself
+  checks (see the status entry). `makeInternalBookingAPI().audit` takes
+  every check.
 - Expected failures throw `ConvexError({ code, message })` instead of a plain
   `Error` (N3). `message` is the 0.4.x text, unchanged; `code` is one of the
   codes in [docs/errors.md](docs/errors.md); other failures stay plain
@@ -94,21 +99,28 @@ bumping.
   reschedule mutations and `transitionBookingState` to `confirmed` require an
   existing, active event type and existing, active resources that are linked
   to it and belong to its organization when it has one, one of them not an
-  add-on. New for bundles: unknown resource IDs are rejected
-  (`RESOURCE_NOT_FOUND`) instead of reserving a one-unit row, pools must be
-  linked like other items, only eligible items satisfy the add-on rule, and
-  the rules come before capacity (an add-on alone on a taken slot reports
-  `RESOURCE_NOT_STANDALONE`). New for moves, by token and by ID alike (no
-  administrator override), and for confirming a provisional hold or
-  approving a pending request: the same check over every item, before
-  anything is released. Cancelling, declining and expiring are never
-  checked, and deactivating never ends a booking. Legacy `createReservation`
-  and its bookings stay exempt. Before upgrading, link every resource your
-  bundles use (pools included) to the event type, create resources for IDs
-  you booked without one, and resolve pending requests and provisional holds
-  on deactivated or unlinked configuration; afterwards, reactivate or relink
-  before moving or confirming such a booking. [docs/errors.md](docs/errors.md)
-  lists the codes per function.
+  add-on. For bundles the whole rule set is new, since 0.4.x checked only
+  that the event type existed: the event type must be active, and every item
+  must exist (unknown resource IDs are rejected with `RESOURCE_NOT_FOUND`
+  instead of reserving a one-unit row), be active, be linked to the event
+  type (pools included) and share its organization; only eligible items
+  satisfy the add-on rule, and the rules come before capacity (an add-on
+  alone on a taken slot reports `RESOURCE_NOT_STANDALONE`). New for moves,
+  by token and by ID alike (no administrator override), and for confirming a
+  provisional hold or approving a pending request: the same check over every
+  item, before anything is released. Cancelling, declining and expiring are
+  never checked, and deactivating never ends a booking. Legacy
+  `createReservation` and its bookings stay exempt. The new
+  `booking_eligibility` check lists the active bookings these rules reject,
+  with their problems (`eventTypeMissing`, `eventTypeInactive`,
+  `resourceMissing`, `resourceInactive`, `resourceNotLinked`,
+  `crossOrganization`, `noStandalone`). Before upgrading, run it on a copy
+  (see the audit entry), then link every resource your bundles use (pools
+  included) to the event type, create resources for IDs you booked without
+  one, and resolve pending requests and provisional holds on deactivated or
+  unlinked configuration; afterwards, reactivate or relink before moving or
+  confirming such a booking. [docs/errors.md](docs/errors.md) lists the
+  codes per function.
 - No bookings across organizations (N13, F7): a booking belongs to its event
   type's organization. An event type with an `organizationId` links only
   resources of that organization: `linkResourceToEventType`,

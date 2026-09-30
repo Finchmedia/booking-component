@@ -150,6 +150,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | "date_override_config"
             | "link_integrity"
             | "booking_integrity"
+            | "booking_eligibility"
             | "booking_status_invalid";
           cursor?: string | null;
           limit: number;
@@ -222,6 +223,29 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                   | "organizationMismatch"
                   | "poolWithoutItems"
                 >;
+                uid: string;
+              }
+            | {
+                check: "booking_eligibility";
+                eventTypeId: string;
+                problems: Array<
+                  | "eventTypeMissing"
+                  | "eventTypeInactive"
+                  | "resourceMissing"
+                  | "resourceInactive"
+                  | "resourceNotLinked"
+                  | "crossOrganization"
+                  | "noStandalone"
+                >;
+                resourceIds: Array<string>;
+                start: number;
+                status:
+                  | "provisional"
+                  | "pending"
+                  | "confirmed"
+                  | "cancelled"
+                  | "declined"
+                  | "completed";
                 uid: string;
               }
             | {

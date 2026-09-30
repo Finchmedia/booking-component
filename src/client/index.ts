@@ -859,6 +859,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
           v.literal("date_override_config"),
           v.literal("link_integrity"),
           v.literal("booking_integrity"),
+          v.literal("booking_eligibility"),
           v.literal("booking_status_invalid"),
         ),
         cursor: v.optional(v.union(v.string(), v.null())),

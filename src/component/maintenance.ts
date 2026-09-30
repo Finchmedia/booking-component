@@ -29,7 +29,8 @@ import {
 import type { Doc, Id } from "./_generated/dataModel";
 import { parseCivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
-import { isBookingStatus } from "../shared/booking-status.js";
+import { bookingStatusValidator, isBookingStatus } from "../shared/booking-status.js";
+import { bookingRuleProblems } from "./booking_lifecycle";
 import { holdsActiveInventory } from "./inventory_helpers";
 import {
   isLengthOutsideOptions,
@@ -38,7 +39,7 @@ import {
   isValidTimeZone,
   isWholePositiveMinutes,
 } from "./input_validation";
-import { sharesOrganization } from "./resource_event_types";
+import { isLinked, sharesOrganization } from "./resource_event_types";
 import { getScheduleByExternalId, getWeeklySlots } from "./schedules";
 import { getLocalDateAndSlot } from "./utils";
 
@@ -187,7 +188,7 @@ export const getDailyAvailability = query({
  * Largest `limit` of one audit call. A row costs at most one read of its own
  * (an override, its link pair) or, for a booking, its items (one per bundle
  * item) or history rows (one per status change), plus lookups of the event
- * types, resources and schedules it names, each once per page.
+ * types, resources, schedules and links it names, each once per page.
  */
 const MAX_AUDIT_LIMIT = 500;
 
@@ -338,6 +339,23 @@ const auditIssue = v.union(
     problems: problems("organizationMissing", "organizationMismatch", "poolWithoutItems"),
   }),
   v.object({
+    check: v.literal("booking_eligibility"),
+    uid: v.string(),
+    status: bookingStatusValidator,
+    start: v.number(),
+    eventTypeId: v.string(),
+    resourceIds: v.array(v.string()),
+    problems: problems(
+      "eventTypeMissing",
+      "eventTypeInactive",
+      "resourceMissing",
+      "resourceInactive",
+      "resourceNotLinked",
+      "crossOrganization",
+      "noStandalone"
+    ),
+  }),
+  v.object({
     check: v.literal("booking_status_invalid"),
     uid: v.string(),
     // The stored value, which may be outside BOOKING_STATUSES.
@@ -457,10 +475,15 @@ function perPage<V>(load: (key: string) => Promise<V>): (key: string) => Promise
 
 /** Configuration rows by external id, tolerant of duplicates (`first`). */
 function lookups(db: DatabaseReader) {
+  const linkedPair = perPage((pair) => {
+    const [resourceId, eventTypeId] = JSON.parse(pair) as [string, string];
+    return isLinked(db, resourceId, eventTypeId);
+  });
   return {
     eventType: perPage((id) => db.query("event_types").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
     resource: perPage((id) => db.query("resources").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
     schedule: perPage((id) => db.query("schedules").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
+    linked: (resourceId: string, eventTypeId: string) => linkedPair(JSON.stringify([resourceId, eventTypeId])),
   };
 }
 
@@ -593,6 +616,32 @@ async function bookingIntegrityIssue(
 }
 
 /**
+ * booking_eligibility: an active booking (pending, confirmed or
+ * provisional; legacy rows are exempt) that fails the booking rules today,
+ * so moving or confirming it is rejected (see bookingRuleProblems). The issue names the event type and the
+ * resources the booking holds.
+ */
+async function bookingEligibilityIssue(
+  db: DatabaseReader,
+  booking: Doc<"bookings">,
+  find: Lookups
+): Promise<AuditIssue | null> {
+  if (!holdsActiveInventory(booking.status) || booking.eventTypeId === "legacy") return null;
+  const resourceIds = heldResourceIds(booking, await bookingItems(db, booking._id));
+  const found = await bookingRuleProblems(find, booking, resourceIds);
+  if (found.length === 0) return null;
+  return {
+    check: "booking_eligibility",
+    uid: booking.uid,
+    status: booking.status,
+    start: booking.start,
+    eventTypeId: booking.eventTypeId,
+    resourceIds,
+    problems: found,
+  };
+}
+
+/**
  * booking_status_invalid: a status outside BOOKING_STATUSES on the booking
  * (`status`) or on one of its history rows (`historyStatus`; a history
  * `fromStatus` may also be "", the creation entry). The component writes
@@ -650,7 +699,7 @@ async function auditPage<T extends AuditTable>(
 /**
  * Read-only upgrade audit, one check and one page of rows per call. Run
  * every check before upgrading to 0.5.0: each reports stored rows that
- * 0.5.0 rejects on write, reads differently or cannot move.
+ * 0.5.0 rejects on write, reads differently or cannot move or confirm.
  * - "f10_weekday" (bookings): upcoming pending, confirmed or provisional
  *   bookings that 0.4.2 admitted on a weekday without opening hours
  *   (schedules at UTC+12 or beyond used the next weekday's hours). The
@@ -661,10 +710,10 @@ async function auditPage<T extends AuditTable>(
  *   availability queries reject such lengths since 0.4.3.
  * - "event_type_config" (event types), "schedule_config" (schedules),
  *   "resource_config" (resources), "date_override_config" (date overrides),
- *   "link_integrity" (resource ↔ event type links), "booking_integrity"
- *   (bookings, with their items) and "booking_status_invalid" (bookings,
- *   with their history rows): each issue lists its `problems`; see the
- *   functions above.
+ *   "link_integrity" (resource ↔ event type links), "booking_integrity",
+ *   "booking_eligibility" (bookings, with their items) and
+ *   "booking_status_invalid" (bookings, with their history rows): each
+ *   issue lists its `problems`; see the functions above.
  *
  * Start without a cursor and pass `continueCursor` back until `isDone`; the
  * cursor is the complete by_creation_time key, so rows with equal creation
@@ -683,6 +732,7 @@ export const audit = query({
       v.literal("date_override_config"),
       v.literal("link_integrity"),
       v.literal("booking_integrity"),
+      v.literal("booking_eligibility"),
       v.literal("booking_status_invalid")
     ),
     cursor: v.optional(v.union(v.string(), v.null())),
@@ -719,6 +769,8 @@ export const audit = query({
         return await auditPage(ctx.db, "resource_event_types", args, (link) => linkIssue(ctx.db, link, find));
       case "booking_integrity":
         return await auditPage(ctx.db, "bookings", args, (booking) => bookingIntegrityIssue(ctx.db, booking, find));
+      case "booking_eligibility":
+        return await auditPage(ctx.db, "bookings", args, (booking) => bookingEligibilityIssue(ctx.db, booking, find));
       case "booking_status_invalid":
         return await auditPage(ctx.db, "bookings", args, (booking) => bookingStatusIssue(ctx.db, booking));
     }
