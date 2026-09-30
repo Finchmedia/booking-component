@@ -517,11 +517,11 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   `listDateOverrides` without bounds, recreate them padded and delete the old rows.
 - The built-in email HTML changes (escaped text, validated buttons; see Security), so
   host snapshot tests of it may need updating. Email jobs queued by 0.4.2 still run.
-- The `bookings` index `by_event_type` becomes `by_event_type_start`, which Convex
+- The `bookings` index `by_event_type` becomes `by_eventTypeId_and_start`, which Convex
   builds during the deploy (allow time on a large table); `schedules` gains
-  `by_org_default`, so `getDefaultSchedule` and the audit read one schedule, not all of
-  an organization's. Booking documents can carry the new optional `rescheduledToUid`;
-  host validators of booking fields must accept it.
+  `by_organizationId_and_isDefault`, so `getDefaultSchedule` and the audit read one
+  schedule, not all of an organization's. Booking documents can carry the new optional
+  `rescheduledToUid`; host validators of booking fields must accept it.
 - The Booker now shows booking errors itself; hosts that also toast them (for example by
   wrapping mutations) show two messages, so drop that or move it to `onBookingError`.
   Throw `ConvexError({ code, message })` from host functions for a specific message.

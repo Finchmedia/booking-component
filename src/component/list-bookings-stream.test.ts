@@ -7,8 +7,8 @@
  * limit: 10 }` read the organization's entire history. The event-type branch
  * read `by_event_type`, where dates could not narrow the range at all. With a
  * positive integer limit the branches now stream their range and stop once
- * enough bookings match; `by_event_type_start` narrows the event-type range by
- * date. The output is identical to before for every argument combination,
+ * enough bookings match; `by_eventTypeId_and_start` narrows the event-type range
+ * by date. The output is identical to before for every argument combination,
  * including the order of equal starts (newest-created first, oldest-created
  * first in the event-type branch). Checked here against a copy of the 0.4.2
  * implementation. Since 0.5.0 (D23) limits that are not positive integers
@@ -132,11 +132,11 @@ async function listBookingsBefore(ctx: any, args: Args): Promise<Booking[]> {
   } else if (args.eventTypeId) {
     // 0.4.2 read the whole range of `by_event_type` (["eventTypeId"], removed
     // in 0.4.3), which yields creation order: the same rows, from
-    // by_event_type_start without a date bound, put back into that order.
+    // by_eventTypeId_and_start without a date bound, put back into that order.
     const eventTypeId = args.eventTypeId;
     const rows: Booking[] = await ctx.db
       .query("bookings")
-      .withIndex("by_event_type_start", (q: any) => q.eq("eventTypeId", eventTypeId))
+      .withIndex("by_eventTypeId_and_start", (q: any) => q.eq("eventTypeId", eventTypeId))
       .collect();
     bookings = rows.sort((a, b) => a._creationTime - b._creationTime);
   } else {
@@ -162,7 +162,7 @@ async function rangeOf(ctx: any, args: Args): Promise<Booking[] | null> {
     : args.resourceId
       ? ["by_resource_start", "resourceId", args.resourceId]
       : args.eventTypeId
-        ? ["by_event_type_start", "eventTypeId", args.eventTypeId]
+        ? ["by_eventTypeId_and_start", "eventTypeId", args.eventTypeId]
         : [];
   if (!index) return null;
   return await ctx.db

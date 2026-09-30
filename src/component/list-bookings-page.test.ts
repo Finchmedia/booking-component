@@ -70,7 +70,7 @@ async function reference(ctx: QueryCtx, args: PageArgs): Promise<string[]> {
       ? (["by_org_start", "organizationId", args.organizationId] as const)
       : "resourceId" in args
         ? (["by_resource_start", "resourceId", args.resourceId] as const)
-        : (["by_event_type_start", "eventTypeId", args.eventTypeId] as const);
+        : (["by_eventTypeId_and_start", "eventTypeId", args.eventTypeId] as const);
   const rows: Booking[] = await ctx.db
     .query("bookings")
     .withIndex(index, (q: any) => {

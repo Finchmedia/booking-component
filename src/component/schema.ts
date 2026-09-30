@@ -56,7 +56,7 @@ export default defineSchema({
     .index("by_external_id", ["id"])
     .index("by_org", ["organizationId"])
     // An organization's default schedule without reading its other schedules.
-    .index("by_org_default", ["organizationId", "isDefault"]),
+    .index("by_organizationId_and_isDefault", ["organizationId", "isDefault"]),
 
   // Date overrides (holidays, custom hours)
   date_overrides: defineTable({
@@ -201,11 +201,11 @@ export default defineSchema({
   })
     // listBookings ranges on `start` (dateFrom/dateTo) and reads newest-first
     // straight out of these three compound indexes; by_resource_start and
-    // by_event_type_start also serve the deleteResource / deleteEventType
+    // by_eventTypeId_and_start also serve the deleteResource / deleteEventType
     // existence probes as prefix queries.
     .index("by_org_start", ["organizationId", "start"])
     .index("by_resource_start", ["resourceId", "start"])
-    .index("by_event_type_start", ["eventTypeId", "start"])
+    .index("by_eventTypeId_and_start", ["eventTypeId", "start"])
     .index("by_uid", ["uid"]),
 
   // Booking items (for multi-resource bookings)

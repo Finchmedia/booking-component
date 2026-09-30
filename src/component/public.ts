@@ -1294,7 +1294,7 @@ export const deleteEventType = mutation({
     // Check for existing bookings
     const bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_event_type_start", (q) => q.eq("eventTypeId", args.id))
+      .withIndex("by_eventTypeId_and_start", (q) => q.eq("eventTypeId", args.id))
       .first();
 
     if (bookings) {
@@ -1419,7 +1419,7 @@ function bookingsInRange(ctx: QueryCtx, args: ListBookingsArgs, order: "asc" | "
   }
   if (eventTypeId) {
     return bookings
-      .withIndex("by_event_type_start", (q) => {
+      .withIndex("by_eventTypeId_and_start", (q) => {
         const byEventType = q.eq("eventTypeId", eventTypeId);
         const from = dateFrom !== undefined ? byEventType.gte("start", dateFrom) : byEventType;
         return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -1478,14 +1478,14 @@ async function firstMatching(
  *
  * Pass `organizationId`, `resourceId` or `eventTypeId` (tried in that order):
  * the branch reads the `by_org_start` / `by_resource_start` /
- * `by_event_type_start` index, so `dateFrom` / `dateTo` narrow the index range
- * itself and the scan is proportional to the window. With a `limit` the scan
- * also stops once `limit` bookings match, so it reads the limit plus the rows
- * the other filters skip (for `eventTypeId`, plus the rest of the bookings
- * sharing the last one's `start`). Without a limit it reads the whole range;
- * listBookingsPage pages through a range instead. `limit` must be a positive
- * integer (0.5.0; INVALID_INPUT otherwise, where 0.4.x read 0 as no limit).
- * Bookings with equal `start` come newest-created first, except in the
+ * `by_eventTypeId_and_start` index, so `dateFrom` / `dateTo` narrow the index
+ * range itself and the scan is proportional to the window. With a `limit` the
+ * scan also stops once `limit` bookings match, so it reads the limit plus the
+ * rows the other filters skip (for `eventTypeId`, plus the rest of the
+ * bookings sharing the last one's `start`). Without a limit it reads the whole
+ * range; listBookingsPage pages through a range instead. `limit` must be a
+ * positive integer (0.5.0; INVALID_INPUT otherwise, where 0.4.x read 0 as no
+ * limit). Bookings with equal `start` come newest-created first, except in the
  * `eventTypeId` branch, where they come oldest-created first.
  *
  * `resourceId` matches a booking's primary resource: a bundle is listed under
@@ -1600,7 +1600,7 @@ function bookingPageStream(ctx: QueryCtx, { field, value }: PageSelector, args: 
       .order("desc");
   }
   return bookings
-    .withIndex("by_event_type_start", (q) => {
+    .withIndex("by_eventTypeId_and_start", (q) => {
       const byEventType = q.eq("eventTypeId", value);
       const from = dateFrom !== undefined ? byEventType.gte("start", dateFrom) : byEventType;
       return dateTo !== undefined ? from.lte("start", dateTo) : from;
