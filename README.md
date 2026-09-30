@@ -77,6 +77,22 @@ Pass `onEventTypeReset(recovery)` and `onNavigate(path, recovery)` to offer a wa
 back; map `recovery` (`"select-event-type"` or `"select-resource"`) to your own
 routes.
 
+The Booker and Calendar treat a `null` event type as deleted. Until 0.5.0 the
+component's `getEventType` throws `Event type not found: <id>` instead, so make
+your public `getEventType` wrapper return `null` for that error:
+
+```ts
+try {
+  return await ctx.runQuery(components.booking.public.getEventType, args);
+} catch (error) {
+  if (error instanceof Error && error.message.includes("Event type not found")) return null;
+  throw error;
+}
+```
+
+Like any Convex `useQuery` consumer, the Booker rethrows other query errors
+during rendering, so place it inside an error boundary.
+
 ## Backend integration
 
 Browser clients call **your host functions**. Those functions check access and

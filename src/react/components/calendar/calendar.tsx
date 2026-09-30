@@ -6,8 +6,10 @@ import { CalendarGrid } from "./calendar-grid.js";
 import { TimeSlotsPanel } from "./time-slots-panel.js";
 import { EventMetaPanel } from "./event-meta-panel.js";
 import { CalendarSkeleton } from "./calendar-skeleton.js";
+import { BookingErrorDialog } from "../booker/booking-error-dialog.js";
 import { useBookingAPI } from "../../context.js";
 import { useConvexSlots } from "../../hooks/use-convex-slots.js";
+import { eventDeletedError } from "../../hooks/use-booking-validation.js";
 import { useIntersectionObserver } from "../../hooks/use-intersection-observer.js";
 import { fromLocalFields, toLocalMidnight, todayIn } from "../../utils/civil-date.js";
 
@@ -46,6 +48,12 @@ export const Calendar: React.FC<CalendarProps> = (props) => {
   // Show loading state if event type is still loading
   if (eventType === undefined) {
     return <CalendarSkeleton />;
+  }
+
+  // A missing event type (the host's getEventType resolved null) cannot be
+  // booked: show the "deleted" notice instead of its calendar
+  if (eventType === null) {
+    return <BookingErrorDialog error={eventDeletedError(props.resourceId)} />;
   }
 
   return <CalendarContent {...props} eventType={eventType} />;

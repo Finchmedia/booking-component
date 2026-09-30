@@ -218,6 +218,10 @@
   call. Host functions enforce access; booking reads must check the management
   token or the caller's ownership and must not return `managementToken` to
   anonymous callers.
+- `Calendar` shows the "event type has been deleted" notice when `getEventType`
+  resolves to `null`, including after a valid event type is deleted, instead of
+  a calendar for the missing event type. The Booker already showed its
+  event-deleted recovery for `null`.
 
 ### Added
 
@@ -288,6 +292,11 @@
 - Without usable `sessionStorage` the presence session ID is kept in memory,
   so it changes on reload: until it expires (about 10 seconds), the visitor's
   own earlier hold shows as another session's.
+- The Booker's event-deleted recovery needs `getEventType` to resolve to `null`
+  for a missing event type, but until 0.5.0 the component's `getEventType`
+  throws `Event type not found`. Make your public wrapper return `null` for
+  that error (see the README) and render the Booker inside an error boundary;
+  otherwise the error reaches the boundary or the framework's error page.
 - A hand-built (plain-object) `adminApi` that carries a public operation name,
   such as `getEventType`, no longer overrides `publicApi` for it. Names outside
   both interfaces still come from `adminApi` when it has them.

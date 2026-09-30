@@ -37,6 +37,20 @@ export interface ValidationResult {
 }
 
 /**
+ * @internal The error for a missing event type: the host's getEventType
+ * resolved to null. Shared by the Booker's validation and the Calendar.
+ */
+export function eventDeletedError(resourceId: string): ValidationError {
+  return {
+    type: "event_deleted",
+    recovery: "select-event-type",
+    message:
+      "This event type has been deleted and is no longer available for booking.",
+    recoveryPath: `/book/${resourceId}`,
+  };
+}
+
+/**
  * Validates booking flow state reactively.
  * Monitors event type, resource, and link state for mid-booking changes.
  *
@@ -66,16 +80,7 @@ export function useBookingValidation(
 
     // 1. Event type deleted
     if (eventType === null) {
-      return {
-        status: "error",
-        error: {
-          type: "event_deleted",
-          recovery: "select-event-type",
-          message:
-            "This event type has been deleted and is no longer available for booking.",
-          recoveryPath: `/book/${resourceId}`,
-        },
-      };
+      return { status: "error", error: eventDeletedError(resourceId) };
     }
 
     // 2. Event type deactivated
