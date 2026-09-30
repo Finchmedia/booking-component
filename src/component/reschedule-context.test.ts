@@ -16,9 +16,13 @@ import { api } from "./_generated/api.js";
 import {
   BOOKER,
   LOCATION,
+  ORG,
   TUESDAY,
   berlin,
   book,
+  getBusySlots,
+  range,
+  seedFungibleResource,
   seedResource,
   seedResourceWithSchedule,
   setup,
@@ -49,9 +53,9 @@ async function day(t: T, s: SeededSchedule, extra: Extra = {}, resourceId = s.re
   return slots.map((slot) => slot.time);
 }
 
-async function month(t: T, s: SeededSchedule, extra: Extra = {}): Promise<boolean> {
+async function month(t: T, s: SeededSchedule, extra: Extra = {}, resourceId = s.resourceId): Promise<boolean> {
   const days = await t.query(api.public.getMonthAvailability, {
-    resourceId: s.resourceId, dateFrom: TUESDAY, dateTo: TUESDAY, eventLength: 60, slotInterval: 30,
+    resourceId, dateFrom: TUESDAY, dateTo: TUESDAY, eventLength: 60, slotInterval: 30,
     scheduleId: s.scheduleId, ...extra,
   });
   return days[TUESDAY];
@@ -174,6 +178,92 @@ describe("another booking is never excluded", () => {
     await book(t, s, ...hour("09:00"));
     expect(await day(t, s, {})).toEqual([]);
     expect(await month(t, s, {})).toBe(false);
+  });
+});
+
+describe("bundles: every resource the booking holds", () => {
+  // A bundle's resourceId is only its first item; 0.5.0 excluded nothing on
+  // the others, so a move the mutations accept was not offered there.
+  const BEA = { name: "Bea", email: "bea@example.com" };
+
+  /** res-1 (room), res-2 (room), projector (add-on) and pool-1 (2 units), all linked to et-1. */
+  async function seedBundles(weeklyHours: WeeklyHours) {
+    const s = await seed(t, weeklyHours);
+    await t.mutation(api.resources.createResource, {
+      id: "projector", organizationId: ORG, name: "Projector", type: "equipment", timezone: s.timezone, isStandalone: false,
+    });
+    await t.mutation(api.resources.createResource, { id: "res-2", organizationId: ORG, name: "Room 2", type: "room", timezone: s.timezone });
+    for (const resourceId of ["projector", "res-2"]) {
+      await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId, eventTypeId: s.eventTypeId });
+    }
+    await seedFungibleResource(t, { quantity: 2, eventTypeId: s.eventTypeId });
+    return s;
+  }
+
+  function bundleAt(s: SeededSchedule, time: string, resources: Array<{ resourceId: string; quantity?: number }>, booker = BOOKER) {
+    return t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId: s.eventTypeId, resources, start: hour(time)[0], end: hour(time)[1], timezone: s.timezone, booker, location: LOCATION,
+    });
+  }
+
+  test("on a secondary item a valid credential frees the booking's own slots, and the move is accepted", async () => {
+    const s = await seedBundles(NARROW);
+    const a = await bundleAt(s, "09:00", [{ resourceId: s.resourceId }, { resourceId: "projector" }, { resourceId: "pool-1", quantity: 1 }]);
+    // Another bundle takes the pool's second unit for 09:30–10:30.
+    await bundleAt(s, "09:30", [{ resourceId: "res-2" }, { resourceId: "pool-1", quantity: 1 }], BEA);
+    // CONTROL: without a credential A blocks both starts on its projector.
+    expect(await day(t, s, {}, "projector")).toEqual([]);
+    expect(await month(t, s, {}, "projector")).toBe(false);
+
+    const rescheduleContext = contextOf(a);
+    const both = [iso("09:00"), iso("09:30")];
+    expect(await day(t, s, { rescheduleContext }, "projector")).toEqual(both);
+    expect(await month(t, s, { rescheduleContext }, "projector")).toBe(true);
+    expect(await day(t, s, { excludeBookingUid: a.uid }, "projector")).toEqual(both);
+    expect(await month(t, s, { excludeBookingUid: a.uid }, "projector")).toBe(true);
+    const wrongToken = { uid: a.uid, token: "0".repeat(64) };
+    expect(await day(t, s, { rescheduleContext: wrongToken }, "projector")).toEqual([]);
+    expect(await month(t, s, { rescheduleContext: wrongToken }, "projector")).toBe(false);
+    // CONTROL: the primary resource is freed as before.
+    expect(await day(t, s, {}, s.resourceId)).toEqual([]);
+    expect(await day(t, s, { rescheduleContext }, s.resourceId)).toEqual(both);
+    // The slot queries offer no times on a pool, with a credential or without.
+    expect(await day(t, s, { rescheduleContext }, "pool-1")).toEqual([]);
+    expect(await month(t, s, { rescheduleContext }, "pool-1")).toBe(false);
+
+    const moved = await t.mutation(api.public.rescheduleBookingByToken, {
+      ...rescheduleContext, newStart: hour("09:30")[0], newEnd: hour("09:30")[1],
+    });
+    expect(moved).toMatchObject({ status: "confirmed", start: berlin(TUESDAY, "09:30") });
+    // 09:30–10:30 Berlin are UTC slots 34–37. A's pool unit moved once, next to the other bundle's.
+    expect(await getBusySlots(t, "projector", TUESDAY)).toEqual(range(34, 38));
+    expect((await t.query(api.resources.getQuantityAvailability, { resourceId: "pool-1", date: TUESDAY })).bookedQuantities)
+      .toEqual({ "32": 0, "33": 0, "34": 2, "35": 2, "36": 2, "37": 2 });
+  });
+
+  test("another booking on the same item stays busy, and no credential frees a resource its booking does not hold", async () => {
+    const s = await seedBundles(WIDE);
+    const a = await bundleAt(s, "09:00", [{ resourceId: s.resourceId }, { resourceId: "projector" }]);
+    const b = await bundleAt(s, "11:00", [{ resourceId: "res-2" }, { resourceId: "projector" }], BEA);
+    // CONTROL: on the projector A blocks 09:00 and 09:30, B blocks 10:30, 11:00 and 11:30.
+    expect(await day(t, s, {}, "projector")).toEqual([iso("10:00")]);
+
+    expect(await day(t, s, { rescheduleContext: contextOf(a) }, "projector")).toEqual([iso("09:00"), iso("09:30"), iso("10:00")]);
+    const freedB = [iso("10:00"), iso("10:30"), iso("11:00"), iso("11:30")];
+    expect(await day(t, s, { rescheduleContext: contextOf(b) }, "projector")).toEqual(freedB);
+    expect(await day(t, s, { excludeBookingUid: b.uid }, "projector")).toEqual(freedB);
+    for (const rescheduleContext of [
+      { uid: a.uid, token: b.managementToken! },
+      { uid: b.uid, token: a.managementToken! },
+    ]) {
+      expect(await day(t, s, { rescheduleContext }, "projector")).toEqual([iso("10:00")]);
+    }
+
+    // B does not hold res-1: its credential leaves A's slots there busy.
+    const withA = [iso("10:00"), iso("10:30"), iso("11:00"), iso("11:30")];
+    expect(await day(t, s, {}, s.resourceId)).toEqual(withA);
+    expect(await day(t, s, { rescheduleContext: contextOf(b) }, s.resourceId)).toEqual(withA);
+    expect(await day(t, s, { excludeBookingUid: b.uid }, s.resourceId)).toEqual(withA);
   });
 });
 

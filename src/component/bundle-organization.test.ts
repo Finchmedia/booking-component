@@ -288,3 +288,116 @@ describe("a move gives the new row its event type's organization", () => {
     expect(movedGlobal.organizationId).toBe("org-1");
   });
 });
+
+describe("confirming a booking or submitting a hold gives it its event type's organization", () => {
+  /** Version 1 and version 2 probes of org-1 and org-other for `eventType`. */
+  async function probes(t: T, eventType: string) {
+    for (const organizationId of ["org-1", "org-other"]) {
+      await t.mutation(api.hooks.registerHook, { eventType, functionHandle: `function://;probe:${organizationId}`, organizationId });
+      await t.mutation(api.hooks.registerHook, {
+        eventType, functionHandle: `function://;probe-v2:${organizationId}`, organizationId, payloadVersion: 2,
+      });
+    }
+  }
+  const storedOrganization = async (t: T, bookingId: Id<"bookings">) =>
+    (await t.query(api.public.getBooking, { bookingId }))?.organizationId;
+  const transition = (t: T, bookingId: Id<"bookings">, toStatus: "pending" | "confirmed") =>
+    t.mutation(api.hooks.transitionBookingState, { bookingId, toStatus });
+
+  test("a request stored for another organization: approving it notifies the event type's organization only", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t, { requiresConfirmation: true }); // et-1 and res-1 in org-1
+    await probes(t, "booking.confirmed");
+    const request = await book(t, seed, hour(9), hour(10));
+    const control = await book(t, seed, hour(11), hour(12));
+    expect([request.status, control.status]).toEqual(["pending", "pending"]);
+    // As 0.4.x could store it: org-other's id on org-1's event type and resource.
+    await t.run((ctx) => ctx.db.patch(request._id, { organizationId: "org-other" }));
+
+    await transition(t, request._id, "confirmed");
+    const job = await hookJob(t, request._id, "booking.confirmed");
+    expect({
+      stored: await storedOrganization(t, request._id),
+      hook: job.organizationId,
+      emailContext: job.emailContext.organizationId,
+      v1Booking: job.payload.booking.organizationId,
+      v2: job.payloadV2.organizationId,
+    }).toEqual({ stored: "org-1", hook: "org-1", emailContext: "org-1", v1Booking: "org-1", v2: "org-1" });
+    // org-other's hooks receive nothing: neither the booker's details nor the management token.
+    expect(await replayHooks(t, job)).toEqual(["probe-v2:org-1", "probe:org-1"]);
+    expect(await t.query(api.public.listBookings, { organizationId: "org-other" })).toEqual([]);
+
+    // CONTROL: a matching organization stays, routes the same way, and the payloads keep their keys.
+    await transition(t, control._id, "confirmed");
+    const controlJob = await hookJob(t, control._id, "booking.confirmed");
+    expect([await storedOrganization(t, control._id), controlJob.organizationId]).toEqual(["org-1", "org-1"]);
+    expect(await replayHooks(t, controlJob)).toEqual(["probe-v2:org-1", "probe:org-1"]);
+    expect(Object.keys(job.payload).sort()).toEqual(Object.keys(controlJob.payload).sort());
+    expect(Object.keys(job.payload.booking).sort()).toEqual(Object.keys(controlJob.payload.booking).sort());
+  });
+
+  test("holds stored for another organization or without one: submitting and confirming them", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t);
+    await probes(t, "booking.pending");
+    await probes(t, "booking.confirmed");
+    const hold = (h: number) =>
+      t.mutation(api.public.createProvisionalBooking, {
+        eventTypeId: seed.eventTypeId, resourceId: seed.resourceId, start: hour(h), end: hour(h + 1),
+        timezone: "UTC", booker: BOOKER, location: LOCATION,
+      });
+    const foreign = await hold(9);
+    const gap = await hold(11);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(foreign._id, { organizationId: "org-other" });
+      await ctx.db.patch(gap._id, { organizationId: undefined });
+    });
+
+    await transition(t, foreign._id, "pending"); // provisional -> pending
+    await transition(t, gap._id, "confirmed"); // provisional -> confirmed
+    const pendingJob = await hookJob(t, foreign._id, "booking.pending");
+    const confirmedJob = await hookJob(t, gap._id, "booking.confirmed");
+    expect({
+      foreign: await storedOrganization(t, foreign._id),
+      gap: await storedOrganization(t, gap._id),
+      pendingHook: pendingJob.organizationId,
+      pendingEmail: pendingJob.emailContext.organizationId,
+      confirmedHook: confirmedJob.organizationId,
+      confirmedEmail: confirmedJob.emailContext.organizationId,
+    }).toEqual({
+      foreign: "org-1", gap: "org-1", pendingHook: "org-1", pendingEmail: "org-1", confirmedHook: "org-1", confirmedEmail: "org-1",
+    });
+    expect(await replayHooks(t, pendingJob)).toEqual(["probe-v2:org-1", "probe:org-1"]);
+    expect(await replayHooks(t, confirmedJob)).toEqual(["probe-v2:org-1", "probe:org-1"]);
+  });
+
+  test("CONTROL: an event type without organization keeps the stored one; a rejected confirmation changes nothing", async () => {
+    const { t } = setup();
+    const global = await seedResource(t, {
+      resourceId: "res-g", eventTypeId: "et-g", requiresConfirmation: true, eventType: { organizationId: undefined },
+    }); // res-g in org-1
+    const scoped = await t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId: global.eventTypeId, organizationId: "org-1", resources: [{ resourceId: "res-g" }],
+      start: hour(8), end: hour(9), timezone: "UTC", booker: BOOKER, location: LOCATION,
+    });
+    const unscoped = await book(t, global, hour(10), hour(11));
+    await transition(t, scoped._id, "confirmed");
+    await transition(t, unscoped._id, "confirmed");
+    expect({
+      scoped: await storedOrganization(t, scoped._id),
+      scopedHook: (await hookJob(t, scoped._id, "booking.confirmed")).organizationId,
+      unscoped: await storedOrganization(t, unscoped._id),
+      unscopedHook: (await hookJob(t, unscoped._id, "booking.confirmed")).organizationId,
+    }).toEqual({ scoped: "org-1", scopedHook: "org-1", unscoped: undefined, unscopedHook: undefined });
+
+    // A confirmation the rules reject rolls back: the stored organization stays, and nothing is queued.
+    const seed = await seedResource(t, { requiresConfirmation: true });
+    const request = await book(t, seed, hour(13), hour(14));
+    await t.run((ctx) => ctx.db.patch(request._id, { organizationId: "org-other" }));
+    await t.mutation(api.public.toggleEventTypeActive, { id: seed.eventTypeId, isActive: false });
+    const jobsBefore = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).length;
+    await expect(transition(t, request._id, "confirmed")).rejects.toMatchObject({ data: { code: "EVENT_TYPE_INACTIVE" } });
+    expect(await storedOrganization(t, request._id)).toBe("org-other");
+    expect((await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).length).toBe(jobsBefore);
+  });
+});

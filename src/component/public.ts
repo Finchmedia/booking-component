@@ -22,6 +22,7 @@ import {
     getScheduleDaySlots,
 } from "./schedules";
 import {
+    LEGACY_EVENT_TYPE_ID,
     assertSingleBookable,
     assertStillBookable,
     buildHookEventV2,
@@ -62,6 +63,33 @@ import {
 } from "./validators";
 
 /**
+ * The busySlots `booking` holds on `resourceId` (dateStr → slot indices), or
+ * null when it holds none there. A booking holds the resources of its
+ * booking_items (a bundle; its resourceId is the first item), else its
+ * resourceId: the resources a cancel or a move releases, each for
+ * [start, end). One bitmap slot has one holder, so these slots free this
+ * booking and never another one.
+ *
+ * Only the busySlots bitmap of a non-fungible resource is read with it. A
+ * pool (isFungible) counts the booking's quantity in quantity_availability
+ * instead, and the slot queries offer no times on a pool at all.
+ */
+async function slotsHeldOn(
+  ctx: QueryCtx,
+  booking: Doc<"bookings">,
+  resourceId: string,
+): Promise<Map<string, number[]> | null> {
+  const items = await ctx.db
+    .query("booking_items")
+    .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+    .collect();
+  const holds = items.length > 0
+    ? items.some((item) => item.resourceId === resourceId)
+    : booking.resourceId === resourceId;
+  return holds ? getRequiredSlots(booking.start, booking.end) : null;
+}
+
+/**
  * Resolves the busy slots currently held by ONE specific booking so that the
  * availability queries can treat them as free. Reschedule flow: a booking's own
  * slots must not make its overlapping new candidate times read as unavailable
@@ -69,14 +97,11 @@ import {
  *
  * Returns the booking's slot map (dateStr → slot indices) or null when there is
  * nothing to exclude. Guards:
- * - unknown uid / different resource → null (never touch other resources)
+ * - unknown uid / a resource the booking does not hold → null (never touch
+ *   other resources); every item of a bundle counts (see slotsHeldOn)
  * - only statuses that actually hold slots (pending/confirmed/provisional):
  *   a cancelled booking already released its slots — excluding its indices
  *   again would free OTHER bookings occupying the same slots by now.
- *
- * Only valid for NON-fungible resources (busySlots bitmap, one holder per
- * slot) — pooled resources track quantity_availability, which this exclusion
- * does not touch.
  *
  * The uid is not a credential: excludeBookingUid is for trusted host code.
  * Client input goes through rescheduleContext (getRescheduleExclusion).
@@ -92,11 +117,10 @@ async function getExcludedSlotsForBooking(
     .withIndex("by_uid", (q) => q.eq("uid", excludeBookingUid))
     .unique();
   if (!booking) return null;
-  if (booking.resourceId !== resourceId) return null;
   if (!["pending", "confirmed", "provisional"].includes(booking.status)) {
     return null;
   }
-  return getRequiredSlots(booking.start, booking.end);
+  return await slotsHeldOn(ctx, booking, resourceId);
 }
 
 /**
@@ -126,9 +150,10 @@ function assertOneRescheduleArgument(args: RescheduleArgs): void {
 
 /**
  * The slots of the booking a slot query treats as free:
- * - `rescheduleContext`: a pending or confirmed booking on this resource
- *   whose uid and management token both match. Anything else (unknown uid,
- *   wrong token, a booking without a token, another status or resource)
+ * - `rescheduleContext`: a pending or confirmed booking that holds this
+ *   resource (its resource, or any item of a bundle) and whose uid and
+ *   management token both match. Anything else (unknown uid, wrong token, a
+ *   booking without a token, another status, a resource it does not hold)
  *   excludes nothing and is no error, so no other booking is ever freed.
  * - `excludeBookingUid`: for trusted host code (see getExcludedSlotsForBooking).
  * Neither value is logged or returned.
@@ -150,12 +175,11 @@ async function getRescheduleExclusion(
     !booking ||
     booking.managementToken === undefined ||
     booking.managementToken !== context.token ||
-    !["pending", "confirmed"].includes(booking.status) ||
-    booking.resourceId !== resourceId
+    !["pending", "confirmed"].includes(booking.status)
   ) {
     return null;
   }
-  return getRequiredSlots(booking.start, booking.end);
+  return await slotsHeldOn(ctx, booking, resourceId);
 }
 
 /**
@@ -331,7 +355,8 @@ export const getAvailability = query({
  *
  * RESCHEDULING: `rescheduleContext` ({ uid, token } of the booking being
  * moved) treats that booking's own slots as free when the token matches a
- * pending or confirmed booking on this resource, and is ignored otherwise.
+ * pending or confirmed booking that holds this resource (as its resource or
+ * as any item of a bundle), and is ignored otherwise.
  * `excludeBookingUid` does the same without a token and is for trusted host
  * code only: never forward it from a client, which could free any booking
  * whose uid it knows. Passing both throws.
@@ -639,7 +664,7 @@ export const createReservation = mutation({
             status: "confirmed",
             // Fill required new fields with placeholders/defaults for backward compat
             uid: `legacy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            eventTypeId: "legacy",
+            eventTypeId: LEGACY_EVENT_TYPE_ID,
             timezone: "UTC",
             bookerName: "Legacy Booker",
             bookerEmail: actorId, // Assume actorId is email for legacy
@@ -1016,7 +1041,10 @@ async function assertScheduleReference(ctx: QueryCtx, scheduleId: string | undef
  * is not given). Lengths, length options and the slot interval must be whole
  * minutes greater than 0, buffers and notice 0 or more, the horizon greater
  * than 0, and the length one of the options when there are any, counting
- * the stored options an upsert keeps (INVALID_INPUT).
+ * the stored options an upsert keeps (INVALID_INPUT). The ID "legacy" is
+ * reserved for createReservation bookings (INVALID_INPUT), also for an
+ * upsert of an event type stored with it before 0.5.0; updateEventType
+ * still changes that one.
  */
 export const createEventType = mutation({
   args: {
@@ -1048,6 +1076,14 @@ export const createEventType = mutation({
   },
   returns: v.id("event_types"),
   handler: async (ctx, args) => {
+    // Bookings naming "legacy" are createReservation rows, which keep the
+    // legacy rules only while no event type has this ID.
+    if (args.id === LEGACY_EVENT_TYPE_ID) {
+      throwBookingError(
+        "INVALID_INPUT",
+        `Invalid id "${LEGACY_EVENT_TYPE_ID}": reserved for createReservation bookings, choose another event type ID`
+      );
+    }
     assertTimeZone(args.timezone);
     assertEventTypeNumbers(args);
     await assertScheduleReference(ctx, args.scheduleId);

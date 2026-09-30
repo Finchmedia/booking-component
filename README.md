@@ -396,13 +396,17 @@ shows how and lists every check with its repair.
   an add-on (`isStandalone: false`). A booking belongs to its event type's
   organization; under an event type without organization its resources
   belong to one organization, and a bundle's `organizationId`, when given, is
-  theirs. A move gives the new booking its event type's organization. A
+  theirs. A move gives the new booking its event type's organization, and
+  a confirmation or a hold submitted as a request gives it to the booking
+  before its hooks and emails go out. A
   bundle's primary resource is its first item and may be an
   add-on. There is no administrator override: to move, confirm or submit a
   hold after deactivating or unlinking, reactivate or relink first.
   Cancelling, declining and expiring are always allowed, and deactivating
   never ends an existing booking. The legacy `createReservation` path checks
-  none of this, and its bookings keep that exemption when moved.
+  none of this, and its bookings (event type ID `legacy`, which
+  `createEventType` rejects) keep that exemption when moved, as long as no
+  event type has that ID.
 - **Schedule arguments:** pass `scheduleId` to `getMonthAvailability` and
   `getDaySlots` and omit `resourceTimezone` and `availableSlots`. The
   component then reads the schedule's hours, date overrides included, in the
@@ -420,9 +424,10 @@ shows how and lists every check with its repair.
 - **Reschedule availability:** while a booker moves a booking, pass
   `rescheduleContext: { uid, token }` (the booking's UID and management token)
   to `getDaySlots` and `getMonthAvailability`. The booking's own slots then
-  count as free, so a move that overlaps its current time is offered. A token
-  that does not match a pending or confirmed booking with that UID on the
-  queried resource excludes nothing and is no error; no other booking is ever
+  count as free, so a move that overlaps its current time is offered, on every
+  resource the booking holds (each item of a bundle). A token that does not
+  match a pending or confirmed booking with that UID that holds the queried
+  resource excludes nothing and is no error; no other booking is ever
   freed, and neither value appears in results or logs. `excludeBookingUid`
   does the same from a UID alone: pass it only from trusted host code, never
   from client input. Passing both throws `INVALID_INPUT`.

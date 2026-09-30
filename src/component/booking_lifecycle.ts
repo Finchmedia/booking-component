@@ -33,7 +33,9 @@ import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 // Cancelling, declining and expiring never check them, and deactivating or
 // unlinking configuration never ends an existing booking. Legacy
 // createReservation rows (eventTypeId "legacy") keep the legacy path's
-// rules: none beyond the pool guard.
+// rules: none beyond the pool guard (see isLegacyReservation). Moves and
+// the transitions that check the rules give the booking its event type's
+// organization.
 //
 // "single" texts are the ones createBooking has always used; "bundle" texts
 // name the offending ids. bookingRuleProblems reports the same rules for the
@@ -61,16 +63,38 @@ function isStandaloneResource(resource: Doc<"resources">): boolean {
   return resource.isStandalone !== false;
 }
 
+/** The eventTypeId of createReservation rows; createEventType refuses it. */
+export const LEGACY_EVENT_TYPE_ID = "legacy";
+
+/**
+ * Whether `booking` is a legacy createReservation row, exempt from the
+ * booking rules: it names the reserved event type ID "legacy" and no event
+ * type has that ID. While an event type created with it before 0.5.0
+ * exists, the bookings naming it (createReservation rows included) follow
+ * its rules like any other booking.
+ */
+export async function isLegacyReservation(
+  findEventType: (id: string) => Promise<Doc<"event_types"> | null>,
+  booking: Pick<Doc<"bookings">, "eventTypeId">,
+): Promise<boolean> {
+  return booking.eventTypeId === LEGACY_EVENT_TYPE_ID && (await findEventType(LEGACY_EVENT_TYPE_ID)) === null;
+}
+
+/** The event type with this external ID (the first, should there be two). */
+function findEventType(ctx: QueryCtx, id: string): Promise<Doc<"event_types"> | null> {
+  return ctx.db
+    .query("event_types")
+    .withIndex("by_external_id", (q) => q.eq("id", id))
+    .first();
+}
+
 /** The event type of a booking: it exists and is active. */
 export async function loadBookableEventType(
   ctx: QueryCtx,
   eventTypeId: string,
   texts: RuleTexts,
 ): Promise<Doc<"event_types">> {
-  const eventType = await ctx.db
-    .query("event_types")
-    .withIndex("by_external_id", (q) => q.eq("id", eventTypeId))
-    .first();
+  const eventType = await findEventType(ctx, eventTypeId);
 
   if (!eventType) {
     throwBookingError("EVENT_TYPE_NOT_FOUND", `${subject("Event type", eventTypeId, texts)} not found`);
@@ -192,7 +216,7 @@ export async function assertStillBookable(
 ): Promise<Doc<"event_types"> | null> {
   // A legacy createReservation row has no event type; it keeps the legacy
   // path's rules.
-  if (booking.eventTypeId === "legacy") return null;
+  if (await isLegacyReservation((id) => findEventType(ctx, id), booking)) return null;
   const texts = items.length > 0 ? "bundle" : "single";
   const resourceIds = items.length > 0 ? items.map((item) => item.resourceId) : [booking.resourceId];
   const eventType = await loadBookableEventType(ctx, booking.eventTypeId, texts);
@@ -244,7 +268,7 @@ export async function bookingRuleProblems(
   booking: Doc<"bookings">,
   resourceIds: string[],
 ): Promise<BookingRuleProblem[]> {
-  if (booking.eventTypeId === "legacy") return [];
+  if (await isLegacyReservation(find.eventType, booking)) return [];
   const found = new Set<BookingRuleProblem>();
   const eventType = await find.eventType(booking.eventTypeId);
   if (!eventType) found.add("eventTypeMissing");

@@ -540,6 +540,10 @@ describe("configuration writes and arguments", () => {
           id: "et-new", slug: "et-new", title: "x", lengthInMinutes: 30, lengthInMinutesOptions: [60, 90], timezone: "UTC",
           lockTimeZoneToggle: false, locations: [],
         }),
+      "createEventType: reserved ID": () =>
+        t.mutation(api.public.createEventType, {
+          id: "legacy", slug: "legacy", title: "x", lengthInMinutes: 60, timezone: "UTC", lockTimeZoneToggle: false, locations: [],
+        }),
       "updateEventType: options without the stored length": () =>
         t.mutation(api.public.updateEventType, { id: seed.eventTypeId, lengthInMinutesOptions: [30, 90] }),
       "updateEventType: negative buffer": () => t.mutation(api.public.updateEventType, { id: seed.eventTypeId, bufferBefore: -5 }),
@@ -603,6 +607,8 @@ describe("configuration writes and arguments", () => {
       "createEventType: zero length": coded("INVALID_INPUT", "Invalid lengthInMinutes 0: expected a whole number of minutes greater than 0"),
       "createEventType: length outside its options":
         coded("INVALID_INPUT", "Invalid lengthInMinutes 30: expected one of lengthInMinutesOptions (60, 90)"),
+      "createEventType: reserved ID":
+        coded("INVALID_INPUT", 'Invalid id "legacy": reserved for createReservation bookings, choose another event type ID'),
       "updateEventType: options without the stored length":
         coded("INVALID_INPUT", "Invalid lengthInMinutes 60: expected one of lengthInMinutesOptions (30, 90)"),
       "updateEventType: negative buffer": coded("INVALID_INPUT", "Invalid bufferBefore -5: expected a number of minutes of 0 or more"),

@@ -447,13 +447,25 @@ export const transitionBookingState = mutation({
     // which tells the booker it awaits approval). After deactivation,
     // unlinking or a change of organization they are rejected. Cancelling,
     // declining and completing never are.
+    // Like a move, such a transition gives the booking its event type's
+    // organization when a missing or another one was stored before 0.5.0
+    // (the rules passed, so every resource belongs to it), in this
+    // transaction and before its hooks and emails are queued: they reach
+    // that organization only. Legacy rows and event types without
+    // organization keep the stored one.
+    let organizationId = booking.organizationId;
     if (args.toStatus === "confirmed" || args.toStatus === "pending") {
       const items = await ctx.db
         .query("booking_items")
         .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
         .collect();
-      await assertStillBookable(ctx, booking, items);
+      const eventType = await assertStillBookable(ctx, booking, items);
+      organizationId = eventType?.organizationId ?? booking.organizationId;
     }
+    const reassigned = organizationId !== booking.organizationId;
+    // What the notifications describe: the booking before this change, in
+    // the organization the change gives it.
+    const notified: Doc<"bookings"> = reassigned ? { ...booking, organizationId } : booking;
 
     const now = Date.now();
 
@@ -484,6 +496,7 @@ export const transitionBookingState = mutation({
       await ctx.db.patch(args.bookingId, {
         status: args.toStatus,
         updatedAt: now,
+        ...(reassigned ? { organizationId } : {}),
       });
     }
 
@@ -501,12 +514,12 @@ export const transitionBookingState = mutation({
       await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
         eventType: hookEventType,
         emailContext: emailKind
-          ? createBookingEmailContext(emailKind, booking, args.resendOptions, { reason: args.reason })
+          ? createBookingEmailContext(emailKind, notified, args.resendOptions, { reason: args.reason })
           : undefined,
-        organizationId: booking.organizationId,
+        organizationId,
         payload: {
           bookingId: args.bookingId,
-          booking: { ...booking, status: args.toStatus },
+          booking: { ...notified, status: args.toStatus },
           previousStatus: currentStatus,
           reason: args.reason,
           // Fields needed for email templates

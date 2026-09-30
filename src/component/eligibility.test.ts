@@ -354,3 +354,91 @@ describe("legacy createReservation keeps the legacy rules", () => {
     expect(await getBusySlots(t, "legacy-room", TUESDAY)).toEqual(range(44, 48));
   });
 });
+
+describe('the event type ID "legacy" is reserved', () => {
+  const eventTypeArgs = (id: string) => ({
+    id, slug: id, title: "Consultation", lengthInMinutes: 60, timezone: "UTC", lockTimeZoneToggle: false,
+    locations: [], organizationId: ORG,
+  });
+  const reserved = {
+    code: "INVALID_INPUT",
+    message: 'Invalid id "legacy": reserved for createReservation bookings, choose another event type ID',
+  };
+  const auditIssues = async (t: T, check: "booking_eligibility" | "event_type_config") =>
+    (await t.query(api.maintenance.audit, { check, limit: 100 })).issues;
+
+  /** An event type stored with the ID "legacy" before 0.5.0, and res-1 linked to it. */
+  async function seedLegacyEventType(t: T) {
+    await t.run((ctx) => ctx.db.insert("event_types", { ...eventTypeArgs("legacy"), isActive: true }));
+    await room(t, "res-1", { link: "legacy" });
+    return { resourceId: "res-1", eventTypeId: "legacy", timezone: "UTC" };
+  }
+
+  test("createEventType refuses it, also as an upsert of a stored one; updateEventType still changes that one", async () => {
+    const { t } = setup();
+    expect(await outcome(t.mutation(api.public.createEventType, eventTypeArgs("legacy")))).toEqual(reserved);
+    expect(await t.query(api.public.getEventType, { eventTypeId: "legacy" })).toBeNull();
+    // CONTROL: other IDs are accepted.
+    expect(await outcome(t.mutation(api.public.createEventType, eventTypeArgs("legacy-consultation")))).toBe("ok");
+
+    await seedLegacyEventType(t);
+    expect(await outcome(t.mutation(api.public.createEventType, { ...eventTypeArgs("legacy"), title: "Renamed" }))).toEqual(reserved);
+    expect(await outcome(t.mutation(api.public.updateEventType, { id: "legacy", title: "Renamed" }))).toBe("ok");
+    expect((await t.query(api.public.getEventType, { eventTypeId: "legacy" }))?.title).toBe("Renamed");
+    // The audit lists the stored one; the other event type is clean.
+    expect(await auditIssues(t, "event_type_config")).toEqual([{ check: "event_type_config", eventTypeId: "legacy", problems: ["id"] }]);
+  });
+
+  test("bookings of an event type stored with it follow the booking rules, and the audit lists them", async () => {
+    const { t } = setup();
+    const target = await seedLegacyEventType(t);
+    const confirmed = await book(t, target, hour(9), hour(10));
+    await t.mutation(api.public.updateEventType, { id: "legacy", requiresConfirmation: true });
+    const pending = await book(t, target, hour(11), hour(12));
+    expect([confirmed.status, pending.status]).toEqual(["confirmed", "pending"]);
+    await t.mutation(api.public.toggleEventTypeActive, { id: "legacy", isActive: false });
+
+    // 0.5.0 took them for legacy rows and moved or confirmed them anyway.
+    const before = await snapshot(t);
+    const inactive = { code: "EVENT_TYPE_INACTIVE", message: "Event type is no longer active" };
+    expect({
+      moveById: await outcome(t.mutation(api.public.rescheduleBooking, { bookingId: confirmed._id, newStart: hour(13), newEnd: hour(14) })),
+      moveByToken: await outcome(t.mutation(api.public.rescheduleBookingByToken, {
+        uid: confirmed.uid, token: confirmed.managementToken!, newStart: hour(13), newEnd: hour(14),
+      })),
+      approve: await outcome(t.mutation(api.hooks.transitionBookingState, { bookingId: pending._id, toStatus: "confirmed" })),
+    }).toEqual({ moveById: inactive, moveByToken: inactive, approve: inactive });
+    expect(await snapshot(t)).toEqual(before);
+
+    const issue = (booking: Doc<"bookings">) => ({
+      check: "booking_eligibility", uid: booking.uid, status: booking.status, start: booking.start, eventTypeId: "legacy",
+      resourceIds: ["res-1"], problems: ["eventTypeInactive"],
+    });
+    expect(await auditIssues(t, "booking_eligibility")).toEqual([issue(confirmed), issue(pending)]);
+
+    // Cancelling is always allowed; CONTROL: reactivated, the booking moves again.
+    expect(await outcome(t.mutation(api.hooks.transitionBookingState, { bookingId: pending._id, toStatus: "cancelled" }))).toBe("ok");
+    await t.mutation(api.public.toggleEventTypeActive, { id: "legacy", isActive: true });
+    expect(await outcome(t.mutation(api.public.rescheduleBooking, { bookingId: confirmed._id, newStart: hour(13), newEnd: hour(14) })))
+      .toBe("ok: confirmed");
+  });
+
+  test("a createReservation row stays exempt (CONTROL) until an event type has the ID", async () => {
+    const { t } = setup();
+    const reservationId = await t.mutation(api.public.createReservation, {
+      resourceId: "legacy-room", actorId: "ops@example.com", start: hour(9), end: hour(10),
+    });
+    expect(await auditIssues(t, "booking_eligibility")).toEqual([]);
+    const moved = await t.mutation(api.public.rescheduleBooking, { bookingId: reservationId, newStart: hour(11), newEnd: hour(12) });
+    expect([moved.status, moved.eventTypeId]).toEqual(["confirmed", "legacy"]);
+
+    // Once an event type has the ID, the row follows that event type's rules like its other bookings.
+    await seedLegacyEventType(t);
+    expect(await outcome(t.mutation(api.public.rescheduleBooking, { bookingId: moved._id, newStart: hour(13), newEnd: hour(14) })))
+      .toEqual({ code: "RESOURCE_NOT_FOUND", message: "Resource not found" });
+    expect(await auditIssues(t, "booking_eligibility")).toEqual([{
+      check: "booking_eligibility", uid: moved.uid, status: "confirmed", start: hour(11), eventTypeId: "legacy",
+      resourceIds: ["legacy-room"], problems: ["resourceMissing"],
+    }]);
+  });
+});

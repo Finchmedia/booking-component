@@ -176,6 +176,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 check: "event_type_config";
                 eventTypeId: string;
                 problems: Array<
+                  | "id"
                   | "lengthInMinutes"
                   | "lengthInMinutesOptions"
                   | "lengthNotInOptions"

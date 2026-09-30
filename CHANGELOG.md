@@ -113,7 +113,8 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
   "awaiting confirmation" mail) or approving a pending request: the same check
   over every item, before anything is released or notified. Cancelling,
   declining and expiring are never checked, and deactivating never ends a
-  booking. Legacy `createReservation` and its bookings stay exempt. The new
+  booking. Legacy `createReservation` and its bookings stay exempt (see the
+  reserved ID `legacy` below). The new
   `booking_eligibility` check lists the active bookings these rules reject,
   with their problems (`eventTypeMissing`, `eventTypeInactive`,
   `resourceMissing`, `resourceInactive`, `resourceNotLinked`,
@@ -124,6 +125,18 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
   unlinked configuration; afterwards, reactivate or relink before moving or
   confirming such a booking. [docs/errors.md](docs/errors.md) lists the codes
   per function.
+- The event type ID `legacy` is reserved: `createEventType` rejects it with
+  `INVALID_INPUT`, also as an upsert of an event type stored with it.
+  `createReservation` stores `eventTypeId: "legacy"` on its bookings, and
+  they keep the legacy exemption from the booking rules only while no event
+  type has that ID. An event type created with it before 0.5.0 is treated
+  like any other: the booking rules above apply to its bookings, and to
+  `createReservation` rows while it exists. `event_type_config` lists it with
+  the problem `id`,
+  and `booking_eligibility` lists its bookings the rules reject. Keep such an
+  event type and manage it with `updateEventType`, `toggleEventTypeActive`
+  and the link functions; change provisioning scripts that re-run
+  `createEventType` for it, and create new event types under other IDs.
 - No bookings across organizations (N13, F7): a booking belongs to its event
   type's organization. An event type with an `organizationId` links only
   resources of that organization: `linkResourceToEventType`,
@@ -139,11 +152,17 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
   its resources (0.4.3 stored any value; without it the bundle has none, like
   a single booking of that event type). Moves and confirmations apply this
   to stored bundles too. A move gives the new booking its event type's
-  organization, so a booking stored without one or with another one moves
-  into it. Unlink the pairs `link_integrity` lists as `crossOrganization`,
-  and link a resource of the event type's organization instead;
-  `booking_integrity` lists stored bookings of another organization as
-  `organizationMismatch`.
+  organization, and confirming a booking or submitting a hold as a request
+  (the transitions that check the booking rules) gives it to the booking
+  itself in the same transaction, before its hooks and emails are queued: a
+  booking stored without one or with another one moves into it, only that
+  organization's hooks receive the event (version 1 payloads, whose
+  `booking` then carries that `organizationId`, include the management
+  token), and the organization it named no longer lists it. Cancelling,
+  declining and completing keep the stored organization. Unlink the pairs
+  `link_integrity` lists as `crossOrganization`, and link a resource of the
+  event type's organization instead; `booking_integrity` lists stored
+  bookings of another organization as `organizationMismatch`.
 - `backfillBookingOrganizations` (new in 0.4.3) gives a booking without
   organization its event type's only when every resource the booking holds
   (every item of a bundle) exists and belongs to that organization;
@@ -327,6 +346,12 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
 - A bundle of an event type without organization no longer holds resources
   of two organizations or names a third organization, and a move no longer
   carries a missing or foreign organization over to the new booking.
+  Confirming a booking or submitting a hold as a request no longer sends a
+  foreign organization's hooks the booking and its management token: the
+  booking takes its event type's organization first.
+- The slot queries' `excludeBookingUid` and `rescheduleContext` free a
+  bundle's own slots on every item, not only on its first, so an overlapping
+  move of the bundle is offered on each of its resources.
 - `backfillBookingOrganizations` no longer gives a booking an organization
   that owns none of its resources.
 - The pool flag no longer strands a resource's single-resource bookings,
@@ -355,9 +380,10 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
 - `rescheduleContext: { uid, token }` on `getDaySlots` and
   `getMonthAvailability` (F13): with the moved booking's UID and management
   token, its own slots count as free, so a move that overlaps its current
-  time is offered, as the move mutations accept it. A token that does not
-  match a pending or confirmed booking with that UID on the queried resource
-  frees nothing and is no error; neither value appears in results or logs.
+  time is offered, as the move mutations accept it, on each resource it holds
+  (every item of a bundle). A token that does not match a pending or
+  confirmed booking with that UID that holds the queried resource frees
+  nothing and is no error; neither value appears in results or logs.
   `makeInternalBookingAPI` forwards it.
 - Hook payloads, version 2 (N7): `registerHook({ …, payloadVersion: 2 })`
   delivers one envelope per event, whichever function emitted it, built from

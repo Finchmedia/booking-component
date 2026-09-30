@@ -30,7 +30,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { parseCivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
 import { bookingStatusValidator, isBookingStatus } from "../shared/booking-status.js";
-import { bookingRuleProblems } from "./booking_lifecycle";
+import { LEGACY_EVENT_TYPE_ID, bookingRuleProblems, isLegacyReservation } from "./booking_lifecycle";
 import { holdsActiveInventory } from "./inventory_helpers";
 import {
   isLengthOutsideOptions,
@@ -298,6 +298,7 @@ const auditIssue = v.union(
     check: v.literal("event_type_config"),
     eventTypeId: v.string(),
     problems: problems(
+      "id",
       "lengthInMinutes",
       "lengthInMinutesOptions",
       "lengthNotInOptions",
@@ -519,14 +520,17 @@ type ProblemsOf<C extends AuditIssue["check"]> = Extract<AuditIssue, { check: C;
 
 /**
  * event_type_config: stored values the 0.5.0 event-type writes reject (the
- * predicates of input_validation.ts): lengths, options and slot interval that
- * are not whole minutes greater than 0, a length missing from non-empty
- * options, buffers and notice that are negative or not finite, a horizon
- * that is not greater than 0, a zone Intl rejects, a scheduleId naming no
- * schedule.
+ * predicates of input_validation.ts): the reserved ID "legacy" (the
+ * eventTypeId of createReservation rows, which then lose their exemption
+ * from the booking rules; see isLegacyReservation), lengths, options and
+ * slot interval that are not whole minutes greater than 0, a length missing
+ * from non-empty options, buffers and notice that are negative or not
+ * finite, a horizon that is not greater than 0, a zone Intl rejects, a
+ * scheduleId naming no schedule.
  */
 async function eventTypeConfigIssue(eventType: Doc<"event_types">, find: Lookups): Promise<AuditIssue | null> {
   const found: ProblemsOf<"event_type_config"> = [];
+  if (eventType.id === LEGACY_EVENT_TYPE_ID) found.push("id");
   const options = eventType.lengthInMinutesOptions;
   if (!isWholePositiveMinutes(eventType.lengthInMinutes)) found.push("lengthInMinutes");
   if (options?.some((option) => !isWholePositiveMinutes(option))) found.push("lengthInMinutesOptions");
@@ -585,12 +589,14 @@ async function linkIssue(
 
 /**
  * booking_integrity, for bookings of an event type with an organization
- * (legacy rows are skipped): `organizationMissing`, no organizationId while
- * every resource the booking holds belongs to the event type's organization
- * (backfillBookingOrganizations fills it); `organizationMismatch`, another
- * organizationId, or none while a resource is missing or belongs to another
- * organization (the backfill lists these and leaves them). Also
- * `poolWithoutItems`: an active booking without items on a pool
+ * (legacy rows have no event type): `organizationMissing`, no
+ * organizationId while every resource the booking holds belongs to the
+ * event type's organization (backfillBookingOrganizations fills it);
+ * `organizationMismatch`, another organizationId, or none while a resource
+ * is missing or belongs to another organization (the backfill lists these
+ * and leaves them; a move, a confirmation or a hold submitted as a request
+ * gives the booking the event type's organization once the booking rules
+ * pass). Also `poolWithoutItems`: an active booking without items on a pool
  * (isFungible), which moves reject.
  */
 async function bookingIntegrityIssue(
@@ -601,8 +607,9 @@ async function bookingIntegrityIssue(
   const found: ProblemsOf<"booking_integrity"> = [];
   let items: Doc<"booking_items">[] | undefined;
   const loadItems = async () => (items ??= await bookingItems(db, booking._id));
-  const eventTypeOrganizationId =
-    booking.eventTypeId === "legacy" ? undefined : (await find.eventType(booking.eventTypeId))?.organizationId;
+  // A legacy row names no event type (unless one was created with the
+  // reserved ID, whose rules it then follows).
+  const eventTypeOrganizationId = (await find.eventType(booking.eventTypeId))?.organizationId;
   if (eventTypeOrganizationId !== undefined && booking.organizationId !== eventTypeOrganizationId) {
     const fillable =
       booking.organizationId === undefined &&
@@ -617,17 +624,17 @@ async function bookingIntegrityIssue(
 
 /**
  * booking_eligibility: an active booking (pending, confirmed or
- * provisional; legacy rows are exempt) that fails the booking rules today,
- * so moving it, confirming it or submitting a hold as a request is rejected
- * (see bookingRuleProblems). The issue names the event type and the
- * resources the booking holds.
+ * provisional; legacy rows are exempt, see isLegacyReservation) that fails
+ * the booking rules today, so moving it, confirming it or submitting a hold
+ * as a request is rejected (see bookingRuleProblems). The issue names the
+ * event type and the resources the booking holds.
  */
 async function bookingEligibilityIssue(
   db: DatabaseReader,
   booking: Doc<"bookings">,
   find: Lookups
 ): Promise<AuditIssue | null> {
-  if (!holdsActiveInventory(booking.status) || booking.eventTypeId === "legacy") return null;
+  if (!holdsActiveInventory(booking.status) || (await isLegacyReservation(find.eventType, booking))) return null;
   const resourceIds = heldResourceIds(booking, await bookingItems(db, booking._id));
   const found = await bookingRuleProblems(find, booking, resourceIds);
   if (found.length === 0) return null;
@@ -811,9 +818,12 @@ const organizationMismatch = v.object({
  *   rows, and rows whose event type is deleted or has no organization.
  * - `mismatches` lists rows whose organization differs from their event
  *   type's, and rows without one whose resources do not all belong to the
- *   event type's organization (no `organizationId`). They are reported,
- *   never rewritten: stamping the event type's organization on another
- *   organization's booking would list it and send its hooks there.
+ *   event type's organization (no `organizationId`). The backfill reports
+ *   them and never rewrites them: stamping the event type's organization on
+ *   another organization's booking would list it and send its hooks there.
+ *   Moving such a booking, confirming it or submitting its hold as a
+ *   request gives it the event type's organization, since those check the
+ *   booking rules first (every resource then belongs to it).
  *
  * Idempotent: a second run updates nothing. Start without a cursor and pass
  * `continueCursor` back until `isDone`; call it from a host internal mutation.
@@ -852,17 +862,16 @@ export const backfillBookingOrganizations = mutation({
     let skipped = 0;
     const mismatches: Array<typeof organizationMismatch.type> = [];
     for (const booking of bookings) {
-      let eventTypeOrganizationId: string | undefined;
-      if (booking.eventTypeId !== "legacy") {
-        if (!organizations.has(booking.eventTypeId)) {
-          const eventType = await ctx.db
-            .query("event_types")
-            .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
-            .first();
-          organizations.set(booking.eventTypeId, eventType?.organizationId);
-        }
-        eventTypeOrganizationId = organizations.get(booking.eventTypeId);
+      // A legacy row names no event type (unless one was created with the
+      // reserved ID, whose rules it then follows).
+      if (!organizations.has(booking.eventTypeId)) {
+        const eventType = await ctx.db
+          .query("event_types")
+          .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
+          .first();
+        organizations.set(booking.eventTypeId, eventType?.organizationId);
       }
+      const eventTypeOrganizationId = organizations.get(booking.eventTypeId);
 
       if (booking.organizationId === undefined) {
         if (eventTypeOrganizationId === undefined) {

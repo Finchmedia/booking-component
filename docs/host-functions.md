@@ -41,9 +41,9 @@ export const getDaySlots = query({
 `scheduleFor` stands for however your wrapper picks the schedule today.
 
 - The component frees the booking's slots only when `token` is the management token of a pending
-  or confirmed booking with that `uid` on the queried resource. Anything else frees nothing and is
-  no error, so the wrapper needs no token check of its own, and a guessed token never frees
-  another booking. Neither value appears in results or logs.
+  or confirmed booking with that `uid` that holds the queried resource (for a bundle, any of its
+  items). Anything else frees nothing and is no error, so the wrapper needs no token check of its
+  own, and a guessed token never frees another booking. Neither value appears in results or logs.
 - `getMonthAvailability` takes the same argument. Forward it there too, so the month view offers
   the day of the booking being moved.
 - `BookingProvider`'s `availabilityContext` (`@mrfinch/booking/react`) makes the Calendar send
