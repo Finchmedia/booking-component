@@ -40,8 +40,10 @@ type Passthrough<R extends FunctionReference<FunctionType, "internal">> = Functi
 >;
 type C = ComponentApi["public"];
 
-// The component's documents, as a passthrough host returns them
-type ComponentEventType = FunctionReturnType<C["getEventType"]>;
+// The component's documents, as a passthrough host returns them. The
+// component's getEventType resolves to `null` for a missing id (0.5.0).
+type ComponentEventTypeResult = FunctionReturnType<C["getEventType"]>;
+type ComponentEventType = NonNullable<ComponentEventTypeResult>;
 type ComponentBooking = FunctionReturnType<C["createBooking"]>;
 type ComponentResource = NonNullable<FunctionReturnType<ComponentApi["resources"]["getResource"]>>;
 
@@ -69,6 +71,23 @@ type HostPublic = {
   rescheduleBookingByToken: M<RescheduleBase, ComponentBooking>;
   heartbeat: M<HeartbeatBase, null>;
   leave: M<LeaveBase, null>;
+};
+
+/** A host module whose functions pass the component's own functions through. */
+type ComponentHost = {
+  getEventType: Passthrough<C["getEventType"]>;
+  getResource: Passthrough<ComponentApi["resources"]["getResource"]>;
+  hasResourceEventTypeLink: Passthrough<ComponentApi["resource_event_types"]["hasResourceEventTypeLink"]>;
+  getMonthAvailability: Passthrough<C["getMonthAvailability"]>;
+  getDaySlots: Passthrough<C["getDaySlots"]>;
+  getDatePresence: Passthrough<ComponentApi["presence"]["getDatePresence"]>;
+  getPresence: Passthrough<ComponentApi["presence"]["list"]>;
+  createBooking: Passthrough<C["createBooking"]>;
+  rescheduleBookingByToken: Passthrough<C["rescheduleBookingByToken"]>;
+  heartbeat: Passthrough<ComponentApi["presence"]["heartbeat"]>;
+  leave: Passthrough<ComponentApi["presence"]["leave"]>;
+  // Optional operations are accepted with any shape
+  getBookingByToken: Passthrough<C["getBookingByToken"]>;
 };
 
 describe("rejected host references", () => {
@@ -124,7 +143,8 @@ describe("rejected host references", () => {
   });
 
   test("incompatible results", () => {
-    // CONTROL: the component's own documents
+    // CONTROL: the component's own documents; its getEventType result includes null
+    expectTypeOf<Q<{ eventTypeId: string }, ComponentEventTypeResult>>().toExtend<Slot<"getEventType">>();
     expectTypeOf<Q<{ eventTypeId: string }, ComponentEventType>>().toExtend<Slot<"getEventType">>();
     expectTypeOf<M<CreateBase, ComponentBooking>>().toExtend<Slot<"createBooking">>();
     // @ts-expect-error no title or lengthInMinutes
@@ -178,21 +198,6 @@ describe("accepted host references", () => {
   });
 
   test("functions that pass the component's own functions through", () => {
-    type ComponentHost = {
-      getEventType: Passthrough<C["getEventType"]>;
-      getResource: Passthrough<ComponentApi["resources"]["getResource"]>;
-      hasResourceEventTypeLink: Passthrough<ComponentApi["resource_event_types"]["hasResourceEventTypeLink"]>;
-      getMonthAvailability: Passthrough<C["getMonthAvailability"]>;
-      getDaySlots: Passthrough<C["getDaySlots"]>;
-      getDatePresence: Passthrough<ComponentApi["presence"]["getDatePresence"]>;
-      getPresence: Passthrough<ComponentApi["presence"]["list"]>;
-      createBooking: Passthrough<C["createBooking"]>;
-      rescheduleBookingByToken: Passthrough<C["rescheduleBookingByToken"]>;
-      heartbeat: Passthrough<ComponentApi["presence"]["heartbeat"]>;
-      leave: Passthrough<ComponentApi["presence"]["leave"]>;
-      // Optional operations are accepted with any shape
-      getBookingByToken: Passthrough<C["getBookingByToken"]>;
-    };
     expectTypeOf<ComponentHost>().toExtend<PublicBookingAPI>();
     // CONTROL: an internal getPresence in the same module is not
     // @ts-expect-error the component's reference itself is internal
@@ -211,6 +216,7 @@ describe("accepted host references", () => {
 
   test("the provider props take the generated shapes", () => {
     expectTypeOf<{ publicApi: HostPublic; children: null }>().toExtend<BookingProviderProps>();
+    expectTypeOf<{ publicApi: ComponentHost; children: null }>().toExtend<BookingProviderProps>();
     // CONTROL
     // @ts-expect-error publicApi is required
     expectTypeOf<{ children: null }>().toExtend<BookingProviderProps>();
@@ -258,6 +264,23 @@ describe("availability context opt-in", () => {
     expectTypeOf<{ publicApi: HostPublic; availabilityContext: true; children: null }>().toExtend<ProviderProps>();
     // @ts-expect-error a boolean flag can be true
     expectTypeOf<{ publicApi: HostPublic; availabilityContext: boolean; children: null }>().toExtend<ProviderProps>();
+  });
+
+  test("wrappers of the component's slot queries that add eventTypeId (docs/host-functions.md)", () => {
+    /** The component's arguments (rescheduleContext included) plus eventTypeId; its result. */
+    type Wrapper<R extends FunctionReference<"query", "internal">> =
+      Q<FunctionArgs<R> & { eventTypeId?: string }, FunctionReturnType<R>>;
+    type WrappingHost = Omit<ComponentHost, "getDaySlots" | "getMonthAvailability"> & {
+      getDaySlots: Wrapper<C["getDaySlots"]>;
+      getMonthAvailability: Wrapper<C["getMonthAvailability"]>;
+    };
+    // CONTROL
+    expectTypeOf<Wrapper<C["getDaySlots"]>>().toExtend<ContextSlot<"getDaySlots">>();
+    expectTypeOf<Wrapper<C["getMonthAvailability"]>>().toExtend<ContextSlot<"getMonthAvailability">>();
+    expectTypeOf<{ publicApi: WrappingHost; availabilityContext: true; children: null }>().toExtend<ProviderProps>();
+    expectTypeOf<{ publicApi: ComponentHost; children: null }>().toExtend<ProviderProps>();
+    // @ts-expect-error the pure passthroughs lack eventTypeId
+    expectTypeOf<{ publicApi: ComponentHost; availabilityContext: true; children: null }>().toExtend<ProviderProps>();
   });
 });
 
