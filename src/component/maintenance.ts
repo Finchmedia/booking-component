@@ -30,7 +30,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { parseCivilDate } from "../shared/time.js";
 import { holdsActiveInventory } from "./inventory_helpers";
 import { isValidTimeZone } from "./input_validation";
-import { getScheduleByExternalId, getWeeklySlots } from "./schedules";
+import { getOrganizationDefaultSchedule, getScheduleByExternalId, getWeeklySlots } from "./schedules";
 import { getLocalDateAndSlot } from "./utils";
 
 // Resets run on modest data sets; the batch keeps per-iteration memory small.
@@ -175,10 +175,22 @@ export const getDailyAvailability = query({
 // rows themselves. `audit` reports one check per call, one page at a time.
 
 /**
- * Largest `limit` of one audit call. A booking costs one override read, plus
- * its event type and schedule once per page; an event type costs nothing more.
+ * Largest `limit` of one audit call. A booking costs one override read, plus,
+ * once per page, its event type, its schedule and its organization's default
+ * schedule (at most two single-document reads); an event type costs nothing
+ * more.
  */
 const MAX_AUDIT_LIMIT = 500;
+
+/** `load(key)` once per key; later calls share its promise. */
+function memoized<V>(cache: Map<string, Promise<V>>, key: string, load: () => Promise<V>): Promise<V> {
+  let value = cache.get(key);
+  if (!value) {
+    value = load();
+    cache.set(key, value);
+  }
+  return value;
+}
 
 type AuditTable = "bookings" | "event_types";
 
@@ -273,38 +285,39 @@ const auditIssue = v.union(
 );
 type AuditIssue = typeof auditIssue.type;
 
+/** Schedule lookups of one audit page, each made once. */
+type ScheduleCache = {
+  /** Event type id and organization → the schedule resolved for them. */
+  resolved: Map<string, Promise<Doc<"schedules"> | null>>;
+  /** Organization → its default schedule. */
+  defaults: Map<string, Promise<Doc<"schedules"> | null>>;
+};
+
 /**
  * The schedule a host would resolve for a booking, as the reference host
  * does: the event type's schedule, else the organization's default schedule
- * (the one marked default, else the first).
+ * (the one marked default, else the first; see getDefaultSchedule).
  */
 async function scheduleForBooking(
   ctx: QueryCtx,
   booking: Doc<"bookings">,
-  cache: Map<string, Promise<Doc<"schedules"> | null>>
+  cache: ScheduleCache
 ): Promise<Doc<"schedules"> | null> {
   const key = `${booking.eventTypeId}\u0000${booking.organizationId ?? ""}`;
-  let schedule = cache.get(key);
-  if (!schedule) {
-    schedule = (async () => {
-      const eventType = await ctx.db
-        .query("event_types")
-        .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
-        .unique();
-      const own = eventType?.scheduleId
-        ? await getScheduleByExternalId(ctx, eventType.scheduleId)
-        : null;
-      const organizationId = booking.organizationId;
-      if (own || !organizationId) return own;
-      const schedules = await ctx.db
-        .query("schedules")
-        .withIndex("by_org", (q) => q.eq("organizationId", organizationId))
-        .collect();
-      return schedules.find((s) => s.isDefault) ?? schedules[0] ?? null;
-    })();
-    cache.set(key, schedule);
-  }
-  return await schedule;
+  return await memoized(cache.resolved, key, async () => {
+    const eventType = await ctx.db
+      .query("event_types")
+      .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
+      .unique();
+    const own = eventType?.scheduleId
+      ? await getScheduleByExternalId(ctx, eventType.scheduleId)
+      : null;
+    const organizationId = booking.organizationId;
+    if (own || !organizationId) return own;
+    return await memoized(cache.defaults, organizationId, () =>
+      getOrganizationDefaultSchedule(ctx, organizationId)
+    );
+  });
 }
 
 /**
@@ -317,7 +330,7 @@ async function f10WeekdayIssue(
   ctx: QueryCtx,
   booking: Doc<"bookings">,
   now: number,
-  cache: Map<string, Promise<Doc<"schedules"> | null>>
+  cache: ScheduleCache
 ): Promise<AuditIssue | null> {
   if (!holdsActiveInventory(booking.status) || booking.start < now) return null;
   const schedule = await scheduleForBooking(ctx, booking, cache);
@@ -398,7 +411,7 @@ export const audit = query({
         typeof args.cursor === "string" ? parseAuditCursor(ctx.db, "bookings", args.cursor) : null;
       const bookings = await rowsAfter(ctx.db, "bookings", cursor, args.limit);
       const now = Date.now();
-      const schedules = new Map<string, Promise<Doc<"schedules"> | null>>();
+      const schedules: ScheduleCache = { resolved: new Map(), defaults: new Map() };
       for (const booking of bookings) {
         const issue = await f10WeekdayIssue(ctx, booking, now, schedules);
         if (issue) issues.push(issue);
@@ -430,8 +443,9 @@ export const audit = query({
 // ============================================
 
 /**
- * Largest `limit` of one backfill call. A booking costs at most one patch,
- * plus its event type once per page.
+ * Largest `limit` of one backfill call. A booking costs at most one patch and
+ * one read of its booking items, plus its event type and each of its
+ * resources once per page.
  */
 const MAX_BACKFILL_LIMIT = 500;
 
@@ -442,15 +456,92 @@ const organizationMismatch = v.object({
 });
 
 /**
- * Fills a missing booking organizationId from the booking's event type, one
- * page of bookings per call. Until 0.4.3 bundles created without
+ * A booking left without organization because the stored rows do not
+ * corroborate one. `resourceId` names the first resource that fails.
+ */
+const organizationReview = v.object({
+  uid: v.string(),
+  eventTypeId: v.string(),
+  reason: v.union(
+    v.literal("event_type_missing"),
+    v.literal("event_type_without_organization"),
+    v.literal("resource_missing"),
+    v.literal("resource_organization_differs")
+  ),
+  eventTypeOrganizationId: v.optional(v.string()),
+  resourceId: v.optional(v.string()),
+  resourceOrganizationId: v.optional(v.string()),
+});
+type OrganizationReview = typeof organizationReview.type;
+
+/**
+ * The organization a booking without one can take, or why it cannot: its
+ * event type must exist and have an organization, and every resource the
+ * booking occupies (its resourceId and each booking item) must exist and
+ * belong to that organization too. Nothing records the organization a
+ * booking was made for, and an event type can move to another organization
+ * later; the resources, owners of the booked inventory, corroborate it.
+ */
+async function corroboratedOrganization(
+  db: DatabaseReader,
+  booking: Doc<"bookings">,
+  eventType: Doc<"event_types"> | null,
+  resourceOrganizations: Map<string, Promise<string | null>>
+): Promise<{ organizationId: string } | OrganizationReview> {
+  const review = { uid: booking.uid, eventTypeId: booking.eventTypeId };
+  if (!eventType) return { ...review, reason: "event_type_missing" };
+  const organizationId = eventType.organizationId;
+  if (organizationId === undefined) return { ...review, reason: "event_type_without_organization" };
+
+  const items = await db
+    .query("booking_items")
+    .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+    .collect();
+  for (const resourceId of new Set([booking.resourceId, ...items.map((item) => item.resourceId)])) {
+    // null: no resource document.
+    const resourceOrganizationId = await memoized(resourceOrganizations, resourceId, async () => {
+      const resource = await db
+        .query("resources")
+        .withIndex("by_external_id", (q) => q.eq("id", resourceId))
+        .first();
+      return resource?.organizationId ?? null;
+    });
+    if (resourceOrganizationId === null) {
+      return { ...review, reason: "resource_missing", eventTypeOrganizationId: organizationId, resourceId };
+    }
+    if (resourceOrganizationId !== organizationId) {
+      return {
+        ...review,
+        reason: "resource_organization_differs",
+        eventTypeOrganizationId: organizationId,
+        resourceId,
+        resourceOrganizationId,
+      };
+    }
+  }
+  return { organizationId };
+}
+
+/**
+ * Fills a missing booking organizationId, one page of bookings per call,
+ * where the stored rows corroborate it. Until 0.4.3 bundles created without
  * `organizationId` stored none (and single bookings before 0.3.0), so they
  * were missing from organization lists and organization hooks.
+ *
+ * A booking takes its event type's organization only when every resource it
+ * occupies (its resourceId and each booking item) exists and belongs to that
+ * organization as well. The event type alone is no evidence: it may have
+ * moved to another organization since the booking was made, which would then
+ * receive the booker's details and management token in its booking list.
  *
  * - `updated` counts the rows given their event type's organization
  *   (with `dryRun`, the rows that would be; nothing is written).
  * - `skipped` counts rows that stay without one: legacy createReservation
- *   rows, and rows whose event type is deleted or has no organization.
+ *   rows and the rows in `needsReview`.
+ * - `needsReview` lists the rows the stored data cannot assign, with the
+ *   reason: event type deleted or without organization, a resource missing or
+ *   in another organization. They keep no organization, so they stay out of
+ *   organization lists and hooks as before; check them against your records.
  * - `mismatches` lists rows whose organization differs from their event
  *   type's. They are reported, never rewritten.
  *
@@ -469,6 +560,7 @@ export const backfillBookingOrganizations = mutation({
     updated: v.number(),
     skipped: v.number(),
     mismatches: v.array(organizationMismatch),
+    needsReview: v.array(organizationReview),
     continueCursor: v.union(v.string(), v.null()),
     isDone: v.boolean(),
   }),
@@ -482,42 +574,48 @@ export const backfillBookingOrganizations = mutation({
         : null;
     const bookings = await rowsAfter(ctx.db, "bookings", cursor, args.limit);
 
-    // Event type id → its organization (undefined: deleted or none).
-    const organizations = new Map<string, string | undefined>();
+    // Lookups shared by the page: event type by id, resource organization by id.
+    const eventTypes = new Map<string, Promise<Doc<"event_types"> | null>>();
+    const resourceOrganizations = new Map<string, Promise<string | null>>();
     let updated = 0;
     let skipped = 0;
     const mismatches: Array<typeof organizationMismatch.type> = [];
+    const needsReview: OrganizationReview[] = [];
     for (const booking of bookings) {
-      let eventTypeOrganizationId: string | undefined;
-      if (booking.eventTypeId !== "legacy") {
-        if (!organizations.has(booking.eventTypeId)) {
-          const eventType = await ctx.db
-            .query("event_types")
-            .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
-            .first();
-          organizations.set(booking.eventTypeId, eventType?.organizationId);
-        }
-        eventTypeOrganizationId = organizations.get(booking.eventTypeId);
-      }
+      const eventType =
+        booking.eventTypeId === "legacy"
+          ? null
+          : await memoized(eventTypes, booking.eventTypeId, () =>
+              ctx.db
+                .query("event_types")
+                .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
+                .first()
+            );
 
-      if (booking.organizationId === undefined) {
-        if (eventTypeOrganizationId === undefined) {
-          skipped++;
-          continue;
+      if (booking.organizationId !== undefined) {
+        const eventTypeOrganizationId = eventType?.organizationId;
+        if (eventTypeOrganizationId !== undefined && booking.organizationId !== eventTypeOrganizationId) {
+          mismatches.push({
+            uid: booking.uid,
+            organizationId: booking.organizationId,
+            eventTypeOrganizationId,
+          });
         }
-        updated++;
-        if (!args.dryRun) {
-          await ctx.db.patch(booking._id, { organizationId: eventTypeOrganizationId });
-        }
-      } else if (
-        eventTypeOrganizationId !== undefined &&
-        booking.organizationId !== eventTypeOrganizationId
-      ) {
-        mismatches.push({
-          uid: booking.uid,
-          organizationId: booking.organizationId,
-          eventTypeOrganizationId,
-        });
+        continue;
+      }
+      if (booking.eventTypeId === "legacy") {
+        skipped++;
+        continue;
+      }
+      const result = await corroboratedOrganization(ctx.db, booking, eventType, resourceOrganizations);
+      if ("reason" in result) {
+        skipped++;
+        needsReview.push(result);
+        continue;
+      }
+      updated++;
+      if (!args.dryRun) {
+        await ctx.db.patch(booking._id, { organizationId: result.organizationId });
       }
     }
 
@@ -527,6 +625,7 @@ export const backfillBookingOrganizations = mutation({
       updated,
       skipped,
       mismatches,
+      needsReview,
       continueCursor: last ? encodeAuditCursor(last) : (args.cursor ?? null),
       isDone: bookings.length < args.limit,
     };

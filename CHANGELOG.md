@@ -9,7 +9,10 @@
   (`limit` 1–500, `dryRun: true` only counts): `presence.sweepOrphanedHolds` for holds
   whose cleanup job was cancelled or failed, `maintenance.backfillBookingOrganizations`
   to give bookings without an organization (bundles created without `organizationId`,
-  pre-0.3.0 ones) their event type's; it only lists mismatches.
+  pre-0.3.0 ones) their event type's when every resource they occupy belongs to it too.
+  It writes nothing else: bookings it cannot corroborate (event type gone or without
+  organization, a resource missing or in another organization) stay without one and
+  are listed in `needsReview` with the reason; it only lists mismatches.
 - Presence runs fewer background jobs: `leave` cancels the hold's pending cleanup job,
   and a heartbeat replaces a cancelled or failed one. Surplus jobs from earlier
   leave/rejoin cycles are not merged; they no longer grow and end 10–20 s after their
@@ -40,8 +43,10 @@
 - The built-in email HTML changes (escaped text, validated buttons; see Security), so
   host snapshot tests of it may need updating. Email jobs queued by 0.4.2 still run.
 - The `bookings` index `by_event_type` becomes `by_event_type_start`, which Convex
-  builds during the deploy (allow time on a large table). Booking documents can carry
-  the new optional `rescheduledToUid`; host validators of booking fields must accept it.
+  builds during the deploy (allow time on a large table); `schedules` gains
+  `by_org_default`, so `getDefaultSchedule` and the audit read one schedule, not all of
+  an organization's. Booking documents can carry the new optional `rescheduledToUid`;
+  host validators of booking fields must accept it.
 - The Booker now shows booking errors itself; hosts that also toast them (for example by
   wrapping mutations) show two messages, so drop that or move it to `onBookingError`.
   Throw `ConvexError({ code, message })` from host functions for a specific message.
