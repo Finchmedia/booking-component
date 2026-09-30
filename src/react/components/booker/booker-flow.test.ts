@@ -102,8 +102,8 @@ function slotButton(
   return screen.getByRole("button", { name: formatTime(slot, format, timezone) }) as HTMLButtonElement;
 }
 
-function fillContact() {
-  fireEvent.change(screen.getByPlaceholderText("John Doe"), { target: { value: "Ada Lovelace" } });
+function fillContact(name = "Ada Lovelace") {
+  fireEvent.change(screen.getByPlaceholderText("John Doe"), { target: { value: name } });
   fireEvent.change(screen.getByPlaceholderText("john@example.com"), { target: { value: "ada@example.com" } });
 }
 
@@ -118,9 +118,11 @@ function submitForm() {
 /** Lets form validation and mutation promises settle. */
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
-function echoBooking(args: { start: number; end: number; timezone: string; booker: { name: string; email: string } }): Booking {
+function echoBooking(args: {
+  resourceId: string; start: number; end: number; timezone: string; booker: { name: string; email: string };
+}): Booking {
   return {
-    _id: "b-db", uid: "bk_new", resourceId: "r", eventTypeId: "e", start: args.start, end: args.end,
+    _id: "b-db", uid: "bk_new", resourceId: args.resourceId, eventTypeId: "e", start: args.start, end: args.end,
     timezone: args.timezone, status: "confirmed", bookerName: args.booker.name,
     bookerEmail: args.booker.email, eventTitle: "Session", managementToken: "tok",
   };
@@ -288,6 +290,63 @@ describe("Booker identity reset (O10)", () => {
       expect(mocks.create.mock.calls[1][0]).toMatchObject({ resourceId: "r-other", start: Date.parse(SLOT_B) });
       cleanup();
     }
+  });
+
+  describe("overlapping submissions across an identity change", () => {
+    /** Each create waits until the test resolves it by submission index. */
+    function deferCreates() {
+      const resolvers: Array<() => void> = [];
+      mocks.create.mockImplementation(
+        (args) => new Promise((resolve) => { resolvers.push(() => resolve(echoBooking(args))); })
+      );
+      return (index: number) => act(async () => resolvers[index]());
+    }
+
+    /** An older create is pending on "r" when the resource changes; a newer one is sent on "r-other". */
+    async function startOverlap(onBookingComplete: BookerProps["onBookingComplete"]) {
+      const resolve = deferCreates();
+      const view = renderBooker({ onBookingComplete });
+      fireEvent.click(slotButton(SLOT_A));
+      fillContact("Ada Lovelace");
+      submitForm();
+      await settle();
+      view.rerender({ resourceId: "r-other", onBookingComplete });
+      fireEvent.click(slotButton(SLOT_B));
+      fillContact("Grace Hopper");
+      submitForm();
+      await settle();
+      expect(mocks.create).toHaveBeenCalledTimes(2);
+      return { older: () => resolve(0), newer: () => resolve(1) };
+    }
+
+    it("keeps the newer confirmation when the older request resolves after it", async () => {
+      const onBookingComplete = vi.fn();
+      const { older, newer } = await startOverlap(onBookingComplete);
+      await newer();
+      expect(screen.getByText("You're booked!")).toBeTruthy();
+      expect(screen.getByText("Grace Hopper")).toBeTruthy();
+      await older();
+      expect(screen.getByText("Grace Hopper")).toBeTruthy(); // still the newer booking
+      expect(screen.queryByText("Ada Lovelace")).toBeNull();
+      // Both bookings were made: the host hears of each, the older one included
+      expect(onBookingComplete).toHaveBeenCalledTimes(2);
+      expect(onBookingComplete.mock.calls[0][0]).toMatchObject({ bookerName: "Grace Hopper", resourceId: "r-other", start: Date.parse(SLOT_B) });
+      expect(onBookingComplete.mock.calls[1][0]).toMatchObject({ bookerName: "Ada Lovelace", resourceId: "r", start: Date.parse(SLOT_A) });
+    });
+
+    it("CONTROL: the newer confirmation replaces the older one when they resolve in order", async () => {
+      const onBookingComplete = vi.fn();
+      const { older, newer } = await startOverlap(onBookingComplete);
+      await older();
+      expect(screen.getByText("Ada Lovelace")).toBeTruthy();
+      await newer();
+      expect(screen.getByText("You're booked!")).toBeTruthy();
+      expect(screen.getByText("Grace Hopper")).toBeTruthy();
+      expect(screen.queryByText("Ada Lovelace")).toBeNull();
+      expect(onBookingComplete).toHaveBeenCalledTimes(2);
+      expect(onBookingComplete.mock.calls.map(([booking]) => (booking as Booking).bookerName))
+        .toEqual(["Ada Lovelace", "Grace Hopper"]);
+    });
   });
 
   it("CONTROL: a confirmation already shown gives way to a fresh flow on an identity change", async () => {

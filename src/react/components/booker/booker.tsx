@@ -137,15 +137,37 @@ export function Booker(props: BookerProps) {
     props.originalBooking?.uid ?? "",
   ]);
   const [completion, setCompletion] = useState<Completion | null>(null);
+  // Rule: every submission of any flow gets the next number when it is sent.
+  // The confirmation shown is the completed submission that started last: a
+  // submission that completes after a later one has completed is recorded
+  // (its onBookingComplete still runs, the booking was made) but not shown, so
+  // an older request resolving late never replaces a newer confirmation.
+  const lastStarted = useRef(0);
+  const lastCompleted = useRef(0);
+  const startSubmission = () => ++lastStarted.current;
+  const completeSubmission = (submission: number, next: Completion) => {
+    if (submission < lastCompleted.current) return; // A later one is shown
+    lastCompleted.current = submission;
+    setCompletion(next);
+  };
   return (
-    <BookerFlow key={identity} {...props} completion={completion} onCompletion={setCompletion} />
+    <BookerFlow
+      key={identity}
+      {...props}
+      completion={completion}
+      onSubmissionStart={startSubmission}
+      onCompletion={completeSubmission}
+    />
   );
 }
 
 interface BookerFlowProps extends BookerProps {
-  /** The latest submission any flow of this Booker completed */
+  /** The completed submission that started last, across all flows of this Booker */
   completion: Completion | null;
-  onCompletion: (completion: Completion) => void;
+  /** Numbers a submission as it is sent */
+  onSubmissionStart: () => number;
+  /** Reports a completed submission; the Booker decides whether it is shown */
+  onCompletion: (submission: number, completion: Completion) => void;
 }
 
 function BookerFlow({
@@ -165,6 +187,7 @@ function BookerFlow({
   originalBooking,
   reuseBookerInfo = false,
   completion,
+  onSubmissionStart,
   onCompletion,
 }: BookerFlowProps) {
   const api = useBookingAPI();
@@ -287,10 +310,10 @@ function BookerFlow({
   // A completed submission goes to the Booker, so its success screen survives
   // this flow being replaced meanwhile and keeps the event type it was made for
   // even if that later resolves to null. Host callbacks run after the mutation,
-  // outside its error handling.
-  const completeBooking = (result: unknown) => {
+  // outside its error handling, for every booking made, shown or not.
+  const completeBooking = (submission: number, result: unknown) => {
     const booking = result as Booking;
-    onCompletion({
+    onCompletion(submission, {
       booking,
       eventType: {
         title: eventType?.title ?? booking.eventTitle,
@@ -326,6 +349,7 @@ function BookerFlow({
 
     inFlight.current = true;
     setIsSubmitting(true);
+    const submission = onSubmissionStart();
 
     let newBooking;
     try {
@@ -346,7 +370,7 @@ function BookerFlow({
       inFlight.current = false;
       setIsSubmitting(false);
     }
-    completeBooking(newBooking);
+    completeBooking(submission, newBooking);
   };
 
   // Step 1: Calendar slot selection (captures BOTH slot AND duration atomically)
@@ -383,6 +407,7 @@ function BookerFlow({
     inFlight.current = true;
     setIsSubmitting(true);
     setBookingError(null);
+    const submission = onSubmissionStart();
 
     let booking;
     try {
@@ -431,7 +456,7 @@ function BookerFlow({
       inFlight.current = false;
       setIsSubmitting(false);
     }
-    completeBooking(booking);
+    completeBooking(submission, booking);
   };
 
   // Back to calendar
