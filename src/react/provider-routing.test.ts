@@ -112,12 +112,16 @@ describe("generated publicApi and adminApi", () => {
     const host = convexTest(defineSchema({}), {
       "./host/_generated/api.js": async () => ({}),
       "./host/public.ts": async () => ({
-        getEventType: queryGeneric({ args: {}, handler: async () => "public getEventType" }),
+        getEventType: queryGeneric({ args: {}, returns: v.string(), handler: async () => "public getEventType" }),
       }),
       "./host/admin.ts": async () => ({
-        createResource: mutationGeneric({ args: { id: v.string() }, handler: async () => "admin createResource" }),
+        createResource: mutationGeneric({
+          args: { id: v.string() },
+          returns: v.string(),
+          handler: async () => "admin createResource",
+        }),
         // Same name as a public operation: must not be picked for public calls
-        getEventType: queryGeneric({ args: {}, handler: async () => "admin getEventType" }),
+        getEventType: queryGeneric({ args: {}, returns: v.string(), handler: async () => "admin getEventType" }),
       }),
     });
     const merged = resolved({ publicApi: api.public, adminApi: api.admin });
