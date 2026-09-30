@@ -12,8 +12,9 @@
 ### Tests
 
 - Characterization tests pin the registered component function paths (checked
-  against the generated `ComponentApi`). Moving or renaming a function fails
-  the suite and must be deliberate.
+  against the generated `ComponentApi`), the v1 hook payload shapes per emitter
+  and stored booking shape, and the entry-point error texts and check order
+  that hosts match. Changing any of them fails the suite and must be deliberate.
 - Time-sensitive tests can run under a chosen process time zone
   (`src/testing/process-time-zone.ts`).
 
