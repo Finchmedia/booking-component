@@ -1427,13 +1427,14 @@ async function firstMatching(
  * Pass `organizationId`, `resourceId` or `eventTypeId` (tried in that order):
  * the branch reads the `by_org_start` / `by_resource_start` /
  * `by_event_type_start` index, so `dateFrom` / `dateTo` narrow the index range
- * itself and the scan is proportional to the window. With a positive integer
- * `limit` the scan also stops once `limit` bookings match, so it reads the
- * limit plus the rows the other filters skip (for `eventTypeId`, plus the rest
- * of the bookings sharing the last one's `start`). Without a limit it reads
- * the whole range. Other `limit` values keep their earlier meaning (0: no
- * limit). Bookings with equal `start` come newest-created first, except in
- * the `eventTypeId` branch, where they come oldest-created first.
+ * itself and the scan is proportional to the window. With a `limit` the scan
+ * also stops once `limit` bookings match, so it reads the limit plus the rows
+ * the other filters skip (for `eventTypeId`, plus the rest of the bookings
+ * sharing the last one's `start`). Without a limit it reads the whole range.
+ * `limit` must be a positive integer (0.5.0; INVALID_INPUT otherwise, where
+ * 0.4.x read 0 as no limit).
+ * Bookings with equal `start` come newest-created first, except in the
+ * `eventTypeId` branch, where they come oldest-created first.
  *
  * `resourceId` matches a booking's primary resource: a bundle is listed under
  * its first resource only, not under its other items (pools included).
@@ -1458,11 +1459,14 @@ export const listBookings = query({
   returns: v.array(bookingDoc),
   handler: async (ctx, args) => {
     const { limit } = args;
+    if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) {
+      throwBookingError("INVALID_INPUT", `Invalid limit ${limit}: expected a positive integer`);
+    }
     // The eventTypeId branch used to read `by_event_type` (creation order) and
     // then sort by start, so its equal starts come oldest first.
     const oldestFirstTies = !args.organizationId && !args.resourceId && !!args.eventTypeId;
 
-    if (limit !== undefined && Number.isInteger(limit) && limit > 0) {
+    if (limit !== undefined) {
       const rows = bookingsInRange(ctx, args, "desc");
       if (rows) return await firstMatching(rows, args, limit, oldestFirstTies);
     }
@@ -1479,7 +1483,7 @@ export const listBookings = query({
     bookings.sort((a, b) => b.start - a.start);
 
     // Apply limit
-    if (limit) {
+    if (limit !== undefined) {
       bookings = bookings.slice(0, limit);
     }
 

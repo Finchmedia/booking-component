@@ -148,6 +148,13 @@
   now the event type or `null`: handle `null` where you read the result, and
   drop a wrapper's catch that mapped that error to `null` (it no longer
   fires). The Booker already treats `null` as a deleted event type.
+- `listBookings` rejects a `limit` that is not a positive integer (F18,
+  D23) with `INVALID_INPUT` "Invalid limit <n>: expected a positive
+  integer". 0.4.x read `0` as no limit, dropped rows from the end for a
+  negative limit and truncated fractions. Omit `limit` for no limit and pass
+  whole numbers. Without a selector the list still considers only the 1,000
+  most recently created bookings; pass `organizationId`, `resourceId` or
+  `eventTypeId` for complete results.
 - Booking statuses are a closed set (F16, D35): `status` is one of
   `provisional`, `pending`, `confirmed`, `cancelled`, `declined` and
   `completed` in the schema, in every returned booking and in the generated

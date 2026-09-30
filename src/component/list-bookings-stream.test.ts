@@ -10,8 +10,11 @@
  * enough bookings match; `by_event_type_start` narrows the event-type range by
  * date. The output is identical to before for every argument combination,
  * including the order of equal starts (newest-created first, oldest-created
- * first in the event-type branch) and the earlier meaning of 0, negative and
- * fractional limits. Checked here against a copy of the 0.4.2 implementation.
+ * first in the event-type branch). Checked here against a copy of the 0.4.2
+ * implementation. Since 0.5.0 (D23) limits that are not positive integers
+ * (0.4.2: 0 = no limit, negative drops rows from the end, fractions
+ * truncate) and statuses outside BOOKING_STATUSES are rejected, so the
+ * comparison covers the arguments 0.5.0 accepts.
  *
  * Reads are counted with a ctx whose db counts every document a query hands
  * to the handler (collect/take/first/unique and async iteration); the
@@ -282,7 +285,7 @@ describe("listBookings output is unchanged", () => {
         {}, { dateFrom: BASE + 2 * HOUR }, { dateTo: BASE + 5 * HOUR },
         { dateFrom: BASE + 2 * HOUR, dateTo: BASE + 5 * HOUR }, { dateFrom: BASE + 5 * HOUR, dateTo: BASE + 2 * HOUR },
       ];
-      const limits = [undefined, 1, 2, 3, 7, 1000, 0, -1, 1.5];
+      const limits = [undefined, 1, 2, 3, 7, 1000];
 
       const { t } = setup();
       await seedRandom(t, seed, 100);
@@ -356,7 +359,7 @@ describe("listBookings output is unchanged", () => {
         { eventTypeId: "et-1" }, { eventTypeId: "et-2" }, {}],
       [undefined, "provisional", "confirmed"],
       [{}, { dateFrom: at("10:00"), dateTo: at("12:00") }],
-      [undefined, 1, 2, 5, 0, -1, 1.5]
+      [undefined, 1, 2, 5]
     );
     expect(tally.tiedOutput).toBeGreaterThan(0);
     expect(tally.multiRow).toBeGreaterThan(10);
@@ -388,25 +391,29 @@ describe("listBookings reads", () => {
     expect(await measured(t, { eventTypeId: "et-1", ...window, limit: 1 })).toEqual({ uids: ["u11"], reads: 2 });
   });
 
-  test("unchanged: without a positive integer limit a selector reads its whole range", async () => {
+  test("without a limit a selector reads its whole range; no selector reads the 1000 newest-created", async () => {
     const { t } = setup();
     const N = 300;
     await insertDaily(t, N);
-    for (const limit of [undefined, 0, -1, 1.5]) {
-      expect((await measured(t, { organizationId: ORG, limit })).reads).toBe(N);
-      expect((await measured(t, { eventTypeId: "et-1", limit })).reads).toBe(N);
-    }
+    expect((await measured(t, { organizationId: ORG })).reads).toBe(N);
+    expect((await measured(t, { eventTypeId: "et-1" })).reads).toBe(N);
     // No selector: the most recently created 1000 rows, whatever the limit.
     expect(await measured(t, { limit: 1 })).toEqual({ uids: [`u${N - 1}`], reads: N });
   });
 
-  test("unchanged: 0 means no limit, a negative limit drops rows from the end, fractions truncate", async () => {
+  test("0.5.0: limits that are not positive integers are rejected (0.4.x: 0 = no limit, -1 dropped a row, 1.5 truncated)", async () => {
     const { t } = setup();
     await insertDaily(t, 3);
-    for (const selector of [{ organizationId: ORG }, { eventTypeId: "et-1" }]) {
-      expect((await measured(t, { ...selector, limit: 0 })).uids).toEqual(["u2", "u1", "u0"]);
-      expect((await measured(t, { ...selector, limit: -1 })).uids).toEqual(["u2", "u1"]);
-      expect((await measured(t, { ...selector, limit: 1.5 })).uids).toEqual(["u2"]);
+    for (const selector of [{ organizationId: ORG }, { eventTypeId: "et-1" }, {}]) {
+      for (const limit of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+        await expect(t.query(api.public.listBookings, { ...selector, limit })).rejects.toMatchObject({
+          data: { code: "INVALID_INPUT", message: `Invalid limit ${limit}: expected a positive integer` },
+        });
+      }
+      // CONTROL: positive integer limits and no limit are unchanged.
+      expect((await measured(t, { ...selector, limit: 1 })).uids).toEqual(["u2"]);
+      expect((await measured(t, { ...selector, limit: 5 })).uids).toEqual(["u2", "u1", "u0"]);
+      expect((await measured(t, selector)).uids).toEqual(["u2", "u1", "u0"]);
     }
   });
 });
