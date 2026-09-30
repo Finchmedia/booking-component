@@ -122,7 +122,15 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "query",
         "internal",
         {
-          check: "f10_weekday" | "event_length_invalid";
+          check:
+            | "f10_weekday"
+            | "event_length_invalid"
+            | "event_type_config"
+            | "schedule_config"
+            | "resource_config"
+            | "date_override_config"
+            | "link_integrity"
+            | "booking_integrity";
           cursor?: string | null;
           limit: number;
         },
@@ -142,6 +150,55 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 eventTypeId: string;
                 lengthInMinutes: number;
                 lengthInMinutesOptions?: Array<number>;
+              }
+            | {
+                check: "event_type_config";
+                eventTypeId: string;
+                problems: Array<
+                  | "lengthInMinutes"
+                  | "lengthInMinutesOptions"
+                  | "lengthNotInOptions"
+                  | "slotInterval"
+                  | "bufferBefore"
+                  | "bufferAfter"
+                  | "minNoticeMinutes"
+                  | "maxFutureMinutes"
+                  | "timezone"
+                  | "scheduleId"
+                >;
+              }
+            | {
+                check: "schedule_config";
+                problems: Array<"timezone">;
+                scheduleId: string;
+              }
+            | {
+                check: "resource_config";
+                problems: Array<"timezone">;
+                resourceId: string;
+              }
+            | {
+                check: "date_override_config";
+                date: string;
+                overrideId: string;
+                problems: Array<"type" | "customHours" | "date">;
+                type: string;
+              }
+            | {
+                check: "link_integrity";
+                eventTypeId: string;
+                problems: Array<
+                  | "resourceMissing"
+                  | "eventTypeMissing"
+                  | "crossOrganization"
+                  | "duplicate"
+                >;
+                resourceId: string;
+              }
+            | {
+                check: "booking_integrity";
+                problems: Array<"organizationMissing" | "poolWithoutItems">;
+                uid: string;
               }
           >;
           scanned: number;

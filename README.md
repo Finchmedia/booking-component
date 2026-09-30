@@ -188,8 +188,9 @@ endpoints to authorized host wrappers.
   local time that does not exist is not offered, a repeated one means its first
   occurrence, and a window closes when its last existing quarter hour ends, so
   bookings end by then. Before upgrading from 0.4.2 or earlier, check your
-  event-type lengths, and afterwards run the `maintenance.audit` checks; see
-  the CHANGELOG.
+  event-type lengths, and afterwards run the `maintenance.audit` checks,
+  which also list the stored configuration and bookings 0.5.0 treats
+  differently; see the CHANGELOG.
 - **Bundles and pools:** reserve several resources atomically through the
   [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).
   Pool quantities use this API; ordinary single-resource flows reject pools.

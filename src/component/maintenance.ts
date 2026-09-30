@@ -31,6 +31,7 @@ import { parseCivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
 import { holdsActiveInventory } from "./inventory_helpers";
 import { isValidTimeZone } from "./input_validation";
+import { sharesOrganization } from "./resource_event_types";
 import { getScheduleByExternalId, getWeeklySlots } from "./schedules";
 import { getLocalDateAndSlot } from "./utils";
 
@@ -176,12 +177,19 @@ export const getDailyAvailability = query({
 // rows themselves. `audit` reports one check per call, one page at a time.
 
 /**
- * Largest `limit` of one audit call. A booking costs one override read, plus
- * its event type and schedule once per page; an event type costs nothing more.
+ * Largest `limit` of one audit call. A row costs at most one read of its own
+ * (an override, its link pair, its first bundle item) plus lookups of the
+ * event types, resources and schedules it names, each once per page.
  */
 const MAX_AUDIT_LIMIT = 500;
 
-type AuditTable = "bookings" | "event_types";
+type AuditTable =
+  | "bookings"
+  | "event_types"
+  | "schedules"
+  | "resources"
+  | "date_overrides"
+  | "resource_event_types";
 
 /**
  * A row's complete by_creation_time index key. Creation times can tie
@@ -226,8 +234,11 @@ type CreationTimeIndex<T extends AuditTable> = {
       eq(field: "_creationTime", value: number): { gt(field: "_id", value: Id<T>): IndexRange };
       gt(field: "_creationTime", value: number): IndexRange;
     }) => IndexRange
-  ): { take(n: number): Promise<Doc<T>[]> };
+  ): { take(n: number): Promise<AuditRow<T>[]> };
 };
+
+/** A row with its system fields spelled out (Doc<T> of a generic T does not resolve them). */
+type AuditRow<T extends AuditTable> = Doc<T> & { _creationTime: number; _id: Id<T> };
 
 /**
  * Up to `limit` rows after `cursor`, in by_creation_time order: the rest of
@@ -240,7 +251,7 @@ async function rowsAfter<T extends AuditTable>(
   table: T,
   cursor: AuditCursor<T> | null,
   limit: number
-): Promise<Doc<T>[]> {
+): Promise<AuditRow<T>[]> {
   const rows = () => db.query(table) as unknown as CreationTimeIndex<T>;
   if (!cursor) {
     return await rows().withIndex("by_creation_time").take(limit);
@@ -257,6 +268,9 @@ async function rowsAfter<T extends AuditTable>(
   return [...tieGroup, ...later];
 }
 
+const problems = <P extends string>(...names: [P, ...P[]]) =>
+  v.array(v.union(...names.map((name) => v.literal(name))));
+
 const auditIssue = v.union(
   v.object({
     check: v.literal("f10_weekday"),
@@ -270,6 +284,50 @@ const auditIssue = v.union(
     eventTypeId: v.string(),
     lengthInMinutes: v.number(),
     lengthInMinutesOptions: v.optional(v.array(v.number())),
+  }),
+  v.object({
+    check: v.literal("event_type_config"),
+    eventTypeId: v.string(),
+    problems: problems(
+      "lengthInMinutes",
+      "lengthInMinutesOptions",
+      "lengthNotInOptions",
+      "slotInterval",
+      "bufferBefore",
+      "bufferAfter",
+      "minNoticeMinutes",
+      "maxFutureMinutes",
+      "timezone",
+      "scheduleId"
+    ),
+  }),
+  v.object({
+    check: v.literal("schedule_config"),
+    scheduleId: v.string(),
+    problems: problems("timezone"),
+  }),
+  v.object({
+    check: v.literal("resource_config"),
+    resourceId: v.string(),
+    problems: problems("timezone"),
+  }),
+  v.object({
+    check: v.literal("date_override_config"),
+    overrideId: v.string(),
+    date: v.string(),
+    type: v.string(),
+    problems: problems("type", "customHours", "date"),
+  }),
+  v.object({
+    check: v.literal("link_integrity"),
+    resourceId: v.string(),
+    eventTypeId: v.string(),
+    problems: problems("resourceMissing", "eventTypeMissing", "crossOrganization", "duplicate"),
+  }),
+  v.object({
+    check: v.literal("booking_integrity"),
+    uid: v.string(),
+    problems: problems("organizationMissing", "poolWithoutItems"),
   })
 );
 type AuditIssue = typeof auditIssue.type;
@@ -361,23 +419,193 @@ function eventLengthIssue(eventType: Doc<"event_types">): AuditIssue | null {
   };
 }
 
+const isPositive = (value: number) => Number.isFinite(value) && value > 0;
+const isNonNegative = (value: number) => Number.isFinite(value) && value >= 0;
+
+function isCanonicalDate(value: string): boolean {
+  try {
+    return parseCivilDate(value) === value;
+  } catch {
+    return false;
+  }
+}
+
+/** `load` runs once per key within one audit page. */
+function perPage<V>(load: (key: string) => Promise<V>): (key: string) => Promise<V> {
+  const cache = new Map<string, Promise<V>>();
+  return (key) => {
+    let value = cache.get(key);
+    if (!value) {
+      value = load(key);
+      cache.set(key, value);
+    }
+    return value;
+  };
+}
+
+/** Configuration rows by external id, tolerant of duplicates (`first`). */
+function lookups(db: DatabaseReader) {
+  return {
+    eventType: perPage((id) => db.query("event_types").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
+    resource: perPage((id) => db.query("resources").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
+    schedule: perPage((id) => db.query("schedules").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
+  };
+}
+type Lookups = ReturnType<typeof lookups>;
+type ProblemsOf<C extends AuditIssue["check"]> = Extract<AuditIssue, { check: C; problems: unknown }>["problems"];
+
 /**
- * Read-only upgrade audit, one check and one page of rows per call:
- * - "f10_weekday": upcoming pending, confirmed or provisional bookings that
- *   0.4.2 admitted on a weekday without opening hours (schedules at UTC+12
- *   or beyond used the next weekday's hours). The schedule is the booking's
- *   event type's, else its organization's default, as in the reference host.
- * - "event_length_invalid": event types whose lengthInMinutes or
+ * event_type_config: stored values the 0.5.0 configuration rules do not
+ * accept: lengths, options and slot interval that are not positive numbers,
+ * a length missing from non-empty options, negative or non-finite buffers,
+ * notice and horizon, a zone Intl rejects, a scheduleId naming no schedule.
+ */
+async function eventTypeConfigIssue(eventType: Doc<"event_types">, find: Lookups): Promise<AuditIssue | null> {
+  const found: ProblemsOf<"event_type_config"> = [];
+  const options = eventType.lengthInMinutesOptions;
+  if (!isPositive(eventType.lengthInMinutes)) found.push("lengthInMinutes");
+  if (options?.some((option) => !isPositive(option))) found.push("lengthInMinutesOptions");
+  if (options && options.length > 0 && !options.includes(eventType.lengthInMinutes)) found.push("lengthNotInOptions");
+  if (eventType.slotInterval !== undefined && !isPositive(eventType.slotInterval)) found.push("slotInterval");
+  for (const key of ["bufferBefore", "bufferAfter", "minNoticeMinutes", "maxFutureMinutes"] as const) {
+    const value = eventType[key];
+    if (value !== undefined && !isNonNegative(value)) found.push(key);
+  }
+  if (!isValidTimeZone(eventType.timezone)) found.push("timezone");
+  if (eventType.scheduleId && !(await find.schedule(eventType.scheduleId))) found.push("scheduleId");
+  return found.length > 0 ? { check: "event_type_config", eventTypeId: eventType.id, problems: found } : null;
+}
+
+/** date_override_config: an unknown type, "custom" without hours, a date that is not a canonical calendar day. */
+function dateOverrideIssue(override: Doc<"date_overrides">): AuditIssue | null {
+  const found: ProblemsOf<"date_override_config"> = [];
+  if (override.type !== "unavailable" && override.type !== "custom") found.push("type");
+  if (override.type === "custom" && !override.customHours?.length) found.push("customHours");
+  if (!isCanonicalDate(override.date)) found.push("date");
+  return found.length > 0
+    ? { check: "date_override_config", overrideId: override._id, date: override.date, type: override.type, problems: found }
+    : null;
+}
+
+/**
+ * link_integrity: a link whose resource or event type no longer exists, one
+ * across organizations (the event type has one and the resource another),
+ * or a second row of the same pair (the first row of a pair is not one).
+ */
+async function linkIssue(
+  db: DatabaseReader,
+  link: Doc<"resource_event_types">,
+  find: Lookups
+): Promise<AuditIssue | null> {
+  const found: ProblemsOf<"link_integrity"> = [];
+  const resource = await find.resource(link.resourceId);
+  const eventType = await find.eventType(link.eventTypeId);
+  if (!resource) found.push("resourceMissing");
+  if (!eventType) found.push("eventTypeMissing");
+  if (resource && eventType && !sharesOrganization(resource, eventType)) found.push("crossOrganization");
+  const firstOfPair = await db
+    .query("resource_event_types")
+    .withIndex("by_resource_event_type", (q) =>
+      q.eq("resourceId", link.resourceId).eq("eventTypeId", link.eventTypeId)
+    )
+    .first();
+  if (firstOfPair && firstOfPair._id !== link._id) found.push("duplicate");
+  return found.length > 0
+    ? { check: "link_integrity", resourceId: link.resourceId, eventTypeId: link.eventTypeId, problems: found }
+    : null;
+}
+
+/**
+ * booking_integrity: no organizationId although the booking's event type has
+ * one (backfillBookingOrganizations fills it; legacy rows are skipped), and
+ * an active booking without items on a pool (isFungible), which moves reject.
+ */
+async function bookingIntegrityIssue(
+  db: DatabaseReader,
+  booking: Doc<"bookings">,
+  find: Lookups
+): Promise<AuditIssue | null> {
+  const found: ProblemsOf<"booking_integrity"> = [];
+  if (booking.organizationId === undefined && booking.eventTypeId !== "legacy") {
+    const eventType = await find.eventType(booking.eventTypeId);
+    if (eventType?.organizationId !== undefined) found.push("organizationMissing");
+  }
+  if (holdsActiveInventory(booking.status) && (await find.resource(booking.resourceId))?.isFungible === true) {
+    const item = await db
+      .query("booking_items")
+      .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+      .first();
+    if (!item) found.push("poolWithoutItems");
+  }
+  return found.length > 0 ? { check: "booking_integrity", uid: booking.uid, problems: found } : null;
+}
+
+/** schedule_config / resource_config: a zone Intl rejects. */
+function zoneIssue(row: Doc<"schedules"> | Doc<"resources">, check: "schedule_config" | "resource_config"): AuditIssue | null {
+  if (isValidTimeZone(row.timezone)) return null;
+  return check === "schedule_config"
+    ? { check, scheduleId: row.id, problems: ["timezone"] }
+    : { check, resourceId: row.id, problems: ["timezone"] };
+}
+
+/** One page of `table` after the cursor, checked row by row. */
+async function auditPage<T extends AuditTable>(
+  db: DatabaseReader,
+  table: T,
+  args: { cursor?: string | null; limit: number },
+  issueOf: (row: Doc<T>) => AuditIssue | null | Promise<AuditIssue | null>
+) {
+  const cursor = typeof args.cursor === "string" ? parseAuditCursor(db, table, args.cursor) : null;
+  const rows = await rowsAfter(db, table, cursor, args.limit);
+  const issues: AuditIssue[] = [];
+  for (const row of rows) {
+    const issue = await issueOf(row);
+    if (issue) issues.push(issue);
+  }
+  const last = rows[rows.length - 1];
+  return {
+    issues,
+    scanned: rows.length,
+    continueCursor: last ? encodeAuditCursor(last) : (args.cursor ?? null),
+    isDone: rows.length < args.limit,
+  };
+}
+
+/**
+ * Read-only upgrade audit, one check and one page of rows per call. Run
+ * every check before upgrading to 0.5.0: each reports stored rows that
+ * 0.5.0 rejects on write, reads differently or cannot move.
+ * - "f10_weekday" (bookings): upcoming pending, confirmed or provisional
+ *   bookings that 0.4.2 admitted on a weekday without opening hours
+ *   (schedules at UTC+12 or beyond used the next weekday's hours). The
+ *   schedule is the booking's event type's, else its organization's
+ *   default, as in the reference host.
+ * - "event_length_invalid" (event types): lengthInMinutes or
  *   lengthInMinutesOptions hold a value that is not a positive number. The
  *   availability queries reject such lengths since 0.4.3.
+ * - "event_type_config" (event types), "schedule_config" (schedules),
+ *   "resource_config" (resources), "date_override_config" (date overrides),
+ *   "link_integrity" (resource ↔ event type links) and "booking_integrity"
+ *   (bookings): each issue lists its `problems`; see the functions above.
  *
- * Start without a cursor and pass `continueCursor` back until `isDone`.
- * `scanned` counts the rows read; `issues` lists the ones that failed the
- * check. Call it from a host internal function.
+ * Start without a cursor and pass `continueCursor` back until `isDone`; the
+ * cursor is the complete by_creation_time key, so rows with equal creation
+ * times are neither skipped nor repeated, and rows created during a run are
+ * visited too. `scanned` counts the rows read; `issues` lists the ones that
+ * failed the check. Call it from a host internal function.
  */
 export const audit = query({
   args: {
-    check: v.union(v.literal("f10_weekday"), v.literal("event_length_invalid")),
+    check: v.union(
+      v.literal("f10_weekday"),
+      v.literal("event_length_invalid"),
+      v.literal("event_type_config"),
+      v.literal("schedule_config"),
+      v.literal("resource_config"),
+      v.literal("date_override_config"),
+      v.literal("link_integrity"),
+      v.literal("booking_integrity")
+    ),
     cursor: v.optional(v.union(v.string(), v.null())),
     limit: v.number(),
   },
@@ -391,38 +619,28 @@ export const audit = query({
     if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_AUDIT_LIMIT) {
       throwBookingError("INVALID_INPUT", `limit must be an integer from 1 to ${MAX_AUDIT_LIMIT}`);
     }
-    const issues: AuditIssue[] = [];
-    let rows: Array<Doc<"bookings"> | Doc<"event_types">>;
-
-    if (args.check === "f10_weekday") {
-      const cursor =
-        typeof args.cursor === "string" ? parseAuditCursor(ctx.db, "bookings", args.cursor) : null;
-      const bookings = await rowsAfter(ctx.db, "bookings", cursor, args.limit);
-      const now = Date.now();
-      const schedules = new Map<string, Promise<Doc<"schedules"> | null>>();
-      for (const booking of bookings) {
-        const issue = await f10WeekdayIssue(ctx, booking, now, schedules);
-        if (issue) issues.push(issue);
+    const find = lookups(ctx.db);
+    switch (args.check) {
+      case "f10_weekday": {
+        const now = Date.now();
+        const schedules = new Map<string, Promise<Doc<"schedules"> | null>>();
+        return await auditPage(ctx.db, "bookings", args, (booking) => f10WeekdayIssue(ctx, booking, now, schedules));
       }
-      rows = bookings;
-    } else {
-      const cursor =
-        typeof args.cursor === "string" ? parseAuditCursor(ctx.db, "event_types", args.cursor) : null;
-      const eventTypes = await rowsAfter(ctx.db, "event_types", cursor, args.limit);
-      for (const eventType of eventTypes) {
-        const issue = eventLengthIssue(eventType);
-        if (issue) issues.push(issue);
-      }
-      rows = eventTypes;
+      case "event_length_invalid":
+        return await auditPage(ctx.db, "event_types", args, eventLengthIssue);
+      case "event_type_config":
+        return await auditPage(ctx.db, "event_types", args, (eventType) => eventTypeConfigIssue(eventType, find));
+      case "schedule_config":
+        return await auditPage(ctx.db, "schedules", args, (schedule) => zoneIssue(schedule, "schedule_config"));
+      case "resource_config":
+        return await auditPage(ctx.db, "resources", args, (resource) => zoneIssue(resource, "resource_config"));
+      case "date_override_config":
+        return await auditPage(ctx.db, "date_overrides", args, dateOverrideIssue);
+      case "link_integrity":
+        return await auditPage(ctx.db, "resource_event_types", args, (link) => linkIssue(ctx.db, link, find));
+      case "booking_integrity":
+        return await auditPage(ctx.db, "bookings", args, (booking) => bookingIntegrityIssue(ctx.db, booking, find));
     }
-
-    const last = rows[rows.length - 1];
-    return {
-      issues,
-      scanned: rows.length,
-      continueCursor: last ? encodeAuditCursor(last) : (args.cursor ?? null),
-      isDone: rows.length < args.limit,
-    };
   },
 });
 

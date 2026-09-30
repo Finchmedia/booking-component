@@ -823,7 +823,16 @@ export function makeInternalBookingAPI(component: ComponentApi) {
     // Read-only upgrade audit of stored rows; see CHANGELOG.
     audit: internalQueryGeneric({
       args: {
-        check: v.union(v.literal("f10_weekday"), v.literal("event_length_invalid")),
+        check: v.union(
+          v.literal("f10_weekday"),
+          v.literal("event_length_invalid"),
+          v.literal("event_type_config"),
+          v.literal("schedule_config"),
+          v.literal("resource_config"),
+          v.literal("date_override_config"),
+          v.literal("link_integrity"),
+          v.literal("booking_integrity"),
+        ),
         cursor: v.optional(v.union(v.string(), v.null())),
         limit: v.number(),
       },

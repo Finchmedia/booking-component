@@ -4,6 +4,20 @@
 
 ### Upgrading
 
+- New `maintenance.audit` checks list the stored rows this release treats
+  differently (PR-38), each issue with its `problems`: `event_type_config`
+  (lengths, options, slot interval, buffers, notice or horizon that are not
+  valid numbers, a length missing from its options, an invalid zone, a
+  `scheduleId` naming no schedule), `schedule_config` and `resource_config`
+  (invalid zones), `date_override_config` (unknown types, `custom` without
+  hours, dates that are not canonical), `link_integrity` (links to deleted
+  rows, across organizations, second rows of a pair) and `booking_integrity`
+  (no organization although the event type has one, active item-less
+  bookings on pools). They only read: run each check until `isDone` right
+  after deploying, or before on a deployment with a copy of your data, and
+  fix what they list as the entries below describe. Link a `duplicate` pair
+  again to collapse it, and run `backfillBookingOrganizations` for
+  `organizationMissing`. `makeInternalBookingAPI().audit` takes the new checks.
 - Expected failures throw `ConvexError({ code, message })` instead of a plain
   `Error`. `message` is the 0.4.x text, unchanged; `code` is one of the codes
   in [docs/errors.md](docs/errors.md). Other failures stay plain `Error`s.
@@ -47,11 +61,10 @@
   before 0.5.0. `createMultiResourceBooking` rejects an `organizationId` that
   differs from its event type's (0.4.3 stored it); omit it or pass the same
   one. For an event type without organization the argument is still stored.
-  Before upgrading, find cross-organization links in a host query (for each
-  event type with an organization, compare the `organizationId` of
-  `getResourcesForEventType`'s resources) and unlink them or move the
-  resource; `backfillBookingOrganizations` reports stored bundles whose
-  organization differs in `mismatches`.
+  The `link_integrity` audit check lists cross-organization links
+  (`crossOrganization`); unlink them or move the resource.
+  `backfillBookingOrganizations` reports stored bundles whose organization
+  differs in `mismatches`.
 - Schedule arguments of `getMonthAvailability` and `getDaySlots` must be
   complete (F12): `resourceTimezone` alone, `availableSlots` without
   `resourceTimezone` or `scheduleId`, and a `resourceTimezone` that differs
@@ -68,10 +81,10 @@
 - Schedule references stay valid (N15): `createEventType` and
   `updateEventType` reject a `scheduleId` that names no schedule
   (`SCHEDULE_NOT_FOUND`; `""` still means none), and `deleteSchedule` refuses
-  while an event type uses the schedule (new code `SCHEDULE_IN_USE`). Before
-  upgrading, find event types whose `scheduleId` names a deleted schedule
-  (`listEventTypes`, then `getSchedule` for each distinct ID) and point them
-  to an existing schedule or `""`; their slot queries throw otherwise.
+  while an event type uses the schedule (new code `SCHEDULE_IN_USE`). The
+  `event_type_config` audit check lists event types whose `scheduleId` names
+  a deleted schedule (`scheduleId`); point them to an existing schedule or
+  `""`, as their slot queries throw otherwise.
 - `createEventType` on an existing ID (an upsert) keeps what it is not given
   (N14): an omitted `isActive` no longer reactivates a deactivated event type
   (a new one is still active by default), and an omitted `organizationId`
@@ -86,15 +99,17 @@
   `RESOURCE_IN_USE`, "Cannot make a resource fungible while it has active
   single-resource bookings". With capacity one the flag used to be accepted
   and left those bookings unmovable. Bundles do not block it. End or move
-  those bookings first; `maintenance.audit` does not list bookings that an
-  earlier flag change already stranded, so check pools of capacity one by
-  hand (cancelling them still works).
+  those bookings first. The `booking_integrity` audit check lists bookings an
+  earlier flag change already stranded (`poolWithoutItems`); cancelling them
+  still works.
 - `deleteResource` and `deleteEventType` delete the links of the deleted ID
   (N12), after their booking check and in the same transaction. A resource
   or event type created again with that ID starts unlinked; link it
-  explicitly. Links that deletes before 0.5.0 left behind stay: call
-  `deleteAllLinksForResource` or `deleteAllLinksForEventType` once for IDs you
-  deleted, at the latest before re-creating one.
+  explicitly. Links that deletes before 0.5.0 left behind stay; the
+  `link_integrity` audit check lists them (`resourceMissing`,
+  `eventTypeMissing`). Call `deleteAllLinksForResource` or
+  `deleteAllLinksForEventType` once for those IDs, at the latest before
+  re-creating one.
 
 ### Added
 
