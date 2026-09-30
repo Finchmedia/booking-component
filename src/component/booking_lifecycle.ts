@@ -4,6 +4,7 @@ import { assertValidRange, getRequiredSlots } from "./utils";
 import { assertSingleResourceSupported } from "./inventory_helpers";
 import { isLinked } from "./resource_event_types";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
+import { throwBookingError } from "../shared/booking-errors.js";
 
 // ============================================
 // BOOKING LIFECYCLE
@@ -32,9 +33,9 @@ export async function assertSingleBookable(
     .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
     .first();
 
-  if (!eventType) throw new Error("Event type not found");
+  if (!eventType) throwBookingError("EVENT_TYPE_NOT_FOUND", "Event type not found");
   if (eventType.isActive === false) {
-    throw new Error("Event type is no longer active");
+    throwBookingError("EVENT_TYPE_INACTIVE", "Event type is no longer active");
   }
 
   // Resource must exist and be active.
@@ -43,22 +44,23 @@ export async function assertSingleBookable(
     .withIndex("by_external_id", (q) => q.eq("id", args.resourceId))
     .unique();
 
-  if (!resource) throw new Error("Resource not found");
+  if (!resource) throwBookingError("RESOURCE_NOT_FOUND", "Resource not found");
   if (resource.isActive === false) {
-    throw new Error("Resource is no longer active");
+    throwBookingError("RESOURCE_INACTIVE", "Resource is no longer active");
   }
 
   // A single-resource booking books the resource on its own — not allowed
   // for add-ons (isStandalone: false); use createMultiResourceBooking with a
   // standalone resource instead.
   if (resource.isStandalone === false) {
-    throw new Error(
+    throwBookingError(
+      "RESOURCE_NOT_STANDALONE",
       `Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`
     );
   }
 
   if (!(await isLinked(ctx.db, args.resourceId, args.eventTypeId))) {
-    throw new Error("Resource is not available for this event type");
+    throwBookingError("RESOURCE_NOT_LINKED", "Resource is not available for this event type");
   }
 
   // Availability per calendar day. getRequiredSlots maps a range spanning
@@ -76,7 +78,7 @@ export async function assertSingleBookable(
     if (dayAvailability) {
       for (const slot of slots) {
         if (dayAvailability.busySlots.includes(slot)) {
-          throw new Error("Time slot no longer available");
+          throwBookingError("SLOT_UNAVAILABLE", "Time slot no longer available");
         }
       }
     }

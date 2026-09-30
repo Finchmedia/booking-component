@@ -1,17 +1,24 @@
 /**
- * Frozen entry-point error texts (N3) — change only deliberately.
+ * Frozen entry-point errors (N3) — change only deliberately.
  *
- * Every expected failure is a plain `Error` whose message hosts match by
- * substring (the reference host maps "Time slot no longer available",
- * "Event type not found", "Resource is not available for this event type", …
- * to its own codes). The same condition deliberately keeps a different text
- * per entry point, and the order of the checks decides which text a request
- * with several problems gets. A failing test here is a host-visible change:
- * update the expectation only together with a CHANGELOG note.
+ * Every expected failure throws ConvexError({ code, message }). The code is
+ * public contract (src/shared/booking-errors.ts, docs/errors.md). The message
+ * is the 0.4.x text, unchanged: hosts matched it by substring ("Time slot no
+ * longer available", "Event type not found", "Resource is not available for
+ * this event type", …) and can keep reading it from `data.message`. The same
+ * condition keeps a different text per entry point but has one code, and the
+ * order of the checks decides which failure a request with several problems
+ * gets. A failing test here is a host-visible change: update the expectation
+ * only together with a CHANGELOG note.
  */
 import { describe, expect, test } from "vitest";
 import { ConvexError } from "convex/values";
 import { api } from "./_generated/api.js";
+import {
+  isBookingError,
+  type BookingErrorCode,
+  type BookingErrorData,
+} from "../shared/booking-errors.js";
 import {
   BOOKER,
   LOCATION,
@@ -28,23 +35,27 @@ import {
 const at = (time: string) => utc(TUESDAY, time);
 const hour = (time: string) => ({ start: at(time), end: at(time) + 3_600_000 });
 
-/** The rejection message of a call, or a marker when it unexpectedly succeeds. */
-async function failureOf(call: Promise<unknown>): Promise<string> {
+/** The expected rejection: `data` of the ConvexError. */
+const coded = (code: BookingErrorCode, message: string): BookingErrorData => ({ code, message });
+
+/** The rejection's `data`, or a marker when the call unexpectedly succeeds. */
+async function failureOf(call: Promise<unknown>): Promise<BookingErrorData | "(resolved)"> {
   try {
     await call;
   } catch (error) {
-    // Hosts parse plain Error messages; a ConvexError would change what they see.
-    expect(error).toBeInstanceOf(Error);
-    expect(error).not.toBeInstanceOf(ConvexError);
-    return (error as Error).message;
+    expect(isBookingError(error), String(error)).toBe(true);
+    const data = (error as ConvexError<BookingErrorData>).data;
+    // The error's own message is the text as well, not the JSON of its data.
+    expect((error as Error).message).toBe(data.message);
+    return data;
   }
   return "(resolved)";
 }
 
 async function failuresOf(cases: Record<string, () => Promise<unknown>>) {
-  const messages: Record<string, string> = {};
-  for (const [name, call] of Object.entries(cases)) messages[name] = await failureOf(call());
-  return messages;
+  const failures: Record<string, BookingErrorData | "(resolved)"> = {};
+  for (const [name, call] of Object.entries(cases)) failures[name] = await failureOf(call());
+  return failures;
 }
 
 /**
@@ -107,14 +118,14 @@ describe("error texts per entry point", () => {
       rescheduleBookingByToken: () => t.mutation(api.public.rescheduleBookingByToken, { uid: movable.uid, token: movable.managementToken!, newStart: at("09:00"), newEnd: at("10:00") }),
       "rescheduleBooking (pool bundle)": () => t.mutation(api.public.rescheduleBooking, { bookingId: pooled._id, newStart: at("11:00"), newEnd: at("12:00") }),
     })).toEqual({
-      createBooking: "Time slot no longer available",
-      createProvisionalBooking: "Time slot no longer available",
-      createReservation: "Resource is not available for the requested time range.",
-      "createMultiResourceBooking (exclusive)": 'Resource "res-1" is not available for the selected time',
-      "createMultiResourceBooking (pool)": 'Resource "pool-1" is not available for the requested quantity',
-      rescheduleBooking: 'Resource "res-1" is not available for the selected time',
-      rescheduleBookingByToken: 'Resource "res-1" is not available for the selected time',
-      "rescheduleBooking (pool bundle)": 'Resource "pool-1" is not available for the requested quantity',
+      createBooking: coded("SLOT_UNAVAILABLE", "Time slot no longer available"),
+      createProvisionalBooking: coded("SLOT_UNAVAILABLE", "Time slot no longer available"),
+      createReservation: coded("SLOT_UNAVAILABLE", "Resource is not available for the requested time range."),
+      "createMultiResourceBooking (exclusive)": coded("SLOT_UNAVAILABLE", 'Resource "res-1" is not available for the selected time'),
+      "createMultiResourceBooking (pool)": coded("QUANTITY_UNAVAILABLE", 'Resource "pool-1" is not available for the requested quantity'),
+      rescheduleBooking: coded("SLOT_UNAVAILABLE", 'Resource "res-1" is not available for the selected time'),
+      rescheduleBookingByToken: coded("SLOT_UNAVAILABLE", 'Resource "res-1" is not available for the selected time'),
+      "rescheduleBooking (pool bundle)": coded("QUANTITY_UNAVAILABLE", 'Resource "pool-1" is not available for the requested quantity'),
     });
   });
 
@@ -156,33 +167,33 @@ describe("error texts per entry point", () => {
       "createReservation: pool on the single-resource path": () =>
         t.mutation(api.public.createReservation, { resourceId: "pool-1", actorId: "x@example.com", ...hour("16:00") }),
     })).toEqual({
-      "getEventType: missing event": "Event type not found: ghost",
-      "createBooking: missing event": "Event type not found",
-      "createProvisionalBooking: missing event": "Event type not found",
-      "createMultiResourceBooking: missing event": 'Event type "ghost" not found',
-      "updateEventType: missing event": 'Event type "ghost" not found',
-      "deleteEventType: missing event": 'Event type "ghost" not found',
-      "toggleEventTypeActive: missing event": 'Event type "ghost" not found',
-      "linkResourceToEventType: missing event": 'Event type "ghost" not found',
-      "createBooking: inactive event": "Event type is no longer active",
-      "createProvisionalBooking: inactive event": "Event type is no longer active",
-      "createBooking: missing resource": "Resource not found",
-      "createProvisionalBooking: missing resource": "Resource not found",
-      "linkResourceToEventType: missing resource": 'Resource "ghost-res" not found',
-      "createBooking: inactive resource": "Resource is no longer active",
-      "createProvisionalBooking: inactive resource": "Resource is no longer active",
-      "createBooking: add-on alone": 'Resource "addon-1" cannot be booked alone (isStandalone: false)',
-      "createProvisionalBooking: add-on alone": 'Resource "addon-1" cannot be booked alone (isStandalone: false)',
+      "getEventType: missing event": coded("EVENT_TYPE_NOT_FOUND", "Event type not found: ghost"),
+      "createBooking: missing event": coded("EVENT_TYPE_NOT_FOUND", "Event type not found"),
+      "createProvisionalBooking: missing event": coded("EVENT_TYPE_NOT_FOUND", "Event type not found"),
+      "createMultiResourceBooking: missing event": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),
+      "updateEventType: missing event": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),
+      "deleteEventType: missing event": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),
+      "toggleEventTypeActive: missing event": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),
+      "linkResourceToEventType: missing event": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),
+      "createBooking: inactive event": coded("EVENT_TYPE_INACTIVE", "Event type is no longer active"),
+      "createProvisionalBooking: inactive event": coded("EVENT_TYPE_INACTIVE", "Event type is no longer active"),
+      "createBooking: missing resource": coded("RESOURCE_NOT_FOUND", "Resource not found"),
+      "createProvisionalBooking: missing resource": coded("RESOURCE_NOT_FOUND", "Resource not found"),
+      "linkResourceToEventType: missing resource": coded("RESOURCE_NOT_FOUND", 'Resource "ghost-res" not found'),
+      "createBooking: inactive resource": coded("RESOURCE_INACTIVE", "Resource is no longer active"),
+      "createProvisionalBooking: inactive resource": coded("RESOURCE_INACTIVE", "Resource is no longer active"),
+      "createBooking: add-on alone": coded("RESOURCE_NOT_STANDALONE", 'Resource "addon-1" cannot be booked alone (isStandalone: false)'),
+      "createProvisionalBooking: add-on alone": coded("RESOURCE_NOT_STANDALONE", 'Resource "addon-1" cannot be booked alone (isStandalone: false)'),
       "createMultiResourceBooking: add-on alone":
-        'Resource "addon-1" cannot be booked alone (isStandalone: false): add a standalone resource to the booking',
-      "createBooking: not linked": "Resource is not available for this event type",
-      "createProvisionalBooking: not linked": "Resource is not available for this event type",
+        coded("RESOURCE_NOT_STANDALONE", 'Resource "addon-1" cannot be booked alone (isStandalone: false): add a standalone resource to the booking'),
+      "createBooking: not linked": coded("RESOURCE_NOT_LINKED", "Resource is not available for this event type"),
+      "createProvisionalBooking: not linked": coded("RESOURCE_NOT_LINKED", "Resource is not available for this event type"),
       "createBooking: pool on the single-resource path":
-        "Fungible resources require createMultiResourceBooking with an explicit quantity",
+        coded("POOL_REQUIRES_BUNDLE", "Fungible resources require createMultiResourceBooking with an explicit quantity"),
       "createProvisionalBooking: pool on the single-resource path":
-        "Fungible resources require createMultiResourceBooking with an explicit quantity",
+        coded("POOL_REQUIRES_BUNDLE", "Fungible resources require createMultiResourceBooking with an explicit quantity"),
       "createReservation: pool on the single-resource path":
-        "Fungible resources require createMultiResourceBooking with an explicit quantity",
+        coded("POOL_REQUIRES_BUNDLE", "Fungible resources require createMultiResourceBooking with an explicit quantity"),
     });
   });
 
@@ -191,7 +202,7 @@ describe("error texts per entry point", () => {
     const { seed, movable } = await seedWorld(t);
     const empty = { start: at("15:00"), end: at("15:00") };
     const single = { eventTypeId: seed.eventTypeId, resourceId: seed.resourceId, ...empty, timezone: "UTC", booker: BOOKER, location: LOCATION };
-    const messages = await failuresOf({
+    const failures = await failuresOf({
       createBooking: () => t.mutation(api.public.createBooking, single),
       createProvisionalBooking: () => t.mutation(api.public.createProvisionalBooking, single),
       createReservation: () => t.mutation(api.public.createReservation, { resourceId: seed.resourceId, actorId: "x@example.com", ...empty }),
@@ -203,9 +214,9 @@ describe("error texts per entry point", () => {
       rescheduleBookingByToken: () =>
         t.mutation(api.public.rescheduleBookingByToken, { uid: movable.uid, token: movable.managementToken!, newStart: empty.start, newEnd: empty.end }),
     });
-    expect(Object.keys(messages)).toHaveLength(6);
-    for (const [name, message] of Object.entries(messages)) {
-      expect(message, name).toBe("Invalid time range: end must be after start");
+    expect(Object.keys(failures)).toHaveLength(6);
+    for (const [name, failure] of Object.entries(failures)) {
+      expect(failure, name).toEqual(coded("INVALID_RANGE", "Invalid time range: end must be after start"));
     }
   });
 
@@ -247,25 +258,25 @@ describe("error texts per entry point", () => {
       "transitionBookingState: not allowed": () =>
         t.mutation(api.hooks.transitionBookingState, { bookingId: movable._id, toStatus: "pending" }),
     })).toEqual({
-      "getBookingByToken: unknown uid": "Booking not found",
-      "getBookingByToken: wrong token": "Invalid token",
-      "cancelBookingByToken: unknown uid": "Booking not found",
-      "cancelBookingByToken: wrong token": "Invalid token",
-      "rescheduleBookingByToken: unknown uid": "Booking not found",
-      "rescheduleBookingByToken: wrong token": "Invalid token",
-      "rescheduleBooking: unknown id": "Booking not found",
-      "cancelReservation: unknown id": "Reservation not found",
-      "cancelMultiResourceBooking: unknown id": "Booking not found",
-      "transitionBookingState: unknown id": "Booking not found",
-      "expireProvisionalBooking: unknown id": "Booking not found",
-      "cancelBookingByToken: cancelled": "Cannot cancel booking with status: cancelled",
-      "cancelReservation: completed": "Cannot cancel booking with status: completed",
-      "cancelMultiResourceBooking: cancelled": "Booking is already cancelled",
-      "cancelMultiResourceBooking: completed": "Cannot cancel booking with status: completed",
-      "rescheduleBooking: cancelled": "Cannot reschedule booking with status: cancelled",
-      "rescheduleBookingByToken: cancelled": "Cannot reschedule booking with status: cancelled",
-      "transitionBookingState: from a terminal state": "Invalid state transition: cancelled -> confirmed. Allowed: none",
-      "transitionBookingState: not allowed": "Invalid state transition: confirmed -> pending. Allowed: cancelled, completed",
+      "getBookingByToken: unknown uid": coded("BOOKING_NOT_FOUND", "Booking not found"),
+      "getBookingByToken: wrong token": coded("INVALID_TOKEN", "Invalid token"),
+      "cancelBookingByToken: unknown uid": coded("BOOKING_NOT_FOUND", "Booking not found"),
+      "cancelBookingByToken: wrong token": coded("INVALID_TOKEN", "Invalid token"),
+      "rescheduleBookingByToken: unknown uid": coded("BOOKING_NOT_FOUND", "Booking not found"),
+      "rescheduleBookingByToken: wrong token": coded("INVALID_TOKEN", "Invalid token"),
+      "rescheduleBooking: unknown id": coded("BOOKING_NOT_FOUND", "Booking not found"),
+      "cancelReservation: unknown id": coded("BOOKING_NOT_FOUND", "Reservation not found"),
+      "cancelMultiResourceBooking: unknown id": coded("BOOKING_NOT_FOUND", "Booking not found"),
+      "transitionBookingState: unknown id": coded("BOOKING_NOT_FOUND", "Booking not found"),
+      "expireProvisionalBooking: unknown id": coded("BOOKING_NOT_FOUND", "Booking not found"),
+      "cancelBookingByToken: cancelled": coded("INVALID_STATE", "Cannot cancel booking with status: cancelled"),
+      "cancelReservation: completed": coded("INVALID_STATE", "Cannot cancel booking with status: completed"),
+      "cancelMultiResourceBooking: cancelled": coded("INVALID_STATE", "Booking is already cancelled"),
+      "cancelMultiResourceBooking: completed": coded("INVALID_STATE", "Cannot cancel booking with status: completed"),
+      "rescheduleBooking: cancelled": coded("INVALID_STATE", "Cannot reschedule booking with status: cancelled"),
+      "rescheduleBookingByToken: cancelled": coded("INVALID_STATE", "Cannot reschedule booking with status: cancelled"),
+      "transitionBookingState: from a terminal state": coded("INVALID_STATE", "Invalid state transition: cancelled -> confirmed. Allowed: none"),
+      "transitionBookingState: not allowed": coded("INVALID_STATE", "Invalid state transition: confirmed -> pending. Allowed: cancelled, completed"),
     });
   });
 });
@@ -287,14 +298,14 @@ describe("check order: a request with several problems reports the first check",
       "not linked and slot taken": { eventTypeId: seed.eventTypeId, resourceId: "res-unlinked", ...hour("09:00") },
     };
     const expected = {
-      "empty range, pool and missing event": "Invalid time range: end must be after start",
-      "pool and missing event": "Fungible resources require createMultiResourceBooking with an explicit quantity",
-      "missing event and missing resource": "Event type not found",
-      "inactive event and missing resource": "Event type is no longer active",
-      "missing resource": "Resource not found",
-      "inactive add-on, not linked": "Resource is no longer active",
-      "add-on, not linked": 'Resource "addon-unlinked" cannot be booked alone (isStandalone: false)',
-      "not linked and slot taken": "Resource is not available for this event type",
+      "empty range, pool and missing event": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
+      "pool and missing event": coded("POOL_REQUIRES_BUNDLE", "Fungible resources require createMultiResourceBooking with an explicit quantity"),
+      "missing event and missing resource": coded("EVENT_TYPE_NOT_FOUND", "Event type not found"),
+      "inactive event and missing resource": coded("EVENT_TYPE_INACTIVE", "Event type is no longer active"),
+      "missing resource": coded("RESOURCE_NOT_FOUND", "Resource not found"),
+      "inactive add-on, not linked": coded("RESOURCE_INACTIVE", "Resource is no longer active"),
+      "add-on, not linked": coded("RESOURCE_NOT_STANDALONE", 'Resource "addon-unlinked" cannot be booked alone (isStandalone: false)'),
+      "not linked and slot taken": coded("RESOURCE_NOT_LINKED", "Resource is not available for this event type"),
     };
     for (const mutation of [api.public.createBooking, api.public.createProvisionalBooking]) {
       const cases = Object.fromEntries(
@@ -321,10 +332,10 @@ describe("check order: a request with several problems reports the first check",
       "missing event and slot taken": () => bundleOf("ghost", [{ resourceId: seed.resourceId }], at("09:00"), at("10:00")),
       "add-on alone on a taken slot": () => bundle([{ resourceId: "addon-1" }], "13:00"),
     })).toEqual({
-      "empty range and missing event": "Invalid time range: end must be after start",
-      "duplicate resource and missing event": 'Duplicate resource ID: "res-1"',
-      "missing event and slot taken": 'Event type "ghost" not found',
-      "add-on alone on a taken slot": 'Resource "addon-1" is not available for the selected time',
+      "empty range and missing event": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
+      "duplicate resource and missing event": coded("INVALID_INPUT", 'Duplicate resource ID: "res-1"'),
+      "missing event and slot taken": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),
+      "add-on alone on a taken slot": coded("SLOT_UNAVAILABLE", 'Resource "addon-1" is not available for the selected time'),
     });
   });
 
@@ -345,14 +356,182 @@ describe("check order: a request with several problems reports the first check",
       "rescheduleBooking: cancelled booking onto a taken slot": () =>
         t.mutation(api.public.rescheduleBooking, { bookingId: cancelled._id, newStart: at("09:00"), newEnd: at("10:00") }),
     })).toEqual({
-      "rescheduleBooking: empty range, unknown id": "Invalid time range: end must be after start",
-      "rescheduleBookingByToken: empty range, unknown uid": "Invalid time range: end must be after start",
-      "rescheduleBookingByToken: wrong token on a cancelled booking": "Invalid token",
-      "rescheduleBooking: cancelled booking onto a taken slot": "Cannot reschedule booking with status: cancelled",
+      "rescheduleBooking: empty range, unknown id": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
+      "rescheduleBookingByToken: empty range, unknown uid": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
+      "rescheduleBookingByToken: wrong token on a cancelled booking": coded("INVALID_TOKEN", "Invalid token"),
+      "rescheduleBooking: cancelled booking onto a taken slot": coded("INVALID_STATE", "Cannot reschedule booking with status: cancelled"),
     });
     // CONTROL: the movable booking itself can still be moved to a free hour.
     await expect(
       t.mutation(api.public.rescheduleBooking, { bookingId: movable._id, newStart: at("18:00"), newEnd: at("19:00") }),
     ).resolves.toMatchObject({ rescheduleUid: movable.uid });
+  });
+});
+
+describe("configuration writes and arguments", () => {
+  test("in use, already exists, not found and invalid input", async () => {
+    const { t } = setup();
+    const { seed } = await seedWorld(t);
+    const weeklyHours = [{ dayOfWeek: 2, startTime: "09:00", endTime: "17:00" }];
+    const schedule = { id: "sch-1", organizationId: ORG, name: "Hours", timezone: "UTC", weeklyHours };
+    const scheduleDocId = await t.mutation(api.schedules.createSchedule, schedule);
+    const goneOverride = await t.mutation(api.schedules.createDateOverride, {
+      scheduleId: scheduleDocId, date: TUESDAY, type: "unavailable",
+    });
+    await t.mutation(api.schedules.deleteDateOverride, { overrideId: goneOverride });
+    const goneHook = await t.mutation(api.hooks.registerHook, {
+      eventType: "booking.created", functionHandle: "function://probe",
+    });
+    await t.mutation(api.hooks.unregisterHook, { hookId: goneHook });
+
+    expect(await failuresOf({
+      "deleteEventType: with bookings": () => t.mutation(api.public.deleteEventType, { id: seed.eventTypeId }),
+      "createResource: duplicate id": () =>
+        t.mutation(api.resources.createResource, { id: seed.resourceId, organizationId: ORG, name: "x", type: "room", timezone: "UTC" }),
+      "updateResource: missing resource": () => t.mutation(api.resources.updateResource, { id: "ghost-res", name: "x" }),
+      "updateResource: pool with active bookings": () =>
+        t.mutation(api.resources.updateResource, { id: seed.resourceId, isFungible: true, quantity: 3 }),
+      "updateResource: capacity below reservations": () => t.mutation(api.resources.updateResource, { id: "pool-1", quantity: 2 }),
+      "deleteResource: with bookings": () => t.mutation(api.resources.deleteResource, { id: seed.resourceId }),
+      "toggleResourceActive: missing resource": () => t.mutation(api.resources.toggleResourceActive, { id: "ghost-res", isActive: false }),
+      "createSchedule: duplicate id": () => t.mutation(api.schedules.createSchedule, schedule),
+      "updateSchedule: missing schedule": () => t.mutation(api.schedules.updateSchedule, { id: "ghost", name: "x" }),
+      "deleteSchedule: missing schedule": () => t.mutation(api.schedules.deleteSchedule, { id: "ghost" }),
+      "updateDateOverride: missing override": () =>
+        t.mutation(api.schedules.updateDateOverride, { overrideId: goneOverride, type: "unavailable" }),
+      "deleteDateOverride: missing override": () => t.mutation(api.schedules.deleteDateOverride, { overrideId: goneOverride }),
+      "updateHook: missing hook": () => t.mutation(api.hooks.updateHook, { hookId: goneHook, enabled: false }),
+      "unregisterHook: missing hook": () => t.mutation(api.hooks.unregisterHook, { hookId: goneHook }),
+      "getDaySlots: impossible date": () =>
+        t.query(api.public.getDaySlots, { resourceId: seed.resourceId, date: "2027-02-30", eventLength: 60 }),
+      "getDaySlots: zero eventLength": () =>
+        t.query(api.public.getDaySlots, { resourceId: seed.resourceId, date: TUESDAY, eventLength: 0 }),
+      "getMonthAvailability: dateFrom after dateTo": () =>
+        t.query(api.public.getMonthAvailability, { resourceId: seed.resourceId, dateFrom: "2027-03-10", dateTo: TUESDAY, eventLength: 60 }),
+      "createResource: unknown time zone": () =>
+        t.mutation(api.resources.createResource, { id: "res-mars", organizationId: ORG, name: "x", type: "room", timezone: "Mars/Olympus" }),
+      "updateSchedule: inverted window": () =>
+        t.mutation(api.schedules.updateSchedule, { id: "sch-1", weeklyHours: [{ dayOfWeek: 2, startTime: "10:00", endTime: "09:00" }] }),
+      "registerHook: not a function handle": () =>
+        t.mutation(api.hooks.registerHook, { eventType: "booking.created", functionHandle: "hooks:onCreated" }),
+      "createMultiResourceBooking: no resources": () =>
+        t.mutation(api.multi_resource.createMultiResourceBooking, {
+          eventTypeId: seed.eventTypeId, resources: [], ...hour("15:00"), timezone: "UTC", booker: BOOKER,
+        }),
+      "audit: limit 0": () => t.query(api.maintenance.audit, { check: "f10_weekday", limit: 0 }),
+      "sweepOrphanedHolds: foreign cursor": () =>
+        t.mutation(api.presence.sweepOrphanedHolds, { cursor: "not-a-cursor", limit: 10, dryRun: true }),
+    })).toEqual({
+      "deleteEventType: with bookings": coded("EVENT_TYPE_IN_USE", "Cannot delete event type with existing bookings. Deactivate it instead."),
+      "createResource: duplicate id": coded("RESOURCE_ALREADY_EXISTS", 'Resource with ID "res-1" already exists'),
+      "updateResource: missing resource": coded("RESOURCE_NOT_FOUND", 'Resource "ghost-res" not found'),
+      "updateResource: pool with active bookings": coded("RESOURCE_IN_USE", "Cannot change inventory mode while resource has active bookings"),
+      "updateResource: capacity below reservations": coded("RESOURCE_IN_USE", "Cannot reduce capacity below already reserved quantities"),
+      "deleteResource: with bookings": coded("RESOURCE_IN_USE", "Cannot delete resource with existing bookings. Deactivate it instead."),
+      "toggleResourceActive: missing resource": coded("RESOURCE_NOT_FOUND", 'Resource "ghost-res" not found'),
+      "createSchedule: duplicate id": coded("SCHEDULE_ALREADY_EXISTS", 'Schedule with ID "sch-1" already exists'),
+      "updateSchedule: missing schedule": coded("SCHEDULE_NOT_FOUND", 'Schedule "ghost" not found'),
+      "deleteSchedule: missing schedule": coded("SCHEDULE_NOT_FOUND", 'Schedule "ghost" not found'),
+      "updateDateOverride: missing override": coded("DATE_OVERRIDE_NOT_FOUND", "Date override not found"),
+      "deleteDateOverride: missing override": coded("DATE_OVERRIDE_NOT_FOUND", "Date override not found"),
+      "updateHook: missing hook": coded("HOOK_NOT_FOUND", "Hook not found"),
+      "unregisterHook: missing hook": coded("HOOK_NOT_FOUND", "Hook not found"),
+      "getDaySlots: impossible date": coded("INVALID_INPUT", 'Invalid date "2027-02-30": expected a calendar date as YYYY-MM-DD'),
+      "getDaySlots: zero eventLength": coded("INVALID_INPUT", "Invalid eventLength 0: expected a positive number of minutes"),
+      "getMonthAvailability: dateFrom after dateTo": coded("INVALID_INPUT", "Invalid date range: dateFrom 2027-03-10 is after dateTo 2027-03-09"),
+      "createResource: unknown time zone": coded("INVALID_INPUT", 'Invalid time zone "Mars/Olympus": expected an IANA time zone such as "Europe/Berlin"'),
+      "updateSchedule: inverted window": coded("INVALID_INPUT", 'Invalid weeklyHours (dayOfWeek 2) window: startTime "10:00" must be before endTime "09:00"'),
+      "registerHook: not a function handle": coded("INVALID_INPUT", 'Invalid hook functionHandle "hooks:onCreated": expected a function handle from createFunctionHandle'),
+      "createMultiResourceBooking: no resources": coded("INVALID_INPUT", "At least one resource is required"),
+      "audit: limit 0": coded("INVALID_INPUT", "limit must be an integer from 1 to 500"),
+      "sweepOrphanedHolds: foreign cursor": coded("INVALID_INPUT", "Invalid sweep cursor"),
+    });
+  });
+});
+
+describe("hosts: codes instead of message needles (N3)", () => {
+  // The reference host's 0.4.x translation table, copied verbatim (read-only)
+  // from convexbooking/convex/public.ts:191-227.
+  const HOST_NEEDLES: Array<[needle: string, code: string]> = [
+    ["Time slot no longer available", "SLOT_NOT_AVAILABLE"],
+    ["Resource is not available for the requested time range", "SLOT_NOT_AVAILABLE"],
+    ["Conflict detected on", "SLOT_NOT_AVAILABLE"],
+    ["Invalid time range", "INVALID_RANGE"],
+    ["Event type not found", "EVENT_TYPE_NOT_FOUND"],
+    ["Event type is no longer active", "EVENT_TYPE_INACTIVE"],
+    ["Resource not found", "RESOURCE_NOT_FOUND"],
+    ["Resource is no longer active", "RESOURCE_INACTIVE"],
+    ["cannot be booked alone", "RESOURCE_NOT_STANDALONE"],
+    ["Resource is not available for this event type", "NOT_LINKED"],
+    ["Booking not found", "NOT_FOUND"],
+    ["Invalid token", "INVALID_TOKEN"],
+  ];
+  const byNeedle = (message: string) => {
+    if (/Cannot (reschedule|cancel) booking with status: (\w+)/.test(message)) return "INVALID_STATE";
+    return HOST_NEEDLES.find(([needle]) => message.includes(needle))?.[1] ?? "BOOKING_FAILED";
+  };
+
+  test("the needles still read data.message as in 0.4.x; data.code also names bundle and move conflicts", async () => {
+    const { t } = setup();
+    const { seed, bundle, movable } = await seedWorld(t);
+    const single = { eventTypeId: seed.eventTypeId, resourceId: seed.resourceId, ...hour("09:00"), timezone: "UTC", booker: BOOKER, location: LOCATION };
+    const failures = await failuresOf({
+      "createBooking: taken": () => t.mutation(api.public.createBooking, single),
+      "createReservation: taken": () =>
+        t.mutation(api.public.createReservation, { resourceId: seed.resourceId, actorId: "x@example.com", ...hour("09:00") }),
+      "createMultiResourceBooking: taken": () => bundle([{ resourceId: seed.resourceId }], "09:00"),
+      "rescheduleBookingByToken: taken": () =>
+        t.mutation(api.public.rescheduleBookingByToken, { uid: movable.uid, token: movable.managementToken!, newStart: at("09:00"), newEnd: at("10:00") }),
+      "createBooking: missing event": () => t.mutation(api.public.createBooking, { ...single, eventTypeId: "ghost" }),
+      "createMultiResourceBooking: missing event": () =>
+        t.mutation(api.multi_resource.createMultiResourceBooking, {
+          eventTypeId: "ghost", resources: [{ resourceId: seed.resourceId }], ...hour("16:00"), timezone: "UTC", booker: BOOKER,
+        }),
+    });
+    const read = (pick: (failure: BookingErrorData) => string) =>
+      Object.fromEntries(
+        Object.entries(failures).map(([name, failure]) => [name, typeof failure === "string" ? failure : pick(failure)]),
+      );
+
+    // Unchanged texts: a host that applies its needles to data.message gets
+    // its 0.4.x answers, including the generic fallback for bundles and moves.
+    expect(read((failure) => byNeedle(failure.message))).toEqual({
+      "createBooking: taken": "SLOT_NOT_AVAILABLE",
+      "createReservation: taken": "SLOT_NOT_AVAILABLE",
+      "createMultiResourceBooking: taken": "BOOKING_FAILED",
+      "rescheduleBookingByToken: taken": "BOOKING_FAILED",
+      "createBooking: missing event": "EVENT_TYPE_NOT_FOUND",
+      "createMultiResourceBooking: missing event": "BOOKING_FAILED",
+    });
+    // One code per condition, whatever the entry point.
+    expect(read((failure) => failure.code)).toEqual({
+      "createBooking: taken": "SLOT_UNAVAILABLE",
+      "createReservation: taken": "SLOT_UNAVAILABLE",
+      "createMultiResourceBooking: taken": "SLOT_UNAVAILABLE",
+      "rescheduleBookingByToken: taken": "SLOT_UNAVAILABLE",
+      "createBooking: missing event": "EVENT_TYPE_NOT_FOUND",
+      "createMultiResourceBooking: missing event": "EVENT_TYPE_NOT_FOUND",
+    });
+  });
+
+  test("an unexpected failure stays a plain Error", async () => {
+    const { t } = setup();
+    const { seed } = await seedWorld(t);
+    // A second row with the same external id breaks an invariant the
+    // component relies on (`.unique()`); that is no domain failure.
+    await t.run((ctx) =>
+      ctx.db.insert("resources", {
+        id: seed.resourceId, organizationId: ORG, name: "copy", type: "room", timezone: "UTC",
+        isActive: true, createdAt: 0, updatedAt: 0,
+      }),
+    );
+    const error = await t
+      .mutation(api.public.createBooking, {
+        eventTypeId: seed.eventTypeId, resourceId: seed.resourceId, ...hour("15:00"), timezone: "UTC", booker: BOOKER, location: LOCATION,
+      })
+      .then(() => null, (rejection: unknown) => rejection);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(ConvexError);
+    expect(isBookingError(error)).toBe(false);
   });
 });

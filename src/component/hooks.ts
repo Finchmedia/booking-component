@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import type { FunctionHandle, WithoutSystemFields } from "convex/server";
 import type { Doc } from "./_generated/dataModel";
 import { terminateBooking } from "./booking_lifecycle";
+import { throwBookingError } from "../shared/booking-errors.js";
 import {
   bookingHistoryDoc,
   hookDoc,
@@ -41,7 +42,8 @@ function isFunctionHandle(value: string): boolean {
 
 function assertFunctionHandle(value: string): void {
   if (!isFunctionHandle(value)) {
-    throw new Error(
+    throwBookingError(
+      "INVALID_INPUT",
       `Invalid hook functionHandle "${value}": expected a function handle from createFunctionHandle`
     );
   }
@@ -116,7 +118,8 @@ export const registerHook = mutation({
   handler: async (ctx, args) => {
     // Validate event type
     if (!HOOK_EVENTS.includes(args.eventType as HookEventType)) {
-      throw new Error(
+      throwBookingError(
+        "INVALID_INPUT",
         `Invalid hook event type: ${args.eventType}. Valid types: ${HOOK_EVENTS.join(", ")}`
       );
     }
@@ -145,7 +148,7 @@ export const updateHook = mutation({
     }
     const hook = await ctx.db.get(args.hookId);
     if (!hook) {
-      throw new Error("Hook not found");
+      throwBookingError("HOOK_NOT_FOUND", "Hook not found");
     }
 
     const updates: Partial<WithoutSystemFields<Doc<"hooks">>> = {};
@@ -164,7 +167,7 @@ export const unregisterHook = mutation({
   handler: async (ctx, args) => {
     const hook = await ctx.db.get(args.hookId);
     if (!hook) {
-      throw new Error("Hook not found");
+      throwBookingError("HOOK_NOT_FOUND", "Hook not found");
     }
 
     await ctx.db.delete(args.hookId);
@@ -400,14 +403,15 @@ export const transitionBookingState = mutation({
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) {
-      throw new Error("Booking not found");
+      throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
     }
 
     const currentStatus = booking.status;
     const allowedTransitions = STATE_TRANSITIONS[currentStatus] ?? [];
 
     if (!allowedTransitions.includes(args.toStatus)) {
-      throw new Error(
+      throwBookingError(
+        "INVALID_STATE",
         `Invalid state transition: ${currentStatus} -> ${args.toStatus}. Allowed: ${allowedTransitions.join(", ") || "none"}`
       );
     }

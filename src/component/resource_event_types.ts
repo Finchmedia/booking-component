@@ -6,6 +6,7 @@ import {
   resourceDoc,
   successResult,
 } from "./validators";
+import { throwBookingError } from "../shared/booking-errors.js";
 
 // ============================================
 // RESOURCE ↔ EVENT TYPE MAPPING
@@ -173,7 +174,7 @@ export const linkResourceToEventType = mutation({
       .unique();
 
     if (!resource) {
-      throw new Error(`Resource "${args.resourceId}" not found`);
+      throwBookingError("RESOURCE_NOT_FOUND", `Resource "${args.resourceId}" not found`);
     }
 
     // Check if event type exists
@@ -183,7 +184,7 @@ export const linkResourceToEventType = mutation({
       .unique();
 
     if (!eventType) {
-      throw new Error(`Event type "${args.eventTypeId}" not found`);
+      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.eventTypeId}" not found`);
     }
 
     // Check if link already exists
@@ -252,7 +253,7 @@ export const setResourcesForEventType = mutation({
       .unique();
 
     if (!eventType) {
-      throw new Error(`Event type "${args.eventTypeId}" not found`);
+      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.eventTypeId}" not found`);
     }
 
     // Get current links
@@ -313,7 +314,7 @@ export const setEventTypesForResource = mutation({
       .unique();
 
     if (!resource) {
-      throw new Error(`Resource "${args.resourceId}" not found`);
+      throwBookingError("RESOURCE_NOT_FOUND", `Resource "${args.resourceId}" not found`);
     }
 
     // Get current links

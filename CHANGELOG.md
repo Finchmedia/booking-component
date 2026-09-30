@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0 — Unreleased
+
+### Upgrading
+
+- Expected failures throw `ConvexError({ code, message })` instead of a plain
+  `Error`. `message` is the 0.4.x text, unchanged; `code` is one of the codes
+  in [docs/errors.md](docs/errors.md). Other failures stay plain `Error`s.
+  A host that passes every `ConvexError` through to its clients, as the
+  reference host's `translateComponentError` does, would now send the
+  component's codes and texts to browsers instead of its own codes. Before
+  upgrading, map the codes your clients see (for example `SLOT_UNAVAILABLE`
+  to your "slot taken" error) with `isBookingError(error)` and
+  `error.data.code`, fall back to a generic error for the rest, and deploy
+  that host change together with the upgrade. Text matching still works on
+  `error.data.message`; codes also catch the bundle and move conflicts whose
+  texts a needle table missed.
+
+### Added
+
+- Error codes (N3): `BOOKING_ERROR_CODES`, the `BookingErrorCode` and
+  `BookingErrorData` types, `isBookingError` and `isBookingErrorCode` from
+  `@mrfinch/booking`. Each condition has one code in every function: a taken
+  slot is `SLOT_UNAVAILABLE` on the single-resource, bundle and move paths,
+  whose texts differ. [docs/errors.md](docs/errors.md) lists the codes and the
+  functions that throw them.
+
 ## 0.4.3 — Unreleased
 
 ### Upgrading

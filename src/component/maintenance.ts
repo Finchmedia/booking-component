@@ -28,6 +28,7 @@ import {
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { parseCivilDate } from "../shared/time.js";
+import { throwBookingError } from "../shared/booking-errors.js";
 import { holdsActiveInventory } from "./inventory_helpers";
 import { isValidTimeZone } from "./input_validation";
 import { getScheduleByExternalId, getWeeklySlots } from "./schedules";
@@ -210,7 +211,7 @@ function parseAuditCursor<T extends AuditTable>(
     const id = db.normalizeId(table, key[1]);
     if (id) return { creationTime: key[0], id };
   }
-  throw new Error(`Invalid ${name} cursor`);
+  throwBookingError("INVALID_INPUT", `Invalid ${name} cursor`);
 }
 
 /**
@@ -388,7 +389,7 @@ export const audit = query({
   }),
   handler: async (ctx, args) => {
     if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_AUDIT_LIMIT) {
-      throw new Error(`limit must be an integer from 1 to ${MAX_AUDIT_LIMIT}`);
+      throwBookingError("INVALID_INPUT", `limit must be an integer from 1 to ${MAX_AUDIT_LIMIT}`);
     }
     const issues: AuditIssue[] = [];
     let rows: Array<Doc<"bookings"> | Doc<"event_types">>;
@@ -474,7 +475,7 @@ export const backfillBookingOrganizations = mutation({
   }),
   handler: async (ctx, args) => {
     if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_BACKFILL_LIMIT) {
-      throw new Error(`limit must be an integer from 1 to ${MAX_BACKFILL_LIMIT}`);
+      throwBookingError("INVALID_INPUT", `limit must be an integer from 1 to ${MAX_BACKFILL_LIMIT}`);
     }
     const cursor =
       typeof args.cursor === "string"

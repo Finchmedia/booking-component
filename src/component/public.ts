@@ -21,6 +21,7 @@ import {
 import { assertSingleBookable, terminateBooking } from "./booking_lifecycle";
 import { generateManagementToken } from "./tokens";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
+import { throwBookingError } from "../shared/booking-errors.js";
 import {
     assertDateOrder,
     assertEventLength,
@@ -182,7 +183,7 @@ export const getEventType = query({
             .unique();
 
         if (!eventType) {
-            throw new Error(`Event type not found: ${args.eventTypeId}`);
+            throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type not found: ${args.eventTypeId}`);
         }
 
         return eventType;
@@ -476,7 +477,7 @@ export const createReservation = mutation({
         // Note: We re-check inside the transaction to ensure atomicity
         const available = await isAvailable(ctx, resourceId, start, end);
         if (!available) {
-            throw new Error("Resource is not available for the requested time range.");
+            throwBookingError("SLOT_UNAVAILABLE", "Resource is not available for the requested time range.");
         }
 
         // 2. Calculate required slots
@@ -495,7 +496,7 @@ export const createReservation = mutation({
                 // Double check conflict (redundant but safe)
                 for (const slot of slots) {
                     if (existing.busySlots.includes(slot)) {
-                        throw new Error(`Conflict detected on ${date} at slot ${slot}`);
+                        throwBookingError("SLOT_UNAVAILABLE", `Conflict detected on ${date} at slot ${slot}`);
                     }
                 }
 
@@ -796,7 +797,7 @@ export const cancelReservation = mutation({
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.reservationId);
         if (!booking) {
-            throw new Error("Reservation not found");
+            throwBookingError("BOOKING_NOT_FOUND", "Reservation not found");
         }
 
         if (booking.status === "cancelled") {
@@ -806,7 +807,7 @@ export const cancelReservation = mutation({
         }
 
         if (!holdsActiveInventory(booking.status)) {
-            throw new Error(`Cannot cancel booking with status: ${booking.status}`);
+            throwBookingError("INVALID_STATE", `Cannot cancel booking with status: ${booking.status}`);
         }
 
         // 3. Release, record history and stamp the cancellation
@@ -851,7 +852,7 @@ export const expireProvisionalBooking = mutation({
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) {
-      throw new Error("Booking not found");
+      throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
     }
 
     if (booking.status === "cancelled") {
@@ -1015,7 +1016,7 @@ export const updateEventType = mutation({
       .unique();
 
     if (!eventType) {
-      throw new Error(`Event type "${args.id}" not found`);
+      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
     }
 
     // The arguments besides `id` are event_types columns (their types are
@@ -1045,7 +1046,7 @@ export const deleteEventType = mutation({
       .unique();
 
     if (!eventType) {
-      throw new Error(`Event type "${args.id}" not found`);
+      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
     }
 
     // Check for existing bookings
@@ -1055,7 +1056,8 @@ export const deleteEventType = mutation({
       .first();
 
     if (bookings) {
-      throw new Error(
+      throwBookingError(
+        "EVENT_TYPE_IN_USE",
         "Cannot delete event type with existing bookings. Deactivate it instead."
       );
     }
@@ -1078,7 +1080,7 @@ export const toggleEventTypeActive = mutation({
       .unique();
 
     if (!eventType) {
-      throw new Error(`Event type "${args.id}" not found`);
+      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
     }
 
     // Check for active presence (final safety guard)
@@ -1306,11 +1308,11 @@ export const getBookingByToken = query({
       .unique();
 
     if (!booking) {
-      throw new Error("Booking not found");
+      throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
     }
 
     if (booking.managementToken !== args.token) {
-      throw new Error("Invalid token");
+      throwBookingError("INVALID_TOKEN", "Invalid token");
     }
 
     return booking;
@@ -1333,16 +1335,16 @@ export const cancelBookingByToken = mutation({
       .unique();
 
     if (!booking) {
-      throw new Error("Booking not found");
+      throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
     }
 
     if (booking.managementToken !== args.token) {
-      throw new Error("Invalid token");
+      throwBookingError("INVALID_TOKEN", "Invalid token");
     }
 
     // 2. Check if booking can be cancelled (not already cancelled/completed/declined)
     if (!holdsActiveInventory(booking.status)) {
-      throw new Error(`Cannot cancel booking with status: ${booking.status}`);
+      throwBookingError("INVALID_STATE", `Cannot cancel booking with status: ${booking.status}`);
     }
 
     const reason = args.reason || "Cancelled by booker";
@@ -1394,7 +1396,7 @@ async function moveBooking(
 ): Promise<Doc<"bookings">> {
   assertValidRange(args.newStart, args.newEnd);
   if (!["pending", "confirmed"].includes(original.status)) {
-    throw new Error(`Cannot reschedule booking with status: ${original.status}`);
+    throwBookingError("INVALID_STATE", `Cannot reschedule booking with status: ${original.status}`);
   }
   const items = await ctx.db.query("booking_items")
     .withIndex("by_booking", q => q.eq("bookingId", original._id)).collect();
@@ -1500,7 +1502,7 @@ export const rescheduleBooking = mutation({
   handler: async (ctx, args) => {
     assertValidRange(args.newStart, args.newEnd);
     const booking = await ctx.db.get(args.bookingId);
-    if (!booking) throw new Error("Booking not found");
+    if (!booking) throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
     return await moveBooking(ctx, booking, args);
   },
 });
@@ -1518,8 +1520,8 @@ export const rescheduleBookingByToken = mutation({
     assertValidRange(args.newStart, args.newEnd);
     const booking = await ctx.db.query("bookings")
       .withIndex("by_uid", q => q.eq("uid", args.uid)).unique();
-    if (!booking) throw new Error("Booking not found");
-    if (booking.managementToken !== args.token) throw new Error("Invalid token");
+    if (!booking) throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
+    if (booking.managementToken !== args.token) throwBookingError("INVALID_TOKEN", "Invalid token");
     return await moveBooking(ctx, booking, args);
   },
 });

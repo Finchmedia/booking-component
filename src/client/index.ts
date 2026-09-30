@@ -10,6 +10,15 @@ export {
   type EventTypeDurations,
 } from "../shared/durations.js";
 
+// The codes of the component's ConvexError({ code, message }) rejections
+export {
+  BOOKING_ERROR_CODES,
+  isBookingError,
+  isBookingErrorCode,
+  type BookingErrorCode,
+  type BookingErrorData,
+} from "../shared/booking-errors.js";
+
 /**
  * Creates server-only helpers for the booking component.
  *

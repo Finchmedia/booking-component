@@ -4,6 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import type { WithoutSystemFields } from "convex/server";
 import { v } from "convex/values";
 import { parseCivilDate, weekdayOf, type CivilDate } from "../shared/time.js";
+import { throwBookingError } from "../shared/booking-errors.js";
 import { assertDateOrder, assertTimeZone } from "./input_validation";
 import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 
@@ -22,7 +23,8 @@ function parseTimeStrict(time: string, field: string, isEnd = false): number {
   if (isEnd && time === "24:00") return 24 * 60;
   const match = TIME_RE.exec(time);
   if (!match) {
-    throw new Error(
+    throwBookingError(
+      "INVALID_INPUT",
       `Invalid ${field} "${time}": expected "HH:MM" between 00:00 and 23:59${isEnd ? ' (or "24:00" for end of day)' : ""}`
     );
   }
@@ -31,7 +33,8 @@ function parseTimeStrict(time: string, field: string, isEnd = false): number {
   // The component works on a 15-minute slot grid; finer times would silently
   // be rounded down to the containing slot.
   if (minutes % 15 !== 0) {
-    throw new Error(
+    throwBookingError(
+      "INVALID_INPUT",
       `Invalid ${field} "${time}": minutes must be on the 15-minute grid (00, 15, 30, 45)`
     );
   }
@@ -55,7 +58,8 @@ function assertNonOverlappingWindows(
   for (const window of parsed) {
     if (window.start >= window.end) {
       const raw = windows[window.index];
-      throw new Error(
+      throwBookingError(
+        "INVALID_INPUT",
         `Invalid ${label} window: startTime "${raw.startTime}" must be before endTime "${raw.endTime}"`
       );
     }
@@ -65,7 +69,8 @@ function assertNonOverlappingWindows(
     if (sorted[i].start < sorted[i - 1].end) {
       const a = windows[sorted[i - 1].index];
       const b = windows[sorted[i].index];
-      throw new Error(
+      throwBookingError(
+        "INVALID_INPUT",
         `Overlapping ${label} windows: ${a.startTime}–${a.endTime} and ${b.startTime}–${b.endTime}`
       );
     }
@@ -79,7 +84,8 @@ function assertValidWeeklyHours(
   const byDay = new Map<number, Array<{ startTime: string; endTime: string }>>();
   for (const entry of weeklyHours) {
     if (!Number.isInteger(entry.dayOfWeek) || entry.dayOfWeek < 0 || entry.dayOfWeek > 6) {
-      throw new Error(
+      throwBookingError(
+        "INVALID_INPUT",
         `Invalid weeklyHours dayOfWeek ${entry.dayOfWeek}: expected an integer between 0 (Sunday) and 6 (Saturday)`
       );
     }
@@ -177,7 +183,7 @@ export const createSchedule = mutation({
       .unique();
 
     if (existing) {
-      throw new Error(`Schedule with ID "${args.id}" already exists`);
+      throwBookingError("SCHEDULE_ALREADY_EXISTS", `Schedule with ID "${args.id}" already exists`);
     }
 
     // If this is default, unset other defaults
@@ -239,7 +245,7 @@ export const updateSchedule = mutation({
       .unique();
 
     if (!schedule) {
-      throw new Error(`Schedule "${args.id}" not found`);
+      throwBookingError("SCHEDULE_NOT_FOUND", `Schedule "${args.id}" not found`);
     }
 
     // If setting as default, unset other defaults
@@ -280,7 +286,7 @@ export const deleteSchedule = mutation({
       .unique();
 
     if (!schedule) {
-      throw new Error(`Schedule "${args.id}" not found`);
+      throwBookingError("SCHEDULE_NOT_FOUND", `Schedule "${args.id}" not found`);
     }
 
     // Delete associated date overrides
@@ -420,7 +426,7 @@ export const updateDateOverride = mutation({
 
     const override = await ctx.db.get(args.overrideId);
     if (!override) {
-      throw new Error("Date override not found");
+      throwBookingError("DATE_OVERRIDE_NOT_FOUND", "Date override not found");
     }
 
     const updates: Partial<WithoutSystemFields<Doc<"date_overrides">>> = {};
@@ -438,7 +444,7 @@ export const deleteDateOverride = mutation({
   handler: async (ctx, args) => {
     const override = await ctx.db.get(args.overrideId);
     if (!override) {
-      throw new Error("Date override not found");
+      throwBookingError("DATE_OVERRIDE_NOT_FOUND", "Date override not found");
     }
 
     await ctx.db.delete(args.overrideId);

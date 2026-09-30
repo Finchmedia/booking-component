@@ -4,6 +4,7 @@ import type { WithoutSystemFields } from "convex/server";
 import { v } from "convex/values";
 import { holdsActiveInventory, usesQuantityInventory, validateResourceCapacity } from "./inventory_helpers";
 import { assertTimeZone } from "./input_validation";
+import { throwBookingError } from "../shared/booking-errors.js";
 import {
   resourceDoc,
   successResult,
@@ -15,14 +16,14 @@ async function assertNoActiveBookings(ctx: MutationCtx, resourceId: string): Pro
   const primaryBookings = await ctx.db.query("bookings")
     .withIndex("by_resource_start", q => q.eq("resourceId", resourceId)).collect();
   if (primaryBookings.some(booking => holdsActiveInventory(booking.status))) {
-    throw new Error("Cannot change inventory mode while resource has active bookings");
+    throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource has active bookings");
   }
   const items = await ctx.db.query("booking_items")
     .withIndex("by_resource", q => q.eq("resourceId", resourceId)).collect();
   for (const item of items) {
     const booking = await ctx.db.get(item.bookingId);
     if (booking && holdsActiveInventory(booking.status)) {
-      throw new Error("Cannot change inventory mode while resource has active bookings");
+      throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource has active bookings");
     }
   }
 }
@@ -135,7 +136,7 @@ export const createResource = mutation({
       .unique();
 
     if (existing) {
-      throw new Error(`Resource with ID "${args.id}" already exists`);
+      throwBookingError("RESOURCE_ALREADY_EXISTS", `Resource with ID "${args.id}" already exists`);
     }
 
     // Legacy reservations can precede a resource document. Giving their ID a
@@ -147,7 +148,7 @@ export const createResource = mutation({
       const reservedRows = await ctx.db.query("daily_availability")
         .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
       if (reservedRows.some(row => row.busySlots.some(slot => slotIsCurrentOrFuture(row.date, slot, now)))) {
-        throw new Error("Cannot change inventory mode while resource slots are reserved");
+        throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource slots are reserved");
       }
     }
 
@@ -197,7 +198,7 @@ export const updateResource = mutation({
       .unique();
 
     if (!resource) {
-      throw new Error(`Resource "${args.id}" not found`);
+      throwBookingError("RESOURCE_NOT_FOUND", `Resource "${args.id}" not found`);
     }
 
     const nextCapacity = {
@@ -218,17 +219,17 @@ export const updateResource = mutation({
           .filter(([slot]) => slotIsCurrentOrFuture(row.date, Number(slot), now))
           .map(([, count]) => count);
         if (changesInventoryMode && reserved.some(count => count > 0)) {
-          throw new Error("Cannot change inventory mode while resource slots are reserved");
+          throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource slots are reserved");
         }
         if (reserved.some(count => count > (nextCapacity.quantity ?? 1))) {
-          throw new Error("Cannot reduce capacity below already reserved quantities");
+          throwBookingError("RESOURCE_IN_USE", "Cannot reduce capacity below already reserved quantities");
         }
       }
       if (changesInventoryMode) {
         const bitmapRows = await ctx.db.query("daily_availability")
           .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
         if (bitmapRows.some(row => row.busySlots.some(slot => slotIsCurrentOrFuture(row.date, slot, now)))) {
-          throw new Error("Cannot change inventory mode while resource slots are reserved");
+          throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource slots are reserved");
         }
       }
     }
@@ -260,7 +261,7 @@ export const deleteResource = mutation({
       .unique();
 
     if (!resource) {
-      throw new Error(`Resource "${args.id}" not found`);
+      throwBookingError("RESOURCE_NOT_FOUND", `Resource "${args.id}" not found`);
     }
 
     // Check for existing bookings (prefix query on the compound index)
@@ -273,7 +274,8 @@ export const deleteResource = mutation({
       .withIndex("by_resource", q => q.eq("resourceId", args.id)).first();
 
     if (bookings || bookedItem) {
-      throw new Error(
+      throwBookingError(
+        "RESOURCE_IN_USE",
         "Cannot delete resource with existing bookings. Deactivate it instead."
       );
     }
@@ -296,7 +298,7 @@ export const toggleResourceActive = mutation({
       .unique();
 
     if (!resource) {
-      throw new Error(`Resource "${args.id}" not found`);
+      throwBookingError("RESOURCE_NOT_FOUND", `Resource "${args.id}" not found`);
     }
 
     // Check for active presence (final safety guard). Deliberately no

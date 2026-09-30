@@ -10,6 +10,7 @@ import {
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { presenceDoc } from "./validators";
+import { throwBookingError } from "../shared/booking-errors.js";
 
 const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
 
@@ -382,7 +383,7 @@ function parseSweepCursor(db: DatabaseReader, cursor: string): SweepCursor {
     const id = db.normalizeId("presence_heartbeats", key[1]);
     if (id) return { creationTime: key[0], id };
   }
-  throw new Error("Invalid sweep cursor");
+  throwBookingError("INVALID_INPUT", "Invalid sweep cursor");
 }
 
 /**
@@ -446,7 +447,7 @@ export const sweepOrphanedHolds = mutation({
   }),
   handler: async (ctx, args) => {
     if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_SWEEP_LIMIT) {
-      throw new Error(`limit must be an integer from 1 to ${MAX_SWEEP_LIMIT}`);
+      throwBookingError("INVALID_INPUT", `limit must be an integer from 1 to ${MAX_SWEEP_LIMIT}`);
     }
     const cursor =
       typeof args.cursor === "string" ? parseSweepCursor(ctx.db, args.cursor) : null;

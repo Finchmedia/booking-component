@@ -1,4 +1,5 @@
 import { assertEventLength } from "./input_validation";
+import { throwBookingError } from "../shared/booking-errors.js";
 
 export const SLOT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 export const SLOTS_PER_DAY = 24 * 4; // 96
@@ -526,10 +527,10 @@ const MAX_INSTANT_MS = 8.64e15;
  */
 export function assertValidRange(start: number, end: number): void {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-        throw new Error("Invalid time range: end must be after start");
+        throwBookingError("INVALID_RANGE", "Invalid time range: end must be after start");
     }
     if (Math.abs(start) > MAX_INSTANT_MS || Math.abs(end) > MAX_INSTANT_MS) {
-        throw new Error("Invalid time range: start and end must be representable dates");
+        throwBookingError("INVALID_RANGE", "Invalid time range: start and end must be representable dates");
     }
 }
 

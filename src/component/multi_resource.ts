@@ -14,6 +14,7 @@ import {
   validateResourceRequests,
 } from "./inventory_helpers";
 import { bookingDoc, bookingWithItemsDoc, successResult } from "./validators";
+import { throwBookingError } from "../shared/booking-errors.js";
 
 // ============================================
 // MULTI-RESOURCE AVAILABILITY CHECK
@@ -183,7 +184,7 @@ export const createMultiResourceBooking = mutation({
       .unique();
 
     if (!eventType) {
-      throw new Error(`Event type "${args.eventTypeId}" not found`);
+      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.eventTypeId}" not found`);
     }
 
     // The bundle belongs to its event type's organization, as single bookings
@@ -232,7 +233,8 @@ export const createMultiResourceBooking = mutation({
           for (const slot of slots) {
             const booked = bookedQuantities[slot.toString()] ?? 0;
             if (booked + requestedQty > totalQuantity) {
-              throw new Error(
+              throwBookingError(
+                "QUANTITY_UNAVAILABLE",
                 `Resource "${resourceReq.resourceId}" is not available for the requested quantity`
               );
             }
@@ -250,7 +252,8 @@ export const createMultiResourceBooking = mutation({
 
           for (const slot of slots) {
             if (requestedQty > totalQuantity || busySlots.includes(slot)) {
-              throw new Error(
+              throwBookingError(
+                "SLOT_UNAVAILABLE",
                 `Resource "${resourceReq.resourceId}" is not available for the selected time`
               );
             }
@@ -261,7 +264,8 @@ export const createMultiResourceBooking = mutation({
 
     if (!hasStandaloneResource) {
       const ids = args.resources.map((r) => `"${r.resourceId}"`).join(", ");
-      throw new Error(
+      throwBookingError(
+        "RESOURCE_NOT_STANDALONE",
         `Resource ${ids} cannot be booked alone (isStandalone: false): add a standalone resource to the booking`
       );
     }
@@ -402,15 +406,15 @@ export const cancelMultiResourceBooking = mutation({
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) {
-      throw new Error("Booking not found");
+      throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
     }
 
     if (booking.status === "cancelled") {
-      throw new Error("Booking is already cancelled");
+      throwBookingError("INVALID_STATE", "Booking is already cancelled");
     }
 
     if (!holdsActiveInventory(booking.status)) {
-      throw new Error(`Cannot cancel booking with status: ${booking.status}`);
+      throwBookingError("INVALID_STATE", `Cannot cancel booking with status: ${booking.status}`);
     }
 
     // Release every booked resource (quantity_availability for pooled

@@ -247,6 +247,13 @@ endpoints to authorized host wrappers.
   and retries concurrent writes to it; a busy pool is the likely hotspot.
   `npx convex insights` reports `occRetried` and `occFailedPermanently` for
   `daily_availability` and `quantity_availability`.
+- **Errors:** expected failures, such as a taken slot or a wrong management
+  token, throw `ConvexError({ code, message })`. The
+  [codes](https://github.com/Finchmedia/booking-component/blob/main/docs/errors.md)
+  are public contract; `message` is English text for logs and administrators.
+  In host functions, `isBookingError(error)` from `@mrfinch/booking` checks for
+  one, and `error.data.code` selects the text you show. Other failures are
+  plain `Error`s.
 
 ## Host responsibilities
 

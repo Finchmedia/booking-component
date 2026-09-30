@@ -6,16 +6,17 @@
 // to accept inputs without a meaning — a zero, negative or NaN event length,
 // slot indices outside the day, dates like "2027-02-30" — and answered them
 // with silent nonsense (candidates on fully booked days, another day's hours).
-// They now fail fast with an "Invalid …" error; calendar days are parsed with
-// parseCivilDate (src/shared/time.ts). Host policy (allowed durations, notice,
-// horizon) stays in the host.
+// They now fail fast with an "Invalid …" error (code INVALID_INPUT); calendar
+// days are parsed with parseCivilDate (src/shared/time.ts). Host policy
+// (allowed durations, notice, horizon) stays in the host.
 
 import type { CivilDate } from "../shared/time.js";
+import { throwBookingError } from "../shared/booking-errors.js";
 
 /** An event length must be a finite number of minutes greater than zero. */
 export function assertEventLength(eventLength: number): void {
   if (!Number.isFinite(eventLength) || eventLength <= 0) {
-    throw new Error(`Invalid eventLength ${eventLength}: expected a positive number of minutes`);
+    throwBookingError("INVALID_INPUT", `Invalid eventLength ${eventLength}: expected a positive number of minutes`);
   }
 }
 
@@ -23,7 +24,7 @@ export function assertEventLength(eventLength: number): void {
 export function assertSlotIndices(slots: number[]): void {
   for (const slot of slots) {
     if (!Number.isInteger(slot) || slot < 0 || slot > 95) {
-      throw new Error(`Invalid availableSlots index ${slot}: expected integers from 0 to 95`);
+      throwBookingError("INVALID_INPUT", `Invalid availableSlots index ${slot}: expected integers from 0 to 95`);
     }
   }
 }
@@ -32,7 +33,7 @@ export function assertSlotIndices(slots: number[]): void {
 export function assertDateOrder(dateFrom: CivilDate, dateTo: CivilDate): void {
   // Canonical dates compare chronologically as strings.
   if (dateFrom > dateTo) {
-    throw new Error(`Invalid date range: dateFrom ${dateFrom} is after dateTo ${dateTo}`);
+    throwBookingError("INVALID_INPUT", `Invalid date range: dateFrom ${dateFrom} is after dateTo ${dateTo}`);
   }
 }
 
@@ -57,6 +58,6 @@ export function isValidTimeZone(timeZone: string): boolean {
  */
 export function assertTimeZone(timeZone: string): void {
   if (!isValidTimeZone(timeZone)) {
-    throw new Error(`Invalid time zone "${timeZone}": expected an IANA time zone such as "Europe/Berlin"`);
+    throwBookingError("INVALID_INPUT", `Invalid time zone "${timeZone}": expected an IANA time zone such as "Europe/Berlin"`);
   }
 }
