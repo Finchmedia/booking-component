@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { bookingStatusValidator } from "../shared/booking-status.js";
 
 export default defineSchema({
   // ============================================
@@ -159,7 +160,7 @@ export default defineSchema({
     actorId: v.string(),
     start: v.number(),
     end: v.number(),
-    status: v.string(), // "pending" | "confirmed" | "cancelled" | "completed"
+    status: bookingStatusValidator, // BOOKING_STATUSES in src/shared/booking-status.ts
 
     // Unique identifiers
     uid: v.string(), // e.g., "bk_abc123xyz"
@@ -217,8 +218,9 @@ export default defineSchema({
   // Booking state history (audit trail)
   booking_history: defineTable({
     bookingId: v.id("bookings"),
-    fromStatus: v.string(),
-    toStatus: v.string(),
+    // "" marks the entry that records a booking's creation.
+    fromStatus: v.union(v.literal(""), ...bookingStatusValidator.members),
+    toStatus: bookingStatusValidator,
     changedBy: v.optional(v.string()),
     reason: v.optional(v.string()),
     timestamp: v.number(),

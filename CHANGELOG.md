@@ -142,6 +142,22 @@
   repeat the address. Validate both in your booking form and show the error;
   bookings stored earlier keep working, and their mail still renders in UTC
   or is skipped. Recipient verification stays host policy.
+- Booking statuses are a closed set (F16, D35): `status` is one of
+  `provisional`, `pending`, `confirmed`, `cancelled`, `declined` and
+  `completed` in the schema, in every returned booking and in the generated
+  types (`BookingStatus`), as are the history's `toStatus` and `fromStatus`
+  (`""` marks the creation entry) and the version 2 payload's `status` and
+  `previousStatus`. `transitionBookingState({ toStatus })` and
+  `listBookings({ status })` reject other strings in argument validation:
+  an unknown target threw `INVALID_STATE` before, an unknown filter listed
+  nothing, and `""` meant no filter. Omit `status` instead of passing `""`.
+  Convex checks the stored rows against the narrowed schema when you deploy
+  and refuses the deploy while one holds another value, naming the table and
+  document. The component writes only these statuses, so only rows changed
+  in the dashboard or imported can block it: correct them there and deploy
+  again. The new `booking_status_invalid` audit check lists such rows,
+  history included (`status`, `historyStatus`); it ships with the narrowed
+  schema, so on a deployed 0.5.0 it confirms what the deploy already checked.
 
 ### Added
 
@@ -173,6 +189,9 @@
   `bufferAfter`, `minNoticeMinutes` and `maxFutureMinutes` with `null` (N25,
   D30); an omitted field stays unchanged. `makeInternalBookingAPI` forwards
   `null`.
+- `BOOKING_STATUSES`, the `BookingStatus` type, `bookingStatusValidator` and
+  `isBookingStatus` from `@mrfinch/booking`, for host validators and status
+  filters.
 
 ## 0.4.3 — Unreleased
 

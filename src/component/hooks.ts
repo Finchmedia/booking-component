@@ -7,6 +7,7 @@ import type { FunctionHandle, WithoutSystemFields } from "convex/server";
 import type { Doc } from "./_generated/dataModel";
 import { assertStillBookable, buildHookEventV2, terminateBooking } from "./booking_lifecycle";
 import { throwBookingError } from "../shared/booking-errors.js";
+import { bookingStatusValidator, type BookingStatus } from "../shared/booking-status.js";
 import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 import {
   bookingHistoryDoc,
@@ -405,7 +406,7 @@ export const triggerHooks = internalMutation({
 // BOOKING STATE TRANSITIONS
 // ============================================
 
-const STATE_TRANSITIONS: Record<string, string[]> = {
+const STATE_TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
   provisional: ["pending", "confirmed", "cancelled"],
   pending: ["confirmed", "cancelled", "declined"],
   confirmed: ["cancelled", "completed"],
@@ -417,7 +418,7 @@ const STATE_TRANSITIONS: Record<string, string[]> = {
 export const transitionBookingState = mutation({
   args: {
     bookingId: v.id("bookings"),
-    toStatus: v.string(),
+    toStatus: bookingStatusValidator,
     reason: v.optional(v.string()),
     changedBy: v.optional(v.string()),
     // Resend config passed from main app (components can't access process.env)
@@ -431,7 +432,7 @@ export const transitionBookingState = mutation({
     }
 
     const currentStatus = booking.status;
-    const allowedTransitions = STATE_TRANSITIONS[currentStatus] ?? [];
+    const allowedTransitions = STATE_TRANSITIONS[currentStatus];
 
     if (!allowedTransitions.includes(args.toStatus)) {
       throwBookingError(

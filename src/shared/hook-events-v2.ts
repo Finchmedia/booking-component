@@ -11,10 +11,11 @@
 // in trusted host code when you need it).
 // docs/hook-payloads-v2.md renders this validator.
 //
-// Only `convex/values` is imported: the root entry exports it for host
-// functions.
+// Only `convex/values` (and the status set beside it) is imported: the root
+// entry exports it for host functions.
 
 import { v, type Infer } from "convex/values";
+import { bookingStatusValidator } from "./booking-status.js";
 
 /** The events a version 2 hook can receive. */
 export const BOOKING_HOOK_EVENTS_V2 = [
@@ -47,9 +48,9 @@ export const bookingHookEventV2 = v.object({
   /** `"legacy"` for `createReservation` bookings. */
   eventTypeId: v.string(),
   /** The status after the event. */
-  status: v.string(),
+  status: bookingStatusValidator,
   /** The status before the event; set by transitions and cancellations. */
-  previousStatus: v.optional(v.string()),
+  previousStatus: v.optional(bookingStatusValidator),
   start: v.number(),
   end: v.number(),
   timezone: v.string(),

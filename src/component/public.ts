@@ -28,6 +28,7 @@ import { deleteLinks } from "./resource_event_types";
 import { generateManagementToken } from "./tokens";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
+import { bookingStatusValidator, type BookingStatus } from "../shared/booking-status.js";
 import {
     MAX_MONTH_RANGE_DAYS,
     assertAvailabilityRangeLength,
@@ -1334,7 +1335,7 @@ type ListBookingsArgs = {
   organizationId?: string;
   resourceId?: string;
   eventTypeId?: string;
-  status?: string;
+  status?: BookingStatus;
   dateFrom?: number;
   dateTo?: number;
 };
@@ -1450,7 +1451,7 @@ export const listBookings = query({
     organizationId: v.optional(v.string()),
     resourceId: v.optional(v.string()),
     eventTypeId: v.optional(v.string()),
-    status: v.optional(v.string()),
+    status: v.optional(bookingStatusValidator),
     dateFrom: v.optional(v.number()),
     dateTo: v.optional(v.number()),
     limit: v.optional(v.number()),

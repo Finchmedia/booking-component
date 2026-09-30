@@ -21,6 +21,7 @@ import { describe, expect, test } from "vitest";
 import { api } from "./_generated/api.js";
 import type { Doc } from "./_generated/dataModel.js";
 import { listBookings } from "./public.js";
+import { BOOKING_STATUSES, type BookingStatus } from "../shared/booking-status.js";
 import {
   BOOKER, LOCATION, ORG, TUESDAY, book, seedFungibleResource, seedResource, setup, utc, type T,
 } from "./setup.test.js";
@@ -29,7 +30,7 @@ type Args = {
   organizationId?: string;
   resourceId?: string;
   eventTypeId?: string;
-  status?: string;
+  status?: BookingStatus;
   dateFrom?: number;
   dateTo?: number;
   limit?: number;
@@ -39,7 +40,7 @@ type Booking = Doc<"bookings">;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const BASE = utc("2026-01-01", "10:00");
-const STATUSES = ["confirmed", "pending", "cancelled", "provisional", "declined", "completed"];
+const STATUSES = [...BOOKING_STATUSES];
 
 // ============================================
 // Instrumentation
@@ -185,7 +186,7 @@ function expectedReads(range: Booking[], allMatches: Booking[], limit: number, o
 type Tally = { combos: number; multiRow: number; tiedOutput: number; streamed: number; savedReads: number };
 
 /** Compares new and 0.4.2 output (and stream reads) for every combination. */
-async function compareAll(t: T, selectors: Args[], statuses: Array<string | undefined>, dates: Args[], limits: Array<number | undefined>) {
+async function compareAll(t: T, selectors: Args[], statuses: Array<BookingStatus | undefined>, dates: Args[], limits: Array<number | undefined>) {
   return await t.run(async (ctx) => {
     const tally: Tally = { combos: 0, multiRow: 0, tiedOutput: 0, streamed: 0, savedReads: 0 };
     for (const selector of selectors) for (const status of statuses) for (const date of dates) for (const limit of limits) {
@@ -230,7 +231,7 @@ function mulberry32(seed: number) {
 
 function row(uid: string, start: number, over: Partial<Booking> = {}) {
   return {
-    resourceId: "res-1", actorId: "a@example.com", start, end: start + HOUR, status: "confirmed", uid,
+    resourceId: "res-1", actorId: "a@example.com", start, end: start + HOUR, status: "confirmed" as BookingStatus, uid,
     eventTypeId: "et-1", organizationId: ORG, timezone: "UTC", bookerName: "A",
     bookerEmail: "a@example.com", eventTitle: "E", location: { type: "address" }, createdAt: 0, updatedAt: 0,
     ...over,
@@ -275,7 +276,8 @@ describe("listBookings output is unchanged", () => {
         { organizationId: "org-2", eventTypeId: "et-1" }, { resourceId: "res-1", eventTypeId: "et-2" },
         { organizationId: "", eventTypeId: "et-1" }, {},
       ];
-      const statuses = [undefined, "confirmed", "provisional", ""];
+      // 0.4.x also compared status "" here (read as no status); 0.5.0 rejects it.
+      const statuses: Array<BookingStatus | undefined> = [undefined, "confirmed", "provisional"];
       const dates: Args[] = [
         {}, { dateFrom: BASE + 2 * HOUR }, { dateTo: BASE + 5 * HOUR },
         { dateFrom: BASE + 2 * HOUR, dateTo: BASE + 5 * HOUR }, { dateFrom: BASE + 5 * HOUR, dateTo: BASE + 2 * HOUR },
@@ -292,10 +294,11 @@ describe("listBookings output is unchanged", () => {
       expect(tally.multiRow).toBeGreaterThan(tally.combos / 3);
       expect(tally.tiedOutput).toBeGreaterThan(tally.combos / 5);
       expect(tally.streamed).toBe(10 * statuses.length * dates.length * 5);
-      expect(tally.savedReads).toBeGreaterThan(tally.streamed / 2);
+      // (A third: two of the three statuses filter, which reads further.)
+      expect(tally.savedReads).toBeGreaterThan(tally.streamed / 3);
 
       // Spot check through the registered query.
-      for (const args of [{ eventTypeId: "et-1", limit: 3 }, { organizationId: "org-1", status: "", limit: 2 }]) {
+      for (const args of [{ eventTypeId: "et-1", limit: 3 }, { organizationId: "org-1", status: "pending" as const, limit: 2 }]) {
         const expected = await t.run(async (ctx) => (await listBookingsBefore(ctx, args)).map((b) => b.uid));
         expect((await t.query(api.public.listBookings, args)).map((b) => b.uid)).toEqual(expected);
       }
@@ -424,6 +427,19 @@ describe("listBookings documented limits", () => {
     expect(
       (await t.query(api.public.listBookings, { organizationId: ORG, status: "pending", limit: 1 })).map((b) => b.uid)
     ).toEqual(["early"]);
+  });
+
+  test("status is one of BOOKING_STATUSES: \"\" and unknown values fail argument validation", async () => {
+    const { t } = setup();
+    await insertDaily(t, 2, (i) => (i === 0 ? { status: "declined" } : {}));
+    for (const status of ["", "rescheduled", "Confirmed"]) {
+      await expect(
+        t.query(api.public.listBookings, { organizationId: ORG, status: status as BookingStatus })
+      ).rejects.toThrow(`got \`${JSON.stringify(status)}\``);
+    }
+    // CONTROL: a known status filters; no status hides provisional rows only.
+    expect((await t.query(api.public.listBookings, { organizationId: ORG, status: "declined" })).map((b) => b.uid)).toEqual(["u0"]);
+    expect((await t.query(api.public.listBookings, { organizationId: ORG })).map((b) => b.uid)).toEqual(["u1", "u0"]);
   });
 
   test("resourceId lists a bundle under its primary resource only, a pool-first bundle included", async () => {

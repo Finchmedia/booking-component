@@ -5,6 +5,7 @@ import { assertSingleResourceSupported } from "./inventory_helpers";
 import { isLinked, sharesOrganization } from "./resource_event_types";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
 import { throwBookingError } from "../shared/booking-errors.js";
+import type { BookingStatus } from "../shared/booking-status.js";
 import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 
 // ============================================
@@ -234,7 +235,7 @@ export async function buildHookEventV2(
   event: HookEventV2Name,
   bookingId: Id<"bookings">,
   details: {
-    previousStatus?: string;
+    previousStatus?: BookingStatus;
     reason?: string;
     changedBy?: string;
     original?: Doc<"bookings">;

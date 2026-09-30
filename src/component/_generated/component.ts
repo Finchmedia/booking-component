@@ -33,10 +33,23 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           _id: string;
           bookingId: string;
           changedBy?: string;
-          fromStatus: string;
+          fromStatus:
+            | ""
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           reason?: string;
           timestamp: number;
-          toStatus: string;
+          toStatus:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
         }>,
         Name
       >;
@@ -97,7 +110,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             fromEmail?: string;
             renderer?: string;
           };
-          toStatus: string;
+          toStatus:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
         },
         { success: boolean },
         Name
@@ -130,7 +149,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | "resource_config"
             | "date_override_config"
             | "link_integrity"
-            | "booking_integrity";
+            | "booking_integrity"
+            | "booking_status_invalid";
           cursor?: string | null;
           limit: number;
         },
@@ -198,6 +218,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | {
                 check: "booking_integrity";
                 problems: Array<"organizationMissing" | "poolWithoutItems">;
+                uid: string;
+              }
+            | {
+                check: "booking_status_invalid";
+                problems: Array<"status" | "historyStatus">;
+                status: string;
                 uid: string;
               }
           >;
@@ -347,7 +373,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -404,7 +436,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -557,7 +595,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -633,7 +677,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -705,7 +755,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -738,7 +794,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -771,7 +833,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -890,7 +958,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           limit?: number;
           organizationId?: string;
           resourceId?: string;
-          status?: string;
+          status?:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
         },
         Array<{
           _creationTime: number;
@@ -914,7 +988,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -993,7 +1073,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;
@@ -1037,7 +1123,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           rescheduledToUid?: string;
           resourceId: string;
           start: number;
-          status: string;
+          status:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
           timezone: string;
           uid: string;
           updatedAt: number;

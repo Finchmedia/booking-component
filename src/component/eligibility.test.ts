@@ -22,6 +22,7 @@ import { ConvexError } from "convex/values";
 import { api } from "./_generated/api.js";
 import type { Doc } from "./_generated/dataModel.js";
 import type { BookingErrorData } from "../shared/booking-errors.js";
+import type { BookingStatus } from "../shared/booking-status.js";
 import {
   BOOKER,
   LOCATION,
@@ -250,7 +251,7 @@ describe("confirmations re-check the rules; endings never do (F6 e)", () => {
       timezone: "UTC", booker: BOOKER, location: LOCATION,
     });
   }
-  const transition = (t: T, booking: Doc<"bookings">, toStatus: string) =>
+  const transition = (t: T, booking: Doc<"bookings">, toStatus: BookingStatus) =>
     outcome(t.mutation(api.hooks.transitionBookingState, { bookingId: booking._id, toStatus, changedBy: "admin" }));
 
   test("provisional -> confirmed after the event type was deactivated is rejected; cancel and expiry still work", async () => {

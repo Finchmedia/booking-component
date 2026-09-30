@@ -49,8 +49,8 @@ await ctx.runMutation(components.booking.hooks.registerHook, {
   resourceId: string;
   resourceIds: Array<string>;
   eventTypeId: string;
-  status: string;
-  previousStatus?: string;
+  status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
+  previousStatus?: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
   start: number;
   end: number;
   timezone: string;

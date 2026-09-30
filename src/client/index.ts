@@ -2,6 +2,7 @@ import { bookingEmailOptionsValidator } from "../emails.js";
 import { internalQueryGeneric, internalMutationGeneric } from "convex/server";
 import { v } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
+import { bookingStatusValidator } from "../shared/booking-status.js";
 
 // The durations and slot grid the Booker and Calendar use, for host guards
 export {
@@ -12,6 +13,14 @@ export {
 
 // The payload of hooks registered with payloadVersion: 2
 export { bookingHookEventV2, type BookingHookEventV2 } from "../shared/hook-events-v2.js";
+
+// Every value of a booking's `status`
+export {
+  BOOKING_STATUSES,
+  bookingStatusValidator,
+  isBookingStatus,
+  type BookingStatus,
+} from "../shared/booking-status.js";
 
 // The codes of the component's ConvexError({ code, message }) rejections
 export {
@@ -273,7 +282,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       args: {
         organizationId: v.optional(v.string()),
         resourceId: v.optional(v.string()),
-        status: v.optional(v.string()),
+        status: v.optional(bookingStatusValidator),
         dateFrom: v.optional(v.number()),
         dateTo: v.optional(v.number()),
         eventTypeId: v.optional(v.string()),
@@ -699,7 +708,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
     transitionBookingState: internalMutationGeneric({
       args: {
         bookingId: v.string(),
-        toStatus: v.string(),
+        toStatus: bookingStatusValidator,
         reason: v.optional(v.string()),
         changedBy: v.optional(v.string()),
         resendOptions: v.optional(bookingEmailOptionsValidator),
@@ -833,6 +842,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
           v.literal("date_override_config"),
           v.literal("link_integrity"),
           v.literal("booking_integrity"),
+          v.literal("booking_status_invalid"),
         ),
         cursor: v.optional(v.union(v.string(), v.null())),
         limit: v.number(),

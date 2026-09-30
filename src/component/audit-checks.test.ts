@@ -12,13 +12,16 @@
  * - "link_integrity": links to deleted rows, across organizations, and
  *   second rows of a pair;
  * - "booking_integrity": a missing organization the event type has, and
- *   active item-less bookings on pools.
+ *   active item-less bookings on pools;
+ * - "booking_status_invalid": a booking or history status outside
+ *   BOOKING_STATUSES.
  * Invalid rows are seeded with raw inserts, because the component's writes
  * reject them now; each check has valid controls next to them. Paging uses
  * the complete by_creation_time cursor (audit.test.ts covers ties).
  */
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { convexTest } from "convex-test";
+import { defineSchema } from "convex/server";
 import schema from "./schema.js";
 import { api } from "./_generated/api.js";
 import type { Doc } from "./_generated/dataModel.js";
@@ -30,6 +33,7 @@ import {
   ORG,
   TUESDAY,
   book,
+  drain,
   modules,
   seedFungibleResource,
   seedResource,
@@ -280,6 +284,81 @@ describe("booking_integrity", () => {
   });
 });
 
+describe("booking_status_invalid", () => {
+  test("lists bookings whose status or history status is outside BOOKING_STATUSES; every status the component writes is clean", async () => {
+    // The 0.5.0 schema refuses such rows (and a deploy while they exist), so
+    // this backend stores them without schema validation, as 0.4.x did.
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+    const t = convexTest({ schema: defineSchema(schema.tables, { schemaValidation: false }), modules }) as unknown as T;
+    onTestFinished(async () => {
+      await drain(t);
+      vi.useRealTimers();
+    });
+    const seed = await seedResource(t);
+    const hold = (time: string) =>
+      t.mutation(api.public.createProvisionalBooking, {
+        resourceId: seed.resourceId, eventTypeId: seed.eventTypeId, start: at(time), end: at(time) + HOUR,
+        timezone: "UTC", booker: BOOKER, location: LOCATION,
+      });
+    const transition = (bookingId: Doc<"bookings">["_id"], toStatus: Doc<"bookings">["status"]) =>
+      t.mutation(api.hooks.transitionBookingState, { bookingId, toStatus });
+
+    // Controls: each of the six statuses, written by the component.
+    await hold("07:00"); // provisional
+    const requested = await hold("08:00");
+    await transition(requested._id, "pending");
+    const declined = await hold("09:00");
+    await transition(declined._id, "pending");
+    await transition(declined._id, "declined");
+    const completed = await book(t, seed, at("10:00"), at("10:00") + HOUR);
+    await transition(completed._id, "completed");
+    const cancelled = await book(t, seed, at("11:00"), at("11:00") + HOUR);
+    await t.mutation(api.public.cancelBookingByToken, { uid: cancelled.uid, token: cancelled.managementToken! });
+    const moved = await book(t, seed, at("12:00"), at("12:00") + HOUR);
+    await t.mutation(api.public.rescheduleBooking, { bookingId: moved._id, newStart: at("13:00"), newEnd: at("13:00") + HOUR });
+    await t.mutation(api.public.createReservation, {
+      resourceId: seed.resourceId, actorId: BOOKER.email, start: at("14:00"), end: at("14:00") + HOUR,
+    });
+
+    // Rows edited outside the component.
+    const archived = await book(t, seed, at("15:00"), at("15:00") + HOUR);
+    const badHistory = await book(t, seed, at("16:00"), at("16:00") + HOUR);
+    const both = await book(t, seed, at("17:00"), at("17:00") + HOUR);
+    await t.run(async (ctx) => {
+      const raw = ctx.db as unknown as { patch(id: string, value: object): Promise<void>; insert(table: string, value: object): Promise<string> };
+      await raw.patch(archived._id, { status: "archived" });
+      await raw.insert("booking_history", { bookingId: badHistory._id, fromStatus: "confirmed", toStatus: "rescheduled", timestamp: 0 });
+      await raw.patch(both._id, { status: "" });
+      await raw.insert("booking_history", { bookingId: both._id, fromStatus: "rescheduled", toStatus: "cancelled", timestamp: 0 });
+    });
+
+    const { issues, scanned } = await auditAll(t, "booking_status_invalid", 3);
+    expect(scanned).toBe(11); // a move adds its successor
+    expect(issues).toEqual([
+      { check: "booking_status_invalid", uid: archived.uid, status: "archived", problems: ["status"] },
+      { check: "booking_status_invalid", uid: badHistory.uid, status: "confirmed", problems: ["historyStatus"] },
+      { check: "booking_status_invalid", uid: both.uid, status: "", problems: ["status", "historyStatus"] },
+    ]);
+    // CONTROL: the clean rows have history of their own, the "" creation entries included.
+    const history = await t.run(async (ctx) => await ctx.db.query("booking_history").collect());
+    expect(history.filter((row) => row.fromStatus === "").length).toBeGreaterThanOrEqual(9);
+    expect(new Set(history.map((row) => row.toStatus))).toEqual(
+      new Set(["provisional", "pending", "declined", "confirmed", "completed", "cancelled", "rescheduled"])
+    );
+  });
+
+  test("a backend with the 0.5.0 schema stores no other status", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t);
+    const booking = await book(t, seed, at("09:00"), at("09:00") + HOUR);
+    await expect(
+      t.run(async (ctx) => ctx.db.patch(booking._id, { status: "archived" as Doc<"bookings">["status"] }))
+    ).rejects.toThrow("Validator error");
+    expect(await audit(t, "booking_status_invalid")).toMatchObject({ issues: [], scanned: 1, isDone: true });
+  });
+});
+
 describe("paging over the new tables", () => {
   test("a cursor of another table is rejected; a restart from a returned cursor continues there", async () => {
     const { t } = setup();
@@ -289,6 +368,8 @@ describe("paging over the new tables", () => {
     for (const check of ["event_type_config", "schedule_config", "resource_config", "date_override_config", "link_integrity"] as const) {
       await expect(audit(t, check, 1, bookingCursor)).rejects.toThrow("Invalid audit cursor");
     }
+    // The bookings checks share it.
+    expect(await audit(t, "booking_status_invalid", 10, bookingCursor)).toMatchObject({ scanned: 0, isDone: true });
     // Two checks of one table share its cursors.
     const eventCursor = (await audit(t, "event_length_invalid", 1)).continueCursor;
     expect(await audit(t, "event_type_config", 10, eventCursor)).toMatchObject({ scanned: 0, isDone: true });
@@ -308,13 +389,19 @@ describe("paging over the new tables", () => {
             isFungible: true, quantity: 1, isActive: true, createdAt: 0, updatedAt: 0,
           });
           await ctx.db.insert("resource_event_types", { resourceId: `pool-${i}`, eventTypeId: `et-${i}` });
-          await ctx.db.insert("bookings", {
+          const bookingId = await ctx.db.insert("bookings", {
             resourceId: `pool-${i}`, actorId: BOOKER.email, start: at("09:00"), end: at("10:00"), status: "confirmed",
             uid: `bk-${i}`, eventTypeId: `et-${i}`, timezone: "UTC", bookerName: BOOKER.name, bookerEmail: BOOKER.email,
             eventTitle: "Consultation", location: { type: "address" }, createdAt: 0, updatedAt: 0,
           });
+          // Three status changes each for booking_status_invalid.
+          for (const [fromStatus, toStatus] of [["", "provisional"], ["provisional", "pending"], ["pending", "confirmed"]] as const) {
+            await ctx.db.insert("booking_history", { bookingId, fromStatus, toStatus, timestamp: 0 });
+          }
         }
       });
+      const clean = await audit(t, "booking_status_invalid", 500);
+      expect({ scanned: clean.scanned, issues: clean.issues.length }).toEqual({ scanned: 500, issues: 0 });
       for (const check of ["event_type_config", "link_integrity", "booking_integrity"] as const) {
         const page = await audit(t, check, 500);
         expect({ check, scanned: page.scanned, issues: page.issues.length }).toEqual({ check, scanned: 500, issues: 500 });

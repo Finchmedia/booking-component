@@ -25,6 +25,7 @@ import { internal } from "./_generated/api.js";
 import type { Doc, Id, TableNames } from "./_generated/dataModel.js";
 import type { MutationCtx } from "./_generated/server.js";
 import { BOOKER, FIXED_NOW, ORG, TUESDAY, TZ, setup, utc } from "./setup.test.js";
+import { BOOKING_STATUSES } from "../shared/booking-status.js";
 import {
   bookingDoc,
   bookingHistoryDoc,
@@ -397,13 +398,18 @@ describe("document validators are exact", () => {
     });
   });
 
-  test("a status outside the documented set still validates (status stays v.string())", async () => {
+  test("a status outside BOOKING_STATUSES fails, as in the schema (0.5.0; 0.4.x kept v.string())", async () => {
     const { t } = setup();
-    const ok = await t.run(async (ctx) => {
+    const results = await t.run(async (ctx) => {
       const docs = await seedMinimalRows(ctx);
-      return validate(bookingDoc, { ...docs.bookings, status: "legacy-status" });
+      return {
+        unknown: validate(bookingDoc, { ...docs.bookings, status: "legacy-status" }),
+        empty: validate(bookingDoc, { ...docs.bookings, status: "" }),
+        // CONTROL: every status of the set validates.
+        known: BOOKING_STATUSES.map((status) => validate(bookingDoc, { ...docs.bookings, status })),
+      };
     });
-    expect(ok).toBe(true);
+    expect(results).toEqual({ unknown: false, empty: false, known: BOOKING_STATUSES.map(() => true) });
   });
 });
 

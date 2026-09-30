@@ -21,6 +21,7 @@
 import { describe, expect, test } from "vitest";
 import { api } from "./_generated/api.js";
 import type { Doc } from "./_generated/dataModel.js";
+import type { BookingStatus } from "../shared/booking-status.js";
 import {
   BOOKER,
   LOCATION,
@@ -402,7 +403,7 @@ describe("booking.rescheduled", () => {
 test("transitionBookingState: declined, confirmed, pending and completed", async () => {
   const { t } = setup();
   const world = await seedWorld(t);
-  const transition = (booking: Doc<"bookings">, toStatus: string, reason?: string) =>
+  const transition = (booking: Doc<"bookings">, toStatus: BookingStatus, reason?: string) =>
     emittedBy(t, () => t.mutation(api.hooks.transitionBookingState, { bookingId: booking._id, toStatus, reason }));
   const [declinable, approvable] = [await world.pending("09:00"), await world.pending("10:00")];
   const [confirmable, requestable] = [await world.provisional("11:00"), await world.provisional("12:00")];

@@ -260,6 +260,10 @@ endpoints to authorized host wrappers.
   schedule (or is `""`); `createEventType` and `updateEventType` reject
   others, and `deleteSchedule` refuses while an event type uses the schedule
   (`SCHEDULE_IN_USE`).
+- **Statuses:** a booking is `provisional`, `pending`, `confirmed`,
+  `cancelled`, `declined` or `completed`; `BOOKING_STATUSES` and the
+  `BookingStatus` type from `@mrfinch/booking` name them. A moved original
+  is `cancelled` with `rescheduledToUid` set.
 - **Booking lists:** `listBookings({ resourceId })` lists the bookings whose
   primary resource is `resourceId`. A bundle's primary resource is its first
   item; its other resources, pools included, do not list it, although their
