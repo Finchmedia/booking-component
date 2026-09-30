@@ -1,9 +1,30 @@
 import { v } from "convex/values";
-import { mutation, query, internalMutation } from "./_generated/server";
+import { mutation, query, internalMutation, type MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { presenceDoc } from "./validators";
 
 const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
+
+type HoldKey = { resourceId: string; slot: string; user: string };
+
+function scheduleCleanup(ctx: MutationCtx, key: HoldKey) {
+  return ctx.scheduler.runAfter(TIMEOUT_MS, internal.presence.cleanup, {
+    resourceId: key.resourceId,
+    slot: key.slot,
+    user: key.user,
+  });
+}
+
+/**
+ * Whether the cleanup job a marker names can still run. `inProgress` counts as
+ * live: production never reports it for a mutation, convex-test does while
+ * the job runs.
+ */
+async function isCleanupJobLive(ctx: MutationCtx, jobId: Id<"_scheduled_functions">) {
+  const job = await ctx.db.system.get(jobId);
+  return job?.state.kind === "pending" || job?.state.kind === "inProgress";
+}
 
 /**
  * signals that a user is present in one or more slots (time slots).
@@ -61,24 +82,20 @@ export const heartbeat = mutation({
         )
         .first();
 
-      // If we don't have a cleanup job, or (edge case) the previous one might have failed/finished
-      // without cleaning up, we schedule one.
+      // A new hold gets its cleanup job here. An existing marker keeps its job
+      // while that job can still run; a marker whose job was cancelled, failed
+      // or is gone gets exactly one replacement, or the hold would never expire.
       if (!existingHeartbeat) {
-        const scheduledId = await ctx.scheduler.runAfter(
-          TIMEOUT_MS,
-          internal.presence.cleanup,
-          {
-            resourceId: args.resourceId,
-            slot: slot,
-            user: args.user,
-          }
-        );
+        const scheduledId = await scheduleCleanup(ctx, { ...args, slot });
         await ctx.db.insert("presence_heartbeats", {
           resourceId: args.resourceId,
           user: args.user,
           slot: slot,
           markAsGone: scheduledId,
         });
+      } else if (!(await isCleanupJobLive(ctx, existingHeartbeat.markAsGone))) {
+        const scheduledId = await scheduleCleanup(ctx, { ...args, slot });
+        await ctx.db.patch(existingHeartbeat._id, { markAsGone: scheduledId });
       }
     }
 
@@ -117,12 +134,13 @@ export const leave = mutation({
 
       if (presence) await ctx.db.delete(presence._id);
 
-      // We can also delete the heartbeat doc immediately, but we might want to
-      // cancel the scheduled job if possible. For now, deleting the doc is enough
-      // because the cleanup job checks for the doc before doing anything.
+      // Cancel the marker's cleanup job with it. cleanup looks the marker up
+      // by key, so a job left queued would adopt the marker of a rejoin on the
+      // same key and keep a second chain alive. Only a pending job can be
+      // cancelled; a finished, failed or cancelled one is left alone.
       if (heartbeatDoc) {
-        // Optional: cancel the scheduled job if we had the ID available easily
-        // await ctx.scheduler.cancel(heartbeatDoc.markAsGone);
+        const job = await ctx.db.system.get(heartbeatDoc.markAsGone);
+        if (job?.state.kind === "pending") await ctx.scheduler.cancel(job._id);
         await ctx.db.delete(heartbeatDoc._id);
       }
     }
@@ -323,3 +341,4 @@ export const cleanup = internalMutation({
     return null;
   },
 });
+

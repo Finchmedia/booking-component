@@ -2,6 +2,18 @@
 
 ## 0.4.3 — Unreleased
 
+### Upgrading
+
+- Presence cleanup jobs that 0.4.2 already queued keep running; their
+  arguments are unchanged. Surplus jobs left by earlier leave/rejoin cycles are
+  not merged: they no longer grow, and they end with their session, 10–20 s
+  after its last heartbeat. This falls short of the earlier goal of merging
+  them within one cleanup round. The fix is verified with convex-test; a check
+  of the scheduler's cancel behaviour on a deployed backend is recommended
+  before release.
+- Do not mass-cancel `presence:cleanup` jobs to tidy up. That orphans live
+  holds until their next heartbeat.
+
 ### Security
 
 - The six built-in email templates render booking text as text. Guest names,
@@ -39,9 +51,24 @@ The internal email mutations keep their names and arguments, so jobs queued by
   fails every email for that booking. The built-in templates render the
   times in UTC, labelled "UTC"; custom renderers still receive the stored
   value.
+- Presence no longer piles up background cleanup jobs. When a selection was
+  left and taken again before its cleanup job ran (switching between
+  overlapping slots, changing the duration, React StrictMode in development,
+  Back and reselect, or any client calling `leave` and then `heartbeat`), the
+  old job adopted the new hold. Each such cycle added a job that rescheduled
+  itself every 10 s for as long as the hold stayed active. `leave` now cancels
+  the hold's pending cleanup job, so every hold has exactly one and fewer
+  background jobs run. `heartbeat` and `leave` keep their arguments and
+  results.
+- A hold whose cleanup job had been cancelled or had failed never expired once
+  the visitor left without `leave` (for example by closing the tab). The next
+  heartbeat now schedules a replacement job.
 
 ### Maintenance and documentation
 
+- The README states when presence releases a selection: an explicit leave
+  releases it immediately, an abandoned one 10–20 s after its last heartbeat,
+  plus scheduler latency.
 - The npm package excludes every test file (`*.test.*`, `*.test-d.*`) and the
   test-only helpers in `src/testing/`, under `src/` and `dist/` alike.
   Previously only `*.test.ts` was excluded, so a `.test.tsx` file would have
