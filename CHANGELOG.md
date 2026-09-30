@@ -209,6 +209,15 @@
   './context'", and nodenext typed every React export as `any`. Next.js and Vite
   builds were not affected. A Vitest `server.deps.inline` workaround for the
   package keeps working and is no longer needed.
+- `BookingProvider` resolves admin operations from `adminApi`. With the
+  generated `adminApi={api.admin}`, every admin operation resolved to the public
+  module (`public:createResource`), so calls failed as unknown functions or ran a
+  same-named public function. Public operations always resolve from `publicApi`.
+- The `BookingProvider` and `useBookingAPI` documentation no longer presents the
+  choice of references as authorization or shows a conditional `useMutation`
+  call. Host functions enforce access; booking reads must check the management
+  token or the caller's ownership and must not return `managementToken` to
+  anonymous callers.
 
 ### Added
 
@@ -238,6 +247,10 @@
   `fetchSlotsForDate` and `fetchMonthSlotsFor`. `fetchSlots` keeps its meaning,
   the date of that instant in the hook's time zone, which is not the day a
   calendar cell names when that zone is west of the browser's.
+- Resolving admin operations from `publicApi`: without `adminApi`, or for an
+  operation a hand-built `adminApi` lacks, `useBookingAPI()` still returns the
+  `publicApi` reference. Pass `adminApi` wherever admin operations are used;
+  0.5.0 decides whether this fallback stays.
 
 ### Integration
 
@@ -275,6 +288,9 @@
 - Without usable `sessionStorage` the presence session ID is kept in memory,
   so it changes on reload: until it expires (about 10 seconds), the visitor's
   own earlier hold shows as another session's.
+- A hand-built (plain-object) `adminApi` that carries a public operation name,
+  such as `getEventType`, no longer overrides `publicApi` for it. Names outside
+  both interfaces still come from `adminApi` when it has them.
 
 ## 0.4.2 — 23 September 2026
 
