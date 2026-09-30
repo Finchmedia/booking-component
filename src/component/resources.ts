@@ -29,6 +29,29 @@ async function assertNoActiveBookings(ctx: MutationCtx, resourceId: string): Pro
   }
 }
 
+/**
+ * Flagging a resource as a pool (isFungible: true) strands its active
+ * single-resource bookings, even when its capacity stays one and the bitmap
+ * stays in use: moves and the single-resource paths refuse pools. Bundles
+ * keep their items and stay movable, so only bookings without booking_items
+ * (the predicate moves use) block the change.
+ */
+async function assertNoActiveSingleBookings(ctx: MutationCtx, resourceId: string): Promise<void> {
+  const primaryBookings = await ctx.db.query("bookings")
+    .withIndex("by_resource_start", q => q.eq("resourceId", resourceId)).collect();
+  for (const booking of primaryBookings) {
+    if (!holdsActiveInventory(booking.status)) continue;
+    const item = await ctx.db.query("booking_items")
+      .withIndex("by_booking", q => q.eq("bookingId", booking._id)).first();
+    if (!item) {
+      throwBookingError(
+        "RESOURCE_IN_USE",
+        "Cannot make a resource fungible while it has active single-resource bookings"
+      );
+    }
+  }
+}
+
 /** Completed bookings keep historical counters; only current/future slots constrain capacity. */
 function slotIsCurrentOrFuture(date: string, slot: number, now: number): boolean {
   const today = new Date(now).toISOString().slice(0, 10);
@@ -233,6 +256,10 @@ export const updateResource = mutation({
           throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource slots are reserved");
         }
       }
+    }
+
+    if (resource.isFungible !== true && nextCapacity.isFungible === true) {
+      await assertNoActiveSingleBookings(ctx, args.id);
     }
 
     const updates: Partial<WithoutSystemFields<Doc<"resources">>> = { updatedAt: Date.now() };

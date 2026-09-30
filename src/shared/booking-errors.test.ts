@@ -103,7 +103,7 @@ const CODE_DOCS: Record<BookingErrorCode, { meaning: string; thrownBy: string }>
   },
   RESOURCE_IN_USE: {
     meaning:
-      "Bookings or reserved slots prevent the change: deleting a resource with bookings, switching between slot and pool inventory while it holds reservations, or lowering a pool's capacity below its reserved units.",
+      "Bookings or reserved slots prevent the change: deleting a resource with bookings, switching between slot and pool inventory while it holds reservations, flagging a resource as a pool while single-resource bookings on it are active, or lowering a pool's capacity below its reserved units.",
     thrownBy: "`createResource`, `updateResource`, `deleteResource`",
   },
   POOL_REQUIRES_BUNDLE: {

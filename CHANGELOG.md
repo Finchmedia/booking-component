@@ -60,6 +60,15 @@
   caller's organization; adopting an event type stored without organization
   still works. Provisioning scripts that re-run `createEventType` to
   reactivate must pass `isActive: true` or call `toggleEventTypeActive`.
+- `updateResource` refuses `isFungible: true` on a resource while active
+  single-resource bookings (pending, confirmed or provisional, without
+  bundle items; legacy reservations included) hold it (N16):
+  `RESOURCE_IN_USE`, "Cannot make a resource fungible while it has active
+  single-resource bookings". With capacity one the flag used to be accepted
+  and left those bookings unmovable. Bundles do not block it. End or move
+  those bookings first; `maintenance.audit` does not list bookings that an
+  earlier flag change already stranded, so check pools of capacity one by
+  hand (cancelling them still works).
 - `deleteResource` and `deleteEventType` delete the links of the deleted ID
   (N12), after their booking check and in the same transaction. A resource
   or event type created again with that ID starts unlinked; link it

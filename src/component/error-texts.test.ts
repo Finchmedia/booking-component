@@ -458,6 +458,8 @@ describe("configuration writes and arguments", () => {
       "updateResource: missing resource": () => t.mutation(api.resources.updateResource, { id: "ghost-res", name: "x" }),
       "updateResource: pool with active bookings": () =>
         t.mutation(api.resources.updateResource, { id: seed.resourceId, isFungible: true, quantity: 3 }),
+      "updateResource: pool flag with active single bookings": () =>
+        t.mutation(api.resources.updateResource, { id: seed.resourceId, isFungible: true }),
       "updateResource: capacity below reservations": () => t.mutation(api.resources.updateResource, { id: "pool-1", quantity: 2 }),
       "deleteResource: with bookings": () => t.mutation(api.resources.deleteResource, { id: seed.resourceId }),
       "toggleResourceActive: missing resource": () => t.mutation(api.resources.toggleResourceActive, { id: "ghost-res", isActive: false }),
@@ -493,6 +495,8 @@ describe("configuration writes and arguments", () => {
       "createResource: duplicate id": coded("RESOURCE_ALREADY_EXISTS", 'Resource with ID "res-1" already exists'),
       "updateResource: missing resource": coded("RESOURCE_NOT_FOUND", 'Resource "ghost-res" not found'),
       "updateResource: pool with active bookings": coded("RESOURCE_IN_USE", "Cannot change inventory mode while resource has active bookings"),
+      "updateResource: pool flag with active single bookings":
+        coded("RESOURCE_IN_USE", "Cannot make a resource fungible while it has active single-resource bookings"),
       "updateResource: capacity below reservations": coded("RESOURCE_IN_USE", "Cannot reduce capacity below already reserved quantities"),
       "deleteResource: with bookings": coded("RESOURCE_IN_USE", "Cannot delete resource with existing bookings. Deactivate it instead."),
       "toggleResourceActive: missing resource": coded("RESOURCE_NOT_FOUND", 'Resource "ghost-res" not found'),
