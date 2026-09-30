@@ -1,5 +1,5 @@
 import { bookingEmailOptionsValidator } from "../emails.js";
-import { internalQueryGeneric, internalMutationGeneric } from "convex/server";
+import { internalQueryGeneric, internalMutationGeneric, paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
 import { bookingStatusValidator } from "../shared/booking-status.js";
@@ -290,6 +290,23 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.listBookings, args);
+      },
+    }),
+
+    // Cursor pages of one organization's, resource's or event type's bookings.
+    listBookingsPage: internalQueryGeneric({
+      args: {
+        organizationId: v.optional(v.string()),
+        resourceId: v.optional(v.string()),
+        eventTypeId: v.optional(v.string()),
+        dateFrom: v.optional(v.number()),
+        dateTo: v.optional(v.number()),
+        status: v.optional(bookingStatusValidator),
+        includeProvisional: v.optional(v.boolean()),
+        paginationOpts: paginationOptsValidator,
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runQuery(component.public.listBookingsPage, args);
       },
     }),
 

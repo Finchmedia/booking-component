@@ -155,6 +155,10 @@
   whole numbers. Without a selector the list still considers only the 1,000
   most recently created bookings; pass `organizationId`, `resourceId` or
   `eventTypeId` for complete results.
+- `convex-helpers` (`^0.1.124`) is a required peer dependency: the
+  component's `listBookingsPage` uses its paginator, so a host deploy
+  bundles it. Install it next to `@mrfinch/booking` (React users already
+  had it).
 - Booking statuses are a closed set (F16, D35): `status` is one of
   `provisional`, `pending`, `confirmed`, `cancelled`, `declined` and
   `completed` in the schema, in every returned booking and in the generated
@@ -207,6 +211,16 @@
   `bufferAfter`, `minNoticeMinutes` and `maxFutureMinutes` with `null` (N25,
   D30); an omitted field stays unchanged. `makeInternalBookingAPI` forwards
   `null`.
+- `listBookingsPage` (F18, Codex R4): cursor pages of exactly one
+  organization's, resource's or event type's bookings (newest `start`
+  first), with `dateFrom`, `dateTo`, `status` and `includeProvisional`
+  (provisional holds are hidden otherwise) and the usual `paginationOpts`.
+  It uses the convex-helpers paginator, as components cannot use
+  `.paginate()`; its cursor is the complete index key, so equal starts are
+  neither skipped nor repeated. A page reads at most 1,000 rows (a lower
+  `maximumRowsRead` wins), so filtered pages can be short or empty while
+  `isDone` is false. Page reactively with `usePaginatedQuery` from
+  `convex-helpers/react`. `makeInternalBookingAPI` wraps it.
 - `BOOKING_STATUSES`, the `BookingStatus` type, `bookingStatusValidator` and
   `isBookingStatus` from `@mrfinch/booking`, for host validators and status
   filters.

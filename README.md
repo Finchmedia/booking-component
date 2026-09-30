@@ -14,10 +14,11 @@ Use the React Booker or build your own interface.
 ## Install
 
 Start with an existing [Convex app](https://docs.convex.dev/get-started).
-The package requires Convex 1.46 or newer. Use Node 24 LTS for development.
+The package requires Convex 1.46 or newer and `convex-helpers` (the component's
+paginated queries use its paginator). Use Node 24 LTS for development.
 
 ```sh
-npm install @mrfinch/booking convex@^1.46.0
+npm install @mrfinch/booking convex@^1.46.0 convex-helpers@^0.1.124
 ```
 
 Register the component, then run `npx convex dev`:
@@ -36,7 +37,7 @@ For the optional React UI, also install its peer dependencies. Keep your existin
 React 18 or 19 installation and use the matching React DOM version.
 
 ```sh
-npm install convex-helpers@^0.1.124 react-hook-form@^7.88.0 @hookform/resolvers@^5.9.1 lucide-react@^1.47.0
+npm install react-hook-form@^7.88.0 @hookform/resolvers@^5.9.1 lucide-react@^1.47.0
 ```
 
 The package includes Zod 4. Backend-only apps can skip these UI peers.
@@ -259,7 +260,11 @@ endpoints to authorized host wrappers.
 - **Booking lists:** `listBookings({ resourceId })` lists the bookings whose
   primary resource is `resourceId`. A bundle's primary resource is its first
   item; its other resources, pools included, do not list it, although their
-  availability counts it.
+  availability counts it. `listBookingsPage` pages through one
+  organization's, resource's or event type's bookings with cursors
+  (`paginationOpts`); page it reactively from a host query with
+  `usePaginatedQuery` from `convex-helpers/react`. Filtered pages can be
+  short or empty before the end: continue until `isDone`.
 - **Updates:** update mutations change the fields you pass and keep every
   omitted one. `updateEventType` removes `description`, `scheduleId`,
   `bufferBefore`, `bufferAfter`, `minNoticeMinutes` and `maxFutureMinutes`

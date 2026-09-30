@@ -67,6 +67,7 @@ const REGISTERED_FUNCTIONS = [
   "public:getEventTypeBySlug (public query)",
   "public:getMonthAvailability (public query)",
   "public:listBookings (public query)",
+  "public:listBookingsPage (public query)",
   "public:listEventTypes (public query)",
   "public:rescheduleBooking (public mutation)",
   "public:rescheduleBookingByToken (public mutation)",

@@ -2,7 +2,10 @@ import { createBookingEmailContext } from "./emails/context.js";
 import { bookingEmailOptionsValidator, type BookingEmailOptions } from "../emails.js";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { v } from "convex/values";
+import { jsonToConvex, v } from "convex/values";
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
+import { stream } from "convex-helpers/server/stream";
+import schema from "./schema";
 import {
     getRequiredSlots,
     generateDaySlots,
@@ -1430,9 +1433,9 @@ async function firstMatching(
  * itself and the scan is proportional to the window. With a `limit` the scan
  * also stops once `limit` bookings match, so it reads the limit plus the rows
  * the other filters skip (for `eventTypeId`, plus the rest of the bookings
- * sharing the last one's `start`). Without a limit it reads the whole range.
- * `limit` must be a positive integer (0.5.0; INVALID_INPUT otherwise, where
- * 0.4.x read 0 as no limit).
+ * sharing the last one's `start`). Without a limit it reads the whole range;
+ * listBookingsPage pages through a range instead. `limit` must be a positive
+ * integer (0.5.0; INVALID_INPUT otherwise, where 0.4.x read 0 as no limit).
  * Bookings with equal `start` come newest-created first, except in the
  * `eventTypeId` branch, where they come oldest-created first.
  *
@@ -1488,6 +1491,169 @@ export const listBookings = query({
     }
 
     return bookings;
+  },
+});
+
+/**
+ * Rows one listBookingsPage call reads at most, the ones the status filter
+ * skips included (a lower `paginationOpts.maximumRowsRead` wins).
+ */
+const LIST_PAGE_MAX_ROWS_READ = 1000;
+
+const PAGE_SELECTORS = ["organizationId", "resourceId", "eventTypeId"] as const;
+
+type PageArgs = {
+  organizationId?: string;
+  resourceId?: string;
+  eventTypeId?: string;
+  dateFrom?: number;
+  dateTo?: number;
+};
+
+type PageSelector = { field: (typeof PAGE_SELECTORS)[number]; value: string };
+
+/** listBookingsPage's one selector; anything but exactly one non-empty id throws. */
+function pageSelector(args: PageArgs): PageSelector {
+  const given = PAGE_SELECTORS.filter((field) => args[field] !== undefined);
+  const value = given.length === 1 ? args[given[0]] : undefined;
+  if (!value) {
+    throwBookingError(
+      "INVALID_INPUT",
+      "listBookingsPage needs exactly one of organizationId, resourceId or eventTypeId"
+    );
+  }
+  return { field: given[0], value };
+}
+
+/**
+ * The selector's index range as a convex-helpers stream, newest `start`
+ * first (equal starts newest-created first: the index order).
+ */
+function bookingPageStream(ctx: QueryCtx, { field, value }: PageSelector, args: PageArgs) {
+  const { dateFrom, dateTo } = args;
+  const bookings = stream(ctx.db, schema).query("bookings");
+  if (field === "organizationId") {
+    return bookings
+      .withIndex("by_org_start", (q) => {
+        const byOrg = q.eq("organizationId", value);
+        const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
+        return dateTo !== undefined ? from.lte("start", dateTo) : from;
+      })
+      .order("desc");
+  }
+  if (field === "resourceId") {
+    return bookings
+      .withIndex("by_resource_start", (q) => {
+        const byResource = q.eq("resourceId", value);
+        const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
+        return dateTo !== undefined ? from.lte("start", dateTo) : from;
+      })
+      .order("desc");
+  }
+  return bookings
+    .withIndex("by_event_type_start", (q) => {
+      const byEventType = q.eq("eventTypeId", value);
+      const from = dateFrom !== undefined ? byEventType.gte("start", dateFrom) : byEventType;
+      return dateTo !== undefined ? from.lte("start", dateTo) : from;
+    })
+    .order("desc");
+}
+
+/** convex-helpers' continueCursor after the last row: an empty index key. */
+const PAGE_END = "[]";
+
+/**
+ * A cursor listBookingsPage issued for this selector: the complete index key
+ * of a row ([selector id, start, _creationTime, _id], as convex-helpers
+ * serializes it) or "[]", the end. A cursor of another selector would bound
+ * the wrong range, so it is rejected instead of listing wrong rows.
+ */
+function assertPageCursor(cursor: string | null | undefined, selector: string): void {
+  if (cursor === null || cursor === undefined) return;
+  let key: unknown;
+  try {
+    key = jsonToConvex(JSON.parse(cursor));
+  } catch {
+    key = null;
+  }
+  // convex-helpers prefixes "_" to a string that ends in "undefined".
+  const stored = selector.endsWith("undefined") ? `_${selector}` : selector;
+  const valid =
+    Array.isArray(key) &&
+    (key.length === 0 ||
+      (key.length === 4 &&
+        key[0] === stored &&
+        typeof key[1] === "number" &&
+        typeof key[2] === "number" &&
+        typeof key[3] === "string"));
+  if (!valid) throwBookingError("INVALID_INPUT", "Invalid listBookingsPage cursor");
+}
+
+/**
+ * Pages through the bookings of one organization, resource or event type
+ * (exactly one of `organizationId`, `resourceId`, `eventTypeId`), newest
+ * `start` first, bookings with equal `start` newest-created first.
+ * `dateFrom` / `dateTo` narrow `start` (inclusive), `status` keeps one
+ * status; without `status`, provisional holds are left out unless
+ * `includeProvisional`. As in listBookings, `resourceId` matches a booking's
+ * primary resource only, and bookings are returned whole, `managementToken`
+ * included.
+ *
+ * Built on the convex-helpers paginator (component functions cannot use
+ * `.paginate()`): `continueCursor` is the complete index key of the last row
+ * read, so bookings with equal `start` (and equal creation times) are neither
+ * skipped nor repeated across pages. A page reads at most 1,000 rows,
+ * filtered ones included (`paginationOpts.maximumRowsRead` may lower that),
+ * so with a status filter a page can hold fewer than `numItems` bookings, or
+ * none, while `isDone` is false: continue with `continueCursor`. For
+ * reactive paging from a host query, use `usePaginatedQuery` from
+ * `convex-helpers/react`, which passes `endCursor` and splits pages at
+ * `splitCursor`. `numItems` must be a positive integer; a cursor issued for
+ * another selector is rejected (INVALID_INPUT).
+ */
+export const listBookingsPage = query({
+  args: {
+    organizationId: v.optional(v.string()),
+    resourceId: v.optional(v.string()),
+    eventTypeId: v.optional(v.string()),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+    status: v.optional(bookingStatusValidator),
+    includeProvisional: v.optional(v.boolean()),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: paginationResultValidator(bookingDoc),
+  handler: async (ctx, args) => {
+    const { paginationOpts: opts, status, includeProvisional } = args;
+    const selector = pageSelector(args);
+    if (!Number.isInteger(opts.numItems) || opts.numItems < 1) {
+      throwBookingError("INVALID_INPUT", `Invalid numItems ${opts.numItems}: expected a positive integer`);
+    }
+    if (opts.maximumRowsRead !== undefined && !(Number.isInteger(opts.maximumRowsRead) && opts.maximumRowsRead > 0)) {
+      throwBookingError("INVALID_INPUT", `Invalid maximumRowsRead ${opts.maximumRowsRead}: expected a positive integer`);
+    }
+    assertPageCursor(opts.cursor, selector.value);
+    assertPageCursor(opts.endCursor, selector.value);
+    // "[]" is the cursor after the last page. The helper reads it as no
+    // bound at all, so a caller that continued past isDone would get the
+    // whole range again; answer with the end instead.
+    if (opts.cursor === PAGE_END) return { page: [], isDone: true, continueCursor: PAGE_END };
+
+    const range = bookingPageStream(ctx, selector, args);
+    const keep =
+      status !== undefined
+        ? (booking: Doc<"bookings">) => booking.status === status
+        : includeProvisional
+          ? null
+          : (booking: Doc<"bookings">) => booking.status !== "provisional";
+    const rows = keep ? range.filterWith(async (booking) => keep(booking)) : range;
+    return await rows.paginate({
+      numItems: opts.numItems,
+      cursor: opts.cursor,
+      endCursor: opts.endCursor,
+      maximumRowsRead: Math.min(opts.maximumRowsRead ?? LIST_PAGE_MAX_ROWS_READ, LIST_PAGE_MAX_ROWS_READ),
+      maximumBytesRead: opts.maximumBytesRead,
+    });
   },
 });
 

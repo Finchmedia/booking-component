@@ -1001,6 +1001,73 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }>,
         Name
       >;
+      listBookingsPage: FunctionReference<
+        "query",
+        "internal",
+        {
+          dateFrom?: number;
+          dateTo?: number;
+          eventTypeId?: string;
+          includeProvisional?: boolean;
+          organizationId?: string;
+          paginationOpts: {
+            cursor: string | null;
+            endCursor?: string | null;
+            id?: number;
+            maximumBytesRead?: number;
+            maximumRowsRead?: number;
+            numItems: number;
+          };
+          resourceId?: string;
+          status?:
+            | "provisional"
+            | "pending"
+            | "confirmed"
+            | "cancelled"
+            | "declined"
+            | "completed";
+        },
+        {
+          continueCursor: string;
+          isDone: boolean;
+          page: Array<{
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: { type: string; value?: string };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            rescheduledToUid?: string;
+            resourceId: string;
+            start: number;
+            status:
+              | "provisional"
+              | "pending"
+              | "confirmed"
+              | "cancelled"
+              | "declined"
+              | "completed";
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+          }>;
+          pageStatus?: "SplitRecommended" | "SplitRequired" | null;
+          splitCursor?: string | null;
+        },
+        Name
+      >;
       listEventTypes: FunctionReference<
         "query",
         "internal",
