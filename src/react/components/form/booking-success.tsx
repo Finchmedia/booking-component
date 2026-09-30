@@ -35,6 +35,9 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
   locale,
 }) => {
   const isPending = booking.status === "pending";
+  // A location is shown only with a value; the map pin only for places
+  const location = booking.location?.value ? booking.location : undefined;
+  const isPlace = location?.type === "address" || location?.type === "in_person";
 
   return (
     <div className="max-w-2xl mx-auto p-8">
@@ -53,7 +56,11 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
 
       {/* Heading */}
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-foreground mb-2">
+        <h1
+          data-step-heading=""
+          tabIndex={-1}
+          className="text-2xl font-bold text-foreground mb-2 outline-none"
+        >
           {isPending
             ? isRescheduling
               ? "Reschedule Request Submitted"
@@ -95,10 +102,14 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
           </div>
         </div>
 
-        {booking.location?.value && (
+        {location && (
           <div className="flex items-start gap-3">
-            <MapPin className="h-5 w-5 text-muted-foreground mt-0.5" />
-            <p className="text-sm text-foreground">{booking.location?.value}</p>
+            {isPlace ? (
+              <MapPin className="h-5 w-5 text-muted-foreground mt-0.5" />
+            ) : (
+              <span className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+            )}
+            <p className="text-sm text-foreground">{location.value}</p>
           </div>
         )}
 

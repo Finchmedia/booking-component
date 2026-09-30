@@ -1,17 +1,21 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useQuery } from "convex-helpers/react/cache/hooks";
 import { useBookingAPI } from "../../context";
 import { useSlotHold } from "../../hooks/use-slot-hold";
-import { useBookingValidation } from "../../hooks/use-booking-validation";
+import {
+  useBookingValidation,
+  type ValidationRecovery,
+} from "../../hooks/use-booking-validation";
 import { resolveBookingErrorMessage } from "../../utils/booking-error";
 import { Calendar, CalendarSkeleton } from "../calendar";
 import { BookingForm, type CurrentUser } from "../form/booking-form";
 import { BookingSuccess } from "../form/booking-success";
 import { BookingErrorDialog } from "./booking-error-dialog";
+import { getRecoveryAction } from "./recovery";
 import type {
   BookingStep,
   BookingFormData,
@@ -44,10 +48,19 @@ export interface BookerProps {
   currentUser?: CurrentUser;
   /** Callback when booking is successfully created */
   onBookingComplete?: (booking: Booking) => void;
-  /** Callback to reset event type selection (for embedded Booker) */
-  onEventTypeReset?: () => void;
-  /** Callback for navigation (used when resource is deleted/deactivated) */
-  onNavigate?: (path: string) => void;
+  /**
+   * Callback to reset event type selection (for embedded Booker). Used when the
+   * event type is deleted or deactivated or the resource is unlinked; receives
+   * the recovery kind ("select-event-type").
+   */
+  onEventTypeReset?: (recovery: ValidationRecovery) => void;
+  /**
+   * Callback for navigation (used when resource is deleted/deactivated).
+   * `path` is the deprecated recoveryPath; map `recovery` ("select-resource")
+   * to your own route. Without the matching callback the Booker shows the
+   * error inline instead of a blocking dialog.
+   */
+  onNavigate?: (path: string, recovery: ValidationRecovery) => void;
   /**
    * Callback when authentication is required for a new booking (user not signed in).
    * Without it, the Booker shows a sign-in message.
@@ -72,6 +85,17 @@ export interface BookerProps {
    * A reschedule always keeps the original contact details.
    */
   reuseBookerInfo?: boolean;
+}
+
+/**
+ * The event's first configured location, never an invented one. The value is
+ * the location's address when it has one; without a configured location the
+ * type is "unknown" and there is no value.
+ */
+function bookingLocation(locations: EventType["locations"]): { type: string; value?: string } {
+  const first = locations?.[0];
+  if (!first) return { type: "unknown" };
+  return first.address ? { type: first.type, value: first.address } : { type: first.type };
 }
 
 /**
@@ -194,6 +218,19 @@ function BookerFlow({
     selectedDuration,
     resourceId
   );
+  // Validation errors never cover a completed booking. While one is shown a new
+  // booking cannot proceed; reschedules are not blocked here.
+  const validationError = bookingStep === "success" ? undefined : validation.error;
+  const isCreateBlocked = !isRescheduling && !!validationError;
+
+  // A step change moves focus to the new step's heading (not on first render)
+  const rootRef = useRef<HTMLDivElement>(null);
+  const focusedStep = useRef(bookingStep);
+  useEffect(() => {
+    if (focusedStep.current === bookingStep) return;
+    focusedStep.current = bookingStep;
+    rootRef.current?.querySelector<HTMLElement>("[data-step-heading]")?.focus();
+  }, [bookingStep]);
 
   // Every visible failure is logged, shown to the user and reported to the host.
   const reportError = (
@@ -258,6 +295,7 @@ function BookerFlow({
   // Step 1: Calendar slot selection (captures BOTH slot AND duration atomically)
   const handleSlotSelect = (data: { slot: string; duration: number }) => {
     if (inFlight.current) return; // A move is still being sent
+    if (isCreateBlocked) return; // The configuration no longer allows booking
     setBookingError(null);
     setSelectedSlot(data.slot);
     setSelectedDuration(data.duration); // LOCK the duration at slot selection
@@ -273,6 +311,7 @@ function BookerFlow({
   // Step 2: Form submission (handles both new booking and reschedule via form)
   const handleFormSubmit = async (formData: BookingFormData) => {
     if (inFlight.current) return; // The same submission is still being sent
+    if (isCreateBlocked) return; // The configuration no longer allows booking
     const phase: BookingPhase = isRescheduling ? "reschedule" : "create";
     if (!selectedSlot || !eventType) {
       reportError(phase, new Error("Booker: no slot or event type is selected"), "Please select a time again.");
@@ -311,10 +350,7 @@ function BookerFlow({
           end,
           timezone,
           booker: formData,
-          location: {
-            type: "address",
-            value: eventType.locations?.[0]?.address || "Studio A",
-          },
+          location: bookingLocation(eventType.locations),
         });
       }
 
@@ -392,18 +428,14 @@ function BookerFlow({
     return <CalendarSkeleton />;
   }
 
-  return (
-    <>
-      {/* Error Dialog (blocking) */}
-      {validation.status === "error" && validation.error && (
-        <BookingErrorDialog
-          error={validation.error}
-          onReset={handleReset}
-          onEventTypeReset={onEventTypeReset}
-          onNavigate={onNavigate}
-        />
-      )}
+  // With a host callback for its recovery a validation error is a modal dialog
+  // over the flow; without one it replaces the flow, so the page stays usable.
+  const showFlow =
+    !validationError ||
+    !!getRecoveryAction(validationError, { onReset: handleReset, onEventTypeReset, onNavigate });
 
+  return (
+    <div ref={rootRef} className="contents">
       {/* Optional Header */}
       {showHeader &&
         bookingStep === "event-meta" &&
@@ -420,92 +452,106 @@ function BookerFlow({
           </div>
         )}
 
-      {/* One-click reschedule feedback on the calendar step */}
-      {bookingStep === "event-meta" && bookingError && (
-        <div
-          role="alert"
-          className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          <p className="font-medium">
-            {bookingError.phase === "reschedule" ? "Reschedule failed" : "Booking failed"}
-          </p>
-          <p>{bookingError.message}</p>
-        </div>
-      )}
-      {bookingStep === "event-meta" && isSubmitting && (
-        <p role="status" className="mb-4 text-sm text-muted-foreground">
-          Rescheduling to the selected time...
-        </p>
-      )}
-
-      {/* Step 1: Calendar View */}
-      {bookingStep === "event-meta" && eventType && (
-        <Calendar
-          resourceId={resourceId}
-          eventTypeId={eventType.id}
-          onSlotSelect={handleSlotSelect}
-          title={eventType.title}
-          organizerName={organizerName}
-          organizerAvatar={organizerAvatar}
-          // Controlled state (persists across navigation)
-          selectedDate={selectedDate}
-          onDateChange={setSelectedDate}
-          currentMonth={currentMonth}
-          onMonthChange={setCurrentMonth}
-          selectedDuration={selectedDuration}
-          onDurationChange={setSelectedDuration}
-          timezone={timezone}
-          onTimezoneChange={setTimezone}
-          timeFormat={timeFormat}
-          onTimeFormatChange={setTimeFormat}
-          disabled={isSubmitting}
+      {/* Validation error: modal with a recovery action, inline otherwise */}
+      {validationError && (
+        <BookingErrorDialog
+          error={validationError}
+          onReset={handleReset}
+          onEventTypeReset={onEventTypeReset}
+          onNavigate={onNavigate}
         />
       )}
 
-      {/* Step 2: Booking Form */}
-      {bookingStep === "booking-form" && selectedSlot && displayedEventType && (
-        <div className="bg-card rounded-xl border border-border overflow-hidden shadow-2xl">
-          <BookingForm
-            eventType={displayedEventType}
-            selectedSlot={selectedSlot}
-            selectedDuration={selectedDuration}
-            timezone={timezone}
-            onSubmit={handleFormSubmit}
-            onBack={handleBack}
-            isSubmitting={isSubmitting}
-            currentUser={currentUser}
-            isRescheduling={isRescheduling}
-            submitError={bookingError?.message}
-            // A reschedule keeps the original contact details: confirm, don't edit
-            readOnlyDetails={
-              originalBooking
-                ? {
-                    name: originalBooking.bookerName,
-                    email: originalBooking.bookerEmail,
-                    phone: originalBooking.bookerPhone,
-                    notes: originalBooking.bookerNotes,
-                  }
-                : undefined
-            }
-            timeFormat={timeFormat}
-            locale={locale}
-          />
-        </div>
-      )}
+      {showFlow && (
+        <>
+          {/* One-click reschedule feedback on the calendar step */}
+          {bookingStep === "event-meta" && bookingError && (
+            <div
+              role="alert"
+              className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+            >
+              <p className="font-medium">
+                {bookingError.phase === "reschedule" ? "Reschedule failed" : "Booking failed"}
+              </p>
+              <p>{bookingError.message}</p>
+            </div>
+          )}
+          {bookingStep === "event-meta" && isSubmitting && (
+            <p role="status" className="mb-4 text-sm text-muted-foreground">
+              Rescheduling to the selected time...
+            </p>
+          )}
 
-      {/* Step 3: Success Screen */}
-      {bookingStep === "success" && completedBooking && displayedEventType && (
-        <div className="bg-card rounded-xl border border-border overflow-hidden shadow-2xl">
-          <BookingSuccess
-            booking={completedBooking}
-            eventType={displayedEventType}
-            onBookAnother={handleBookAnother}
-            isRescheduling={isRescheduling}
-            timeFormat={timeFormat}
-            locale={locale}
-          />
-        </div>
+          {/* Step 1: Calendar View */}
+          {bookingStep === "event-meta" && eventType && (
+            <Calendar
+              resourceId={resourceId}
+              eventTypeId={eventType.id}
+              onSlotSelect={handleSlotSelect}
+              title={eventType.title}
+              organizerName={organizerName}
+              organizerAvatar={organizerAvatar}
+              // Controlled state (persists across navigation)
+              selectedDate={selectedDate}
+              onDateChange={setSelectedDate}
+              currentMonth={currentMonth}
+              onMonthChange={setCurrentMonth}
+              selectedDuration={selectedDuration}
+              onDurationChange={setSelectedDuration}
+              timezone={timezone}
+              onTimezoneChange={setTimezone}
+              timeFormat={timeFormat}
+              onTimeFormatChange={setTimeFormat}
+              disabled={isSubmitting}
+            />
+          )}
+
+          {/* Step 2: Booking Form */}
+          {bookingStep === "booking-form" && selectedSlot && displayedEventType && (
+            <div className="bg-card rounded-xl border border-border overflow-hidden shadow-2xl">
+              <BookingForm
+                eventType={displayedEventType}
+                selectedSlot={selectedSlot}
+                selectedDuration={selectedDuration}
+                timezone={timezone}
+                onSubmit={handleFormSubmit}
+                onBack={handleBack}
+                isSubmitting={isSubmitting}
+                currentUser={currentUser}
+                isRescheduling={isRescheduling}
+                submitError={bookingError?.message}
+                // A reschedule keeps the original contact details: confirm, don't edit
+                readOnlyDetails={
+                  originalBooking
+                    ? {
+                        name: originalBooking.bookerName,
+                        email: originalBooking.bookerEmail,
+                        phone: originalBooking.bookerPhone,
+                        notes: originalBooking.bookerNotes,
+                      }
+                    : undefined
+                }
+                timeFormat={timeFormat}
+                locale={locale}
+              />
+            </div>
+          )}
+
+          {/* Step 3: Success Screen */}
+          {bookingStep === "success" && completedBooking && displayedEventType && (
+            <div className="bg-card rounded-xl border border-border overflow-hidden shadow-2xl">
+              <BookingSuccess
+                booking={completedBooking}
+                eventType={displayedEventType}
+                onBookAnother={handleBookAnother}
+                isRescheduling={isRescheduling}
+                timeFormat={timeFormat}
+                locale={locale}
+              />
+            </div>
+          )}
+        </>
       )}
-    </>
+    </div>
   );
 }

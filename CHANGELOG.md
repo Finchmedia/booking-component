@@ -158,6 +158,27 @@
   contact details read-only. Its editable fields were never applied.
 - The confirmation and success steps follow the calendar's 12h/24h choice and the
   browser locale.
+- The Booker never invents a location. It submits the event's first configured
+  location with its configured type, and its address as the value when it has
+  one. Without a configured location it submits `{ type: "unknown" }` with no
+  value. "Studio A" is gone, and phone, link and in-person locations are no
+  longer relabelled `"address"`. The success screen shows a location only when
+  it has a value, with a map pin only for `"address"` and `"in_person"`.
+- Keyboard and screen-reader use: the duration choice is a native radio group
+  ("Duration"). Form fields are named by their labels, expose required and
+  invalid state and reference their error message. Reserved slots keep their
+  time in their name. Day buttons expose the full date, the selected day
+  (`aria-pressed`) and today (`aria-current="date"`). The 12h/24h toggles expose
+  `aria-pressed`. Each step change moves focus to the new step's heading,
+  including the confirmation. The time zone row no longer looks clickable.
+- Configuration errors no longer trap users. When the host passes the callback
+  for an error's recovery (`onEventTypeReset` or `onNavigate`; the duration
+  reset is built in), the error is a modal alert dialog with focus on its
+  action, and Escape performs the action. Without that callback, an inline alert
+  replaces the Booker's content and the rest of the page stays usable; before, a
+  full-screen overlay offered a button that did nothing. The error no longer
+  covers the success screen. While it is shown, a new booking cannot continue;
+  reschedules are not blocked by the UI.
 
 ### Added
 
@@ -168,6 +189,17 @@
   `Calendar`, `TimeSlotsPanel` and `TimeSlotButton`. `formatDate`,
   `formatTimeDisplay` and `formatDateTime` accept an optional locale, and
   `formatDateTime` an optional time format. Defaults are unchanged.
+- `ValidationError.recovery` (`"select-event-type"`, `"select-resource"` or
+  `"reset-duration"`) and the exported `ValidationRecovery` type.
+  `onEventTypeReset` and `onNavigate` on `Booker` and `BookingErrorDialog`
+  receive it as an extra argument.
+
+### Deprecated
+
+- `ValidationError.recoveryPath`, which hard-codes the demo's `/book` routes: map
+  `recovery` to your own routes instead. The unused `BookingValidationError` and
+  `BookingValidationResult` types and the never-stored `"rescheduled"` booking
+  status are deprecated too. All remain available.
 
 ### Integration
 
@@ -175,6 +207,19 @@
   show two messages. Remove the wrapper or move it to `onBookingError`. Throw
   `ConvexError({ code, message })` from host functions to show a specific message.
 - `BookingSuccess` no longer renders "Book Another" when `isRescheduling` is set.
+- Booker bookings store the configured location type (for example `"phone"`,
+  `"in_person"` or `"link"`) instead of always `"address"`, `{ type: "unknown" }`
+  for events without locations, and no value for locations without an address.
+  Render a location by `location.value`, not by `booking.location &&`. Existing
+  bookings keep what they stored, including "Studio A".
+- Pass `onEventTypeReset` and `onNavigate` to offer a way back from
+  configuration errors; without them the Booker shows an inline notice. The
+  callbacks now receive the recovery kind as an extra argument, so wrap
+  callbacks that take optional parameters of their own, such as a state setter.
+- Markup changes for CSS and selectors: durations are radio inputs in a
+  `fieldset` instead of `li` elements; `BookingErrorDialog` renders a native
+  `dialog` (opened with `showModal()`) or an inline `role="alert"` instead of a
+  fixed overlay; the Booker wraps its steps in a `display: contents` element.
 
 ## 0.4.2 — 23 September 2026
 

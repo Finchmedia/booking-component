@@ -23,10 +23,13 @@ export const TimeSlotButton: React.FC<TimeSlotButtonProps> = ({
 }) => {
   // NOTE: Presence filtering now happens at the list level in use-convex-slots
   // Slots are split into available (free) and reserved (held by other users)
+  const time = formatTime(slot.time, timeFormat, timezone);
 
   return (
     <button
       disabled={isReserved || disabled}
+      // A reserved slot still names its time for assistive technology
+      aria-label={isReserved ? `${time}, reserved` : undefined}
       onClick={() => !isReserved && !disabled && onSlotSelect(slot.time)}
       className={`w-full rounded-md border px-3 py-2 text-center text-sm font-medium transition-all
         ${
@@ -36,7 +39,7 @@ export const TimeSlotButton: React.FC<TimeSlotButtonProps> = ({
         }
       `}
     >
-      {isReserved ? "Reserved" : formatTime(slot.time, timeFormat, timezone)}
+      {isReserved ? "Reserved" : time}
     </button>
   );
 };

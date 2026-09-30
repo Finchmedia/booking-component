@@ -81,6 +81,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   locale,
 }) => {
   const submitErrorId = useId();
+  const fieldId = useId();
   // Check if user has prefilled data
   const isPrefilled = !readOnlyDetails && !!(currentUser?.name || currentUser?.email);
 
@@ -96,6 +97,17 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       phone: "",
       notes: "",
     },
+  });
+
+  // Labels name their fields; errors describe the field they belong to
+  const ids = (field: keyof BookingFormValues) => ({
+    input: `${fieldId}-${field}`,
+    error: `${fieldId}-${field}-error`,
+  });
+  const fieldState = (field: keyof BookingFormValues) => ({
+    id: ids(field).input,
+    "aria-invalid": errors[field] ? true : undefined,
+    "aria-describedby": errors[field] ? ids(field).error : undefined,
   });
 
   const submitHandler = async (data: BookingFormValues) => {
@@ -125,7 +137,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       {/* Right: Booking Form */}
       <div className="flex-1 p-6">
         <div className="mb-6">
-          <h2 className="text-xl font-semibold text-foreground">
+          <h2
+            data-step-heading=""
+            tabIndex={-1}
+            className="text-xl font-semibold text-foreground outline-none"
+          >
             {isRescheduling ? "Confirm Reschedule" : "Enter Details"}
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
@@ -188,26 +204,30 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             <>
               {/* Name Field */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  Name *
+                <label htmlFor={ids("name").input} className="text-sm font-medium text-foreground">
+                  Name <span aria-hidden="true">*</span>
                 </label>
                 <input
                   {...register("name")}
+                  {...fieldState("name")}
+                  aria-required="true"
                   placeholder="John Doe"
                   className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring"
                 />
                 {errors.name && (
-                  <p className="text-sm text-destructive">{errors.name.message}</p>
+                  <p id={ids("name").error} className="text-sm text-destructive">{errors.name.message}</p>
                 )}
               </div>
 
               {/* Email Field */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  Email *
+                <label htmlFor={ids("email").input} className="text-sm font-medium text-foreground">
+                  Email <span aria-hidden="true">*</span>
                 </label>
                 <input
                   {...register("email")}
+                  {...fieldState("email")}
+                  aria-required="true"
                   type="email"
                   placeholder="john@example.com"
                   readOnly={!!currentUser?.email}
@@ -218,39 +238,41 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                   }`}
                 />
                 {errors.email && (
-                  <p className="text-sm text-destructive">{errors.email.message}</p>
+                  <p id={ids("email").error} className="text-sm text-destructive">{errors.email.message}</p>
                 )}
               </div>
 
               {/* Phone Field */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
+                <label htmlFor={ids("phone").input} className="text-sm font-medium text-foreground">
                   Phone Number
                 </label>
                 <input
                   {...register("phone")}
+                  {...fieldState("phone")}
                   type="tel"
                   placeholder="+1 (555) 000-0000"
                   className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring"
                 />
                 {errors.phone && (
-                  <p className="text-sm text-destructive">{errors.phone.message}</p>
+                  <p id={ids("phone").error} className="text-sm text-destructive">{errors.phone.message}</p>
                 )}
               </div>
 
               {/* Notes Field */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
+                <label htmlFor={ids("notes").input} className="text-sm font-medium text-foreground">
                   Additional Notes
                 </label>
                 <textarea
                   {...register("notes")}
+                  {...fieldState("notes")}
                   placeholder="Please share anything that will help prepare for our meeting."
                   rows={4}
                   className="w-full px-3 py-2 rounded-md border border-border bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring resize-none"
                 />
                 {errors.notes && (
-                  <p className="text-sm text-destructive">{errors.notes.message}</p>
+                  <p id={ids("notes").error} className="text-sm text-destructive">{errors.notes.message}</p>
                 )}
               </div>
             </>

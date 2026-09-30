@@ -11,9 +11,23 @@ export type ValidationErrorType =
   | "duration_invalid"
   | "resource_unlinked";
 
+/**
+ * What the user can do next. Hosts map it to their own routes:
+ * - "select-event-type": choose another event type for this resource
+ * - "select-resource": choose another resource
+ * - "reset-duration": pick an available duration again (the Booker does this itself)
+ */
+export type ValidationRecovery = "select-event-type" | "select-resource" | "reset-duration";
+
 export interface ValidationError {
   type: ValidationErrorType;
   message: string;
+  /** Semantic recovery for this error. Always set by useBookingValidation. */
+  recovery?: ValidationRecovery;
+  /**
+   * @deprecated Hard-codes the demo host's routes ("/book", "/book/<resourceId>")
+   * and "reset". Use `recovery` and map it to your own routes.
+   */
   recoveryPath: string;
 }
 
@@ -30,7 +44,7 @@ export interface ValidationResult {
  * @param resource - Resource query result (may be null/undefined)
  * @param hasLink - Link state query result (may be null/undefined)
  * @param selectedDuration - Currently selected duration in minutes
- * @param resourceId - Resource ID for recovery path
+ * @param resourceId - Resource ID for the deprecated recoveryPath
  * @returns Validation result with status and optional error
  */
 export function useBookingValidation(
@@ -56,6 +70,7 @@ export function useBookingValidation(
         status: "error",
         error: {
           type: "event_deleted",
+          recovery: "select-event-type",
           message:
             "This event type has been deleted and is no longer available for booking.",
           recoveryPath: `/book/${resourceId}`,
@@ -69,6 +84,7 @@ export function useBookingValidation(
         status: "error",
         error: {
           type: "event_deactivated",
+          recovery: "select-event-type",
           message:
             "This event type has been deactivated and is no longer available for booking.",
           recoveryPath: `/book/${resourceId}`,
@@ -82,6 +98,7 @@ export function useBookingValidation(
         status: "error",
         error: {
           type: "resource_deleted",
+          recovery: "select-resource",
           message:
             "This resource has been deleted and is no longer available for booking.",
           recoveryPath: "/book",
@@ -95,6 +112,7 @@ export function useBookingValidation(
         status: "error",
         error: {
           type: "resource_deactivated",
+          recovery: "select-resource",
           message:
             "This resource has been deactivated and is no longer available for booking.",
           recoveryPath: "/book",
@@ -112,6 +130,7 @@ export function useBookingValidation(
         status: "error",
         error: {
           type: "duration_invalid",
+          recovery: "reset-duration",
           message:
             "The selected booking duration is no longer available. Please select a new duration.",
           recoveryPath: "reset", // Special value to signal calendar reset
@@ -125,6 +144,7 @@ export function useBookingValidation(
         status: "error",
         error: {
           type: "resource_unlinked",
+          recovery: "select-event-type",
           message: "This resource is no longer available for this event type.",
           recoveryPath: `/book/${resourceId}`,
         },

@@ -4,6 +4,7 @@ export {
   useBookingValidation,
   type ValidationError,
   type ValidationErrorType,
+  type ValidationRecovery,
   type ValidationResult,
 } from "./use-booking-validation";
 export { useSlotPresence } from "./use-slot-presence";

@@ -36,6 +36,7 @@ export {
   useBookingValidation,
   type ValidationError,
   type ValidationErrorType,
+  type ValidationRecovery,
   type ValidationResult,
 } from "./hooks/use-booking-validation";
 export { useSlotPresence } from "./hooks/use-slot-presence";

@@ -58,6 +58,8 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
         <div className="mb-3 flex justify-center">
           <div className="flex overflow-hidden rounded-md border border-border bg-muted">
             <button
+              type="button"
+              aria-pressed={timeFormat === "12h"}
               onClick={() => onTimeFormatChange("12h")}
               className={`px-2 py-1 text-xs font-medium transition-colors ${
                 timeFormat === "12h"
@@ -68,6 +70,8 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
               12h
             </button>
             <button
+              type="button"
+              aria-pressed={timeFormat === "24h"}
               onClick={() => onTimeFormatChange("24h")}
               className={`px-2 py-1 text-xs font-medium transition-colors ${
                 timeFormat === "24h"

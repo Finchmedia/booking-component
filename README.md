@@ -72,6 +72,10 @@ connect your management pages to the returned booking UID and secret token.
 Failed bookings are shown in the Booker with the message from the `ConvexError`
 your host function throws, or a generic message; `onBookingError(error, { phase })`
 also reports them to your app.
+If the event type or resource stops being bookable, the Booker explains why.
+Pass `onEventTypeReset(recovery)` and `onNavigate(path, recovery)` to offer a way
+back; map `recovery` (`"select-event-type"` or `"select-resource"`) to your own
+routes.
 
 ## Backend integration
 

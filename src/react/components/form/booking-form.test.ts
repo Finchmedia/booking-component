@@ -112,3 +112,70 @@ describe("BookingSuccess after a reschedule (O10)", () => {
     expect(onBookAnother).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("BookingForm labels and error state (O3)", () => {
+  it("names each field by its visible label and marks the required ones", () => {
+    renderForm();
+    const name = screen.getByRole("textbox", { name: "Name" });
+    const email = screen.getByRole("textbox", { name: "Email" });
+    const phone = screen.getByRole("textbox", { name: "Phone Number" });
+    const notes = screen.getByRole("textbox", { name: "Additional Notes" });
+    expect(screen.getByLabelText(/^Name/)).toBe(name);
+    expect(screen.getByLabelText(/^Email/)).toBe(email);
+    expect(name.getAttribute("aria-required")).toBe("true");
+    expect(email.getAttribute("aria-required")).toBe("true");
+    // CONTROL: optional fields are not marked required
+    expect(phone.hasAttribute("aria-required")).toBe(false);
+    expect(notes.hasAttribute("aria-required")).toBe(false);
+  });
+
+  it("an invalid submit marks each failing field and links it to its error", async () => {
+    renderForm();
+    const name = screen.getByRole("textbox", { name: "Name" });
+    const email = screen.getByRole("textbox", { name: "Email" });
+    const phone = screen.getByRole("textbox", { name: "Phone Number" });
+    // CONTROL: nothing is invalid before a submit
+    for (const field of [name, email]) {
+      expect(field.hasAttribute("aria-invalid")).toBe(false);
+      expect(field.hasAttribute("aria-describedby")).toBe(false);
+    }
+    await act(async () => { fireEvent.submit(name.closest("form")!); });
+    for (const [field, message] of [[name, "Name is required"], [email, "Please enter a valid email address"]] as const) {
+      expect(field.getAttribute("aria-invalid")).toBe("true");
+      expect(document.getElementById(field.getAttribute("aria-describedby")!)?.textContent).toBe(message);
+    }
+    // CONTROL: a valid field stays unmarked
+    expect(phone.hasAttribute("aria-invalid")).toBe(false);
+  });
+});
+
+describe("BookingSuccess location (O4)", () => {
+  const mapPin = () => document.querySelector(".lucide-map-pin");
+
+  it("shows a place with a map pin", () => {
+    for (const location of [{ type: "address", value: "Main St 1" }, { type: "in_person", value: "Studio B" }]) {
+      renderSuccess({ booking: { ...booking, location } });
+      expect(screen.getByText(location.value).parentElement!.contains(mapPin())).toBe(true);
+      cleanup();
+    }
+  });
+
+  it("shows other location values without a map pin", () => {
+    for (const location of [{ type: "phone", value: "+49 30 123" }, { type: "link", value: "https://meet.example/abc" }]) {
+      renderSuccess({ booking: { ...booking, location } });
+      expect(screen.getByText(location.value)).toBeTruthy();
+      expect(mapPin()).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("renders no location row without a value", () => {
+    for (const location of [{ type: "unknown" }, { type: "phone" }, { type: "address" }, undefined]) {
+      renderSuccess({ booking: { ...booking, location } });
+      expect(screen.getByText("Ada")).toBeTruthy(); // CONTROL: the details card rendered
+      expect(mapPin()).toBeNull();
+      expect(Array.from(document.querySelectorAll("p")).filter((p) => p.textContent === "")).toHaveLength(0);
+      cleanup();
+    }
+  });
+});
