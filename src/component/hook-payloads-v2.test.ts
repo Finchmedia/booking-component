@@ -439,6 +439,8 @@ function hookPayloadsV2Doc(): string {
     "  fail a handler that validates its arguments. Keys without a value are left out, never sent as",
     "  `null`.",
     "- Hooks registered without `payloadVersion` keep receiving the version 1 payloads.",
+    "  `updateHook` cannot change a hook's version: to switch, register a version 2 handler, then",
+    "  remove the version 1 hook with `unregisterHook`. Until then both run.",
     "- An event queued by 0.4.x and delivered after the upgrade has no version 2 payload; version 2",
     "  hooks skip it with a logged warning.",
     "",

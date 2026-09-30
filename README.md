@@ -150,10 +150,10 @@ Every booking document the component returns contains the token and the
 booker's contact details: `createBooking`, `createProvisionalBooking`,
 `createMultiResourceBooking`, `rescheduleBooking` and
 `rescheduleBookingByToken` (a move keeps the token), `getBooking`,
-`getBookingByUid`, `getBookingByToken`, `listBookings` and
-`multi_resource.getBookingWithItems`. Give the token to the booker only. Host
-functions that serve these results to other callers must remove it, because a
-UID alone must never be enough to obtain it.
+`getBookingByUid`, `getBookingByToken`, `listBookings`, `listBookingsPage`
+and `multi_resource.getBookingWithItems`. Give the token to the booker only.
+Host functions that serve these results to other callers must remove it,
+because a UID alone must never be enough to obtain it.
 
 **Registering a hook is an administrator action.** A hook's function handle
 runs for every matching event, and its payload carries the booker's contact
@@ -170,6 +170,14 @@ internal queries and mutations. Its exports are accessed through `internal.*`.
 The old public `makeBookingAPI` factory was removed in 0.4.0; migrate public
 endpoints to authorized host wrappers.
 
+[Host functions](https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md)
+shows two wrappers whose arguments need care: slot queries that forward a
+booker's `rescheduleContext`, and paged booking lists. After an upgrade, run
+the read-only `maintenance.audit` checks from an internal function and repair
+what they list;
+[maintenance](https://github.com/Finchmedia/booking-component/blob/main/docs/maintenance.md)
+shows how and lists every check with its repair.
+
 ## Supported behavior
 
 - **Schedules:** weekly hours, date overrides and IANA timezones. Booking timestamps
@@ -181,9 +189,10 @@ endpoints to authorized host wrappers.
   local time that does not exist is not offered, a repeated one means its first
   occurrence, and a window closes when its last existing quarter hour ends, so
   bookings end by then. Before upgrading from 0.4.2 or earlier, check your
-  event-type lengths, and afterwards run the `maintenance.audit` checks,
+  event-type lengths. After upgrading, run the `maintenance.audit` checks,
   which also list the stored configuration and bookings 0.5.0 treats
-  differently; see the CHANGELOG.
+  differently; see the CHANGELOG and
+  [maintenance](https://github.com/Finchmedia/booking-component/blob/main/docs/maintenance.md).
 - **Bundles and pools:** reserve several resources atomically through the
   [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).
   Pool quantities use this API; ordinary single-resource flows reject pools.
@@ -220,8 +229,9 @@ endpoints to authorized host wrappers.
   `confirmed`) check the current configuration: the event type and every
   resource exist and are active, each resource is linked to the event type
   and belongs to its organization when it has one, and one resource is not
-  an add-on (`isStandalone: false`). A bundle's primary resource is its first
-  item and may be an add-on. There is no administrator override: to move or
+  an add-on (`isStandalone: false`). A booking belongs to its event type's
+  organization. A bundle's primary resource is its first item and may be an
+  add-on. There is no administrator override: to move or
   confirm after deactivating or unlinking, reactivate or relink first.
   Cancelling, declining and expiring are always allowed, and deactivating
   never ends an existing booking. The legacy `createReservation` path checks
@@ -249,14 +259,18 @@ endpoints to authorized host wrappers.
   freed, and neither value appears in results or logs. `excludeBookingUid`
   does the same from a UID alone: pass it only from trusted host code, never
   from client input. Passing both throws `INVALID_INPUT`.
+  [Host functions](https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md#slot-queries-while-rescheduling)
+  shows a wrapper.
 - **Schedule references:** an event type's `scheduleId` names an existing
   schedule (or is `""`); `createEventType` and `updateEventType` reject
   others, and `deleteSchedule` refuses while an event type uses the schedule
   (`SCHEDULE_IN_USE`).
 - **Statuses:** a booking is `provisional`, `pending`, `confirmed`,
-  `cancelled`, `declined` or `completed`; `BOOKING_STATUSES` and the
-  `BookingStatus` type from `@mrfinch/booking` name them. A moved original
-  is `cancelled` with `rescheduledToUid` set.
+  `cancelled`, `declined` or `completed`, and the schema stores no other
+  value. For host types, validators and filters, `@mrfinch/booking` exports
+  `BOOKING_STATUSES`, the `BookingStatus` type, `bookingStatusValidator` and
+  the guard `isBookingStatus`. A moved original is `cancelled` with
+  `rescheduledToUid` set.
 - **Booking lists:** `listBookings({ resourceId })` lists the bookings whose
   primary resource is `resourceId`. A bundle's primary resource is its first
   item; its other resources, pools included, do not list it, although their
@@ -265,6 +279,8 @@ endpoints to authorized host wrappers.
   (`paginationOpts`); page it reactively from a host query with
   `usePaginatedQuery` from `convex-helpers/react`. Filtered pages can be
   short or empty before the end: continue until `isDone`.
+  [Host functions](https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md#paged-booking-lists)
+  shows a wrapper.
 - **Updates:** update mutations change the fields you pass and keep every
   omitted one. `updateEventType` removes `description`, `scheduleId`,
   `bufferBefore`, `bufferAfter`, `minNoticeMinutes` and `maxFutureMinutes`
@@ -295,21 +311,33 @@ endpoints to authorized host wrappers.
 - **Errors:** expected failures, such as a taken slot or a wrong management
   token, throw `ConvexError({ code, message })`. The
   [codes](https://github.com/Finchmedia/booking-component/blob/main/docs/errors.md)
-  are public contract; `message` is English text for logs and administrators.
+  are public contract, listed with the functions that throw them; `message`
+  is English text for logs and administrators.
   In host functions, `isBookingError(error)` from `@mrfinch/booking` checks for
   one, and `error.data.code` selects the text you show. Other failures are
   plain `Error`s.
 
 ## Host responsibilities
 
-- **Policy:** resource visibility, opening-hours policy, notice periods and
-  abuse limits. The quickstart gateway implements common defaults. Buffer
-  fields are stored settings; enforce any required gaps in your host's reads
-  and writes.
-- **Email recipients:** anyone who can create a booking through your host can
-  have your sender mail any address. Decide the recipient policy, such as
-  address verification, rate limits or a CAPTCHA, before enabling email for
-  public booking.
+The component enforces the booking rules, inventory and input checks above.
+Everything else is policy that your host functions enforce before they call
+it:
+
+- **Authorization:** the component checks no user identity. Check roles and
+  organizations for administration, and ownership or management tokens for
+  booking details.
+- **Booking policy:** resource visibility, opening-hours policy, notice
+  periods and booking horizons. `minNoticeMinutes`, `maxFutureMinutes`,
+  `bufferBefore` and `bufferAfter` are stored event-type settings that the
+  component validates but does not apply to slots or bookings; enforce
+  notice, horizon and any required gaps in your host's reads and writes.
+- **Abuse limits:** rate limits and CAPTCHAs for public booking. The
+  quickstart gateway implements common defaults.
+- **Email recipients:** the component checks only the syntax of a booker's
+  email. Anyone who can create a booking through your host can have your
+  sender mail any address. Decide the recipient policy, such as address
+  verification, rate limits or a CAPTCHA, before enabling email for public
+  booking.
 - **Secrets:** management tokens and hook registration, as described under
   Backend integration.
 
