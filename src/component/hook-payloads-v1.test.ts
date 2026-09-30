@@ -13,6 +13,10 @@
  * so their nested shape follows the stored optional fields. A change that adds
  * a stored optional field must show the result equals an existing pinned shape,
  * or change the pin deliberately together with a CHANGELOG note.
+ *
+ * docs/hook-payloads-v1.md is rendered from these pins and compared at the end;
+ * after a deliberate change regenerate it with
+ * `npx vitest run src/component/hook-payloads-v1.test.ts -u`.
  */
 import { describe, expect, test } from "vitest";
 import { api } from "./_generated/api.js";
@@ -225,7 +229,7 @@ const CREATED_SINGLE = {
   managementToken: S, resourceId: S, start: N, status: S, timezone: S, uid: S,
 };
 /** `resources` mirrors the request items as passed (quantity only where given). */
-const CREATED_BUNDLE = {
+const CREATED_BUNDLE: Record<string, Shape> = {
   ...CREATED_SINGLE, isMultiResource: B, resources: [{ resourceId: S }, { quantity: N, resourceId: S }],
 };
 const CREATED_LEGACY = { bookerEmail: S, bookingId: S, end: N, resourceId: S, start: N, status: S };
@@ -261,6 +265,45 @@ const RESCHEDULED = (shape: StoredShape) => {
   return shape === "legacy createReservation row" ? omit(payload, "managementToken") : payload;
 };
 
+// Pinned emissions per call. A label starts with the emitting function's name,
+// which is how docs/hook-payloads-v1.md groups them.
+
+const CREATED_PINS: Record<string, Emitted[]> = {
+  createBooking: [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_SINGLE }],
+  "createBooking (requires confirmation)": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_SINGLE }],
+  // Since 0.4.3 (F7) the event type's organization is used, so the envelope carries it.
+  "createMultiResourceBooking without organization": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_BUNDLE }],
+  "createMultiResourceBooking for an event type without organization": [{ eventType: "booking.created", envelope: WITHOUT_ORG, payload: CREATED_BUNDLE }],
+  "createMultiResourceBooking with organization": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_BUNDLE }],
+  createReservation: [{ eventType: "booking.created", envelope: WITHOUT_ORG, payload: CREATED_LEGACY }],
+};
+
+const WITH_TOKEN = ALL_STORED.filter((shape) => shape !== "legacy createReservation row");
+const CANCELLED_PINS = {
+  cancelReservation: pinsFor(ALL_STORED, "booking.cancelled", () => CANCELLED_BY_ID),
+  cancelBookingByToken: pinsFor(WITH_TOKEN, "booking.cancelled", CANCELLED_BY_TOKEN),
+  "transitionBookingState to cancelled": pinsFor(ALL_STORED, "booking.cancelled", (shape) => TRANSITION(shape)),
+  cancelMultiResourceBooking: pinsFor(ALL_STORED, "booking.cancelled", () => ({ ...CANCELLED_BY_ID, isMultiResource: B })),
+  "cancelMultiResourceBooking with reason and cancelledBy": pinsFor(["bundle with organization"], "booking.cancelled", () => ({
+    ...CANCELLED_BY_ID, cancelledBy: S, isMultiResource: B, reason: S,
+  })),
+};
+
+const RESCHEDULED_PINS = {
+  rescheduleBooking: pinsFor(ALL_STORED, "booking.rescheduled", RESCHEDULED),
+  rescheduleBookingByToken: pinsFor(WITH_TOKEN, "booking.rescheduled", RESCHEDULED),
+};
+
+const MODERN = "modern single booking";
+const TRANSITION_PINS: Record<string, Emitted[]> = {
+  "transitionBookingState pending -> declined (with reason)": [{ eventType: "booking.declined", envelope: WITH_ORG, payload: TRANSITION(MODERN, true) }],
+  "transitionBookingState pending -> confirmed": [{ eventType: "booking.confirmed", envelope: WITH_ORG, payload: TRANSITION(MODERN) }],
+  "transitionBookingState provisional -> confirmed": [{ eventType: "booking.confirmed", envelope: WITH_ORG, payload: TRANSITION(MODERN) }],
+  "transitionBookingState provisional -> pending": [{ eventType: "booking.pending", envelope: WITH_ORG, payload: TRANSITION(MODERN) }],
+  // No notification for completion, so no emailContext either.
+  "transitionBookingState confirmed -> completed": [{ eventType: "booking.completed", envelope: ["eventType", "organizationId", "payload"], payload: TRANSITION(MODERN) }],
+};
+
 // ============================================
 // TESTS
 // ============================================
@@ -277,15 +320,7 @@ describe("booking.created", () => {
         world.bundle("14:00", undefined, "et-no-org")),
       "createMultiResourceBooking with organization": await emittedBy(t, () => world.bundle("11:00", ORG)),
       createReservation: await emittedBy(t, () => world.legacy("12:00")),
-    }).toStrictEqual({
-      createBooking: [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_SINGLE }],
-      "createBooking (requires confirmation)": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_SINGLE }],
-      // Since 0.4.3 (F7) the event type's organization is used, so the envelope carries it.
-      "createMultiResourceBooking without organization": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_BUNDLE }],
-      "createMultiResourceBooking for an event type without organization": [{ eventType: "booking.created", envelope: WITHOUT_ORG, payload: CREATED_BUNDLE }],
-      "createMultiResourceBooking with organization": [{ eventType: "booking.created", envelope: WITH_ORG, payload: CREATED_BUNDLE }],
-      createReservation: [{ eventType: "booking.created", envelope: WITHOUT_ORG, payload: CREATED_LEGACY }],
-    });
+    }).toStrictEqual(CREATED_PINS);
   });
 
   test("provisional creation and provisional expiry emit no hook", async () => {
@@ -304,28 +339,28 @@ describe("booking.cancelled: four emitters, four shapes", () => {
   test("cancelReservation", async () => {
     await expectPerStoredShape(
       (t, booking) => t.mutation(api.public.cancelReservation, { reservationId: booking._id }),
-      pinsFor(ALL_STORED, "booking.cancelled", () => CANCELLED_BY_ID),
+      CANCELLED_PINS.cancelReservation,
     );
   });
 
   test("cancelBookingByToken (legacy rows carry no token)", async () => {
     await expectPerStoredShape(
       (t, booking) => t.mutation(api.public.cancelBookingByToken, { uid: booking.uid, token: booking.managementToken! }),
-      pinsFor(ALL_STORED.filter((shape) => shape !== "legacy createReservation row"), "booking.cancelled", CANCELLED_BY_TOKEN),
+      CANCELLED_PINS.cancelBookingByToken,
     );
   });
 
   test("transitionBookingState to cancelled", async () => {
     await expectPerStoredShape(
       (t, booking) => t.mutation(api.hooks.transitionBookingState, { bookingId: booking._id, toStatus: "cancelled" }),
-      pinsFor(ALL_STORED, "booking.cancelled", (shape) => TRANSITION(shape)),
+      CANCELLED_PINS["transitionBookingState to cancelled"],
     );
   });
 
   test("cancelMultiResourceBooking", async () => {
     await expectPerStoredShape(
       (t, booking) => t.mutation(api.multi_resource.cancelMultiResourceBooking, { bookingId: booking._id }),
-      pinsFor(ALL_STORED, "booking.cancelled", () => ({ ...CANCELLED_BY_ID, isMultiResource: B })),
+      CANCELLED_PINS.cancelMultiResourceBooking,
     );
   });
 
@@ -333,9 +368,7 @@ describe("booking.cancelled: four emitters, four shapes", () => {
     await expectPerStoredShape(
       (t, booking) =>
         t.mutation(api.multi_resource.cancelMultiResourceBooking, { bookingId: booking._id, reason: "r", cancelledBy: "admin" }),
-      pinsFor(["bundle with organization"], "booking.cancelled", () => ({
-        ...CANCELLED_BY_ID, cancelledBy: S, isMultiResource: B, reason: S,
-      })),
+      CANCELLED_PINS["cancelMultiResourceBooking with reason and cancelledBy"],
     );
   });
 });
@@ -346,7 +379,7 @@ describe("booking.rescheduled", () => {
   test("rescheduleBooking", async () => {
     await expectPerStoredShape(
       (t, booking) => t.mutation(api.public.rescheduleBooking, { bookingId: booking._id, ...later(booking) }),
-      pinsFor(ALL_STORED, "booking.rescheduled", RESCHEDULED),
+      RESCHEDULED_PINS.rescheduleBooking,
     );
   });
 
@@ -354,7 +387,7 @@ describe("booking.rescheduled", () => {
     await expectPerStoredShape(
       (t, booking) =>
         t.mutation(api.public.rescheduleBookingByToken, { uid: booking.uid, token: booking.managementToken!, ...later(booking) }),
-      pinsFor(ALL_STORED.filter((shape) => shape !== "legacy createReservation row"), "booking.rescheduled", RESCHEDULED),
+      RESCHEDULED_PINS.rescheduleBookingByToken,
     );
   });
 });
@@ -367,20 +400,133 @@ test("transitionBookingState: declined, confirmed, pending and completed", async
   const [declinable, approvable] = [await world.pending("09:00"), await world.pending("10:00")];
   const [confirmable, requestable] = [await world.provisional("11:00"), await world.provisional("12:00")];
   const completable = await world.single("13:00");
-  const modern = "modern single booking";
 
   expect({
-    "pending -> declined (with reason)": await transition(declinable, "declined", "r"),
-    "pending -> confirmed": await transition(approvable, "confirmed"),
-    "provisional -> confirmed": await transition(confirmable, "confirmed"),
-    "provisional -> pending": await transition(requestable, "pending"),
-    "confirmed -> completed": await transition(completable, "completed"),
-  }).toStrictEqual({
-    "pending -> declined (with reason)": [{ eventType: "booking.declined", envelope: WITH_ORG, payload: TRANSITION(modern, true) }],
-    "pending -> confirmed": [{ eventType: "booking.confirmed", envelope: WITH_ORG, payload: TRANSITION(modern) }],
-    "provisional -> confirmed": [{ eventType: "booking.confirmed", envelope: WITH_ORG, payload: TRANSITION(modern) }],
-    "provisional -> pending": [{ eventType: "booking.pending", envelope: WITH_ORG, payload: TRANSITION(modern) }],
-    // No notification for completion, so no emailContext either.
-    "confirmed -> completed": [{ eventType: "booking.completed", envelope: ["eventType", "organizationId", "payload"], payload: TRANSITION(modern) }],
-  });
+    "transitionBookingState pending -> declined (with reason)": await transition(declinable, "declined", "r"),
+    "transitionBookingState pending -> confirmed": await transition(approvable, "confirmed"),
+    "transitionBookingState provisional -> confirmed": await transition(confirmable, "confirmed"),
+    "transitionBookingState provisional -> pending": await transition(requestable, "pending"),
+    "transitionBookingState confirmed -> completed": await transition(completable, "completed"),
+  }).toStrictEqual(TRANSITION_PINS);
+});
+
+// ============================================
+// docs/hook-payloads-v1.md
+// ============================================
+
+type Field = { type: DocType; optional: boolean };
+type DocType = { leaf: string } | { array: DocType } | { object: Record<string, Field> };
+
+/** One type for several captures; a key missing from some of them is optional. */
+function merge(shapes: Shape[]): DocType {
+  if (shapes.every((shape): shape is string => typeof shape === "string")) {
+    return { leaf: [...new Set(shapes)].sort().join(" | ") };
+  }
+  if (shapes.every((shape): shape is Shape[] => Array.isArray(shape))) return { array: merge(shapes.flat()) };
+  if (shapes.some((shape) => typeof shape === "string" || Array.isArray(shape))) {
+    throw new Error(`Cannot merge ${JSON.stringify(shapes)}`);
+  }
+  const objects = shapes as Array<Record<string, Shape>>;
+  const keys = [...new Set(objects.flatMap((object) => Object.keys(object)))].sort();
+  return {
+    object: Object.fromEntries(keys.map((key) => {
+      const present = objects.filter((object) => key in object);
+      return [key, { type: merge(present.map((object) => object[key])), optional: present.length < objects.length }];
+    })),
+  };
+}
+
+/** TypeScript-like text; `named` keys print a type name instead of their shape. */
+function render(type: DocType, indent = "", named: Record<string, string> = {}): string {
+  if ("leaf" in type) return type.leaf;
+  if ("array" in type) return `Array<${render(type.array, indent)}>`;
+  const inner = `${indent}  `;
+  const lines = Object.entries(type.object).map(([key, field]) =>
+    `${inner}${key}${field.optional ? "?" : ""}: ${named[key] ?? render(field.type, inner)};`);
+  return `{\n${lines.join("\n")}\n${indent}}`;
+}
+
+const EVENT_ORDER = [
+  "booking.created", "booking.pending", "booking.confirmed", "booking.declined",
+  "booking.cancelled", "booking.rescheduled", "booking.completed",
+];
+
+function hookPayloadsDoc(): string {
+  const byCall: Record<string, Emitted[]> = {
+    ...CREATED_PINS,
+    ...TRANSITION_PINS,
+    ...Object.fromEntries(Object.entries({ ...CANCELLED_PINS, ...RESCHEDULED_PINS })
+      .map(([call, pins]) => [call, Object.values(pins).flat()])),
+  };
+  // event type -> emitting function -> every pinned emission
+  const grouped = new Map<string, Map<string, Emitted[]>>(EVENT_ORDER.map((event) => [event, new Map()]));
+  for (const [call, emissions] of Object.entries(byCall)) {
+    for (const emitted of emissions) {
+      const emitters = grouped.get(emitted.eventType);
+      if (!emitters) throw new Error(`${emitted.eventType} is missing from EVENT_ORDER`);
+      const emitter = call.split(" ")[0];
+      emitters.set(emitter, [...(emitters.get(emitter) ?? []), emitted]);
+    }
+  }
+
+  const out = [
+    "# Hook payloads, version 1",
+    "",
+    "<!-- Generated from the pins in src/component/hook-payloads-v1.test.ts. Do not edit by hand; after a deliberate change run `npx vitest run src/component/hook-payloads-v1.test.ts -u`. -->",
+    "",
+    "A hook registered with `registerHook` runs its function handle with the event's payload as the",
+    "function's arguments. The payload depends on the function that emitted the event, not only on",
+    "the event type: `booking.cancelled` has four shapes. A handler with an argument validator must",
+    "accept every shape of its event, and an added key fails such a validator just like a missing one,",
+    "so each emitter keeps the shape below within version 1.",
+    "",
+    "Payloads contain booker contact details and, where shown, the booking's management token.",
+    "Register hooks only from trusted server code.",
+    "",
+    "- Values a booking or call does not have are left out, never sent as `null`. Legacy",
+    "  `createReservation` rows have no `managementToken` and no `organizationId`, bookings without an",
+    "  organization have no `organizationId`, and `transitionBookingState` sends `reason` only when the",
+    "  call passes one. `?` marks the keys the pinned calls show both ways; treat `managementToken` and",
+    "  `organizationId` as optional for every emitter, and `reason` for `transitionBookingState`.",
+    "- Hooks registered without `organizationId` receive every event of their type. Hooks registered",
+    "  for an organization receive the events of that organization's bookings only.",
+    "- `createBooking` for an event type that requires confirmation emits `booking.created` with",
+    "  `status: \"pending\"`. `booking.pending` comes only from `transitionBookingState`.",
+    "- `createProvisionalBooking` and `expireProvisionalBooking` emit no event. `presence.timeout` is",
+    "  accepted by `registerHook` but never emitted.",
+    "- A move emits `booking.rescheduled` only, not `booking.cancelled` for the original.",
+  ];
+  for (const [event, emitters] of grouped) {
+    out.push("", `## ${event}`);
+    for (const [emitter, emissions] of emitters) {
+      out.push("", `### ${emitter}`, "");
+      if (!emissions.some((emitted) => emitted.envelope.includes("organizationId"))) {
+        out.push("Reaches global hooks only: these bookings have no organization.", "");
+      }
+      out.push("```ts", render(merge(emissions.map((emitted) => emitted.payload)), "", { booking: "StoredBooking" }), "```");
+    }
+  }
+  out.push(
+    "",
+    "## StoredBooking",
+    "",
+    "`booking` is the stored booking document as it was before the change, with `status` set to the",
+    "new status. Besides the keys below it carries `bookerPhone`, `bookerNotes` and `eventDescription`",
+    "when the booking has them.",
+    "",
+    "```ts",
+    render(merge(Object.values(STORED))),
+    "```",
+    "",
+  );
+  return out.join("\n");
+}
+
+test("docs/hook-payloads-v1.md is generated from these pins", async () => {
+  const doc = hookPayloadsDoc();
+  // CONTROL: every pinned event type and emitter is in the rendered text.
+  for (const heading of ["## booking.cancelled", "### cancelBookingByToken", "### createReservation", "## StoredBooking"]) {
+    expect(doc).toContain(heading);
+  }
+  await expect(doc).toMatchFileSnapshot("../../docs/hook-payloads-v1.md");
 });
