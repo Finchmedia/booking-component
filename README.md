@@ -231,9 +231,12 @@ and `useConvexSlots` add two optional arguments to both functions:
 `rescheduleContext: { uid, token }`, the booking being moved and its
 management token. Presence functions never receive the token.
 
-Both functions must then declare both arguments as optional
+Both functions must then declare both arguments as optional, with
+`rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`
 (`PublicBookingAPIWithAvailabilityContext`); `BookingProvider` rejects a
-`publicApi` without them at compile time. Pass `rescheduleContext` on
+`publicApi` without them, or with a `rescheduleContext` that lacks `uid` or
+`token`, at compile time. Functions with untyped arguments are not checked.
+Pass `rescheduleContext` on
 unchanged: the component frees the moved booking's own time only when the
 token matches it, and otherwise ignores it. Never turn it into
 `excludeBookingUid`, which trusts any UID and is meant for trusted server

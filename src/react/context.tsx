@@ -213,9 +213,10 @@ export interface BookingProviderProps {
  * `rescheduleContext` as optional in their argument validators, deployed
  * before the page that turns it on: a validator without them rejects every
  * slot query. `publicApi` is checked for both
- * ({@link PublicBookingAPIWithAvailabilityContext}), so a host that lacks them
- * is a type error here instead of a validator error in the browser. The
- * wrapper is in
+ * ({@link PublicBookingAPIWithAvailabilityContext}), `uid` and `token` inside
+ * `rescheduleContext` included, so a host that lacks them is a type error
+ * here instead of a validator error in the browser (functions with untyped
+ * arguments are not checked). The wrapper is in
  * {@link https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md#slot-queries-while-rescheduling | docs/host-functions.md, "Slot queries while rescheduling"}.
  */
 export interface BookingProviderPropsWithAvailabilityContext

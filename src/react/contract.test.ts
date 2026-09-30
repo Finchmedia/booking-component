@@ -262,6 +262,37 @@ describe("availability context opt-in", () => {
     expectTypeOf<HostPublic>().toExtend<PublicBookingAPIWithAvailabilityContext>();
   });
 
+  test("rescheduleContext is checked inside: both keys, as the components send them", () => {
+    type Nested<R> = DaySlotBase & { eventTypeId?: string; rescheduleContext?: R };
+    // CONTROL: the component's shape, a broader value type, and an extra optional key
+    expectTypeOf<Q<Nested<{ uid: string; token: string }>, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    expectTypeOf<Q<Nested<{ uid: string | number; token: string }>, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    expectTypeOf<Q<Nested<{ uid: string; token: string; note?: string }>, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    // @ts-expect-error `v.object({ uid: v.string() })`: the validator rejects the token the components send
+    expectTypeOf<Q<Nested<{ uid: string }>, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    type MonthLacking = Q<MonthBase & { eventTypeId?: string; rescheduleContext?: { token: string } }, Record<string, boolean>>;
+    // @ts-expect-error the same gap on getMonthAvailability
+    expectTypeOf<MonthLacking>().toExtend<ContextSlot<"getMonthAvailability">>();
+    // @ts-expect-error a nested key the components never send, required
+    expectTypeOf<Q<Nested<{ uid: string; token: string; reason: string }>, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    type Lacking = Omit<HostWithContext, "getDaySlots"> & { getDaySlots: Q<Nested<{ uid: string }>, Array<{ time: string }>> };
+    // CONTROL: without the opt-in nothing nested is sent, so the host still fits
+    expectTypeOf<{ publicApi: Lacking; children: null }>().toExtend<ProviderProps>();
+    // @ts-expect-error BookingProvider's opt-in rejects it
+    expectTypeOf<{ publicApi: Lacking; availabilityContext: true; children: null }>().toExtend<ProviderProps>();
+  });
+
+  test("known limitation: untyped arguments are not checked", () => {
+    // A reference whose arguments are `any` (makeFunctionReference without
+    // type arguments, or a gateway cast to FunctionReference<"query">) passes
+    // unchecked at every level, rescheduleContext included: nothing on the
+    // type says what its validator accepts.
+    expectTypeOf<FunctionReference<"query", "public", any, Array<{ time: string }>>>().toExtend<ContextSlot<"getDaySlots">>();
+    // CONTROL: typed arguments are checked (above), a wrong result still is not accepted
+    // @ts-expect-error slots without time
+    expectTypeOf<FunctionReference<"query", "public", any, Array<{ start: number }>>>().toExtend<ContextSlot<"getDaySlots">>();
+  });
+
   test("BookingProvider takes the opt-in only with a declaring publicApi", () => {
     // CONTROL: opted in with the declaring host; off with either host
     expectTypeOf<{ publicApi: HostWithContext; availabilityContext: true; children: null }>().toExtend<ProviderProps>();

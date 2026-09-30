@@ -267,11 +267,32 @@ export interface OptionalPublicOperations {
 export interface PublicBookingAPI extends HostReferences, OptionalPublicOperations {}
 
 /**
+ * The check inside `rescheduleContext` that {@link FunctionReference_future}
+ * leaves out: it compares top-level argument keys only, so a host validator
+ * `rescheduleContext: v.optional(v.object({ uid: v.string() }))` would pass
+ * and then reject the `token` the components send, failing every reschedule
+ * slot query. A reference's declared `rescheduleContext` must have both
+ * keys; the `_fn` comparison already rejects nested keys it requires that
+ * the components never send.
+ *
+ * It reads the `_args` slot of generated references (the one
+ * `FunctionArgs` reads). A reference without it, such as a hand-typed
+ * `FunctionReference_future`, is not checked here.
+ */
+type DeclaresRescheduleContext = {
+  // Required, so that the type is not "weak" (all optional): TypeScript
+  // rejects a weak type target sharing no property with the source.
+  _type: "query";
+  _args?: { rescheduleContext?: { uid: unknown; token: unknown } };
+};
+
+/**
  * publicApi with BookingProvider's `availabilityContext` on. As
  * {@link PublicBookingAPI}, except that getDaySlots and getMonthAvailability
  * must also declare the optional `eventTypeId` and `rescheduleContext` of
  * {@link AvailabilityContextArgs}, because the components send them. A host
- * function that lacks them, or requires them, is a type error.
+ * function that lacks them, requires them, or declares `rescheduleContext`
+ * without both `uid` and `token` is a type error.
  */
 export interface PublicBookingAPIWithAvailabilityContext
   extends Omit<PublicBookingAPI, keyof AvailabilityContextOperations> {
@@ -280,13 +301,15 @@ export interface PublicBookingAPIWithAvailabilityContext
     "public",
     AvailabilityContextOperations["getMonthAvailability"]["args"],
     AvailabilityContextOperations["getMonthAvailability"]["result"]
-  >;
+  > &
+    DeclaresRescheduleContext;
   getDaySlots: FunctionReference_future<
     "query",
     "public",
     AvailabilityContextOperations["getDaySlots"]["args"],
     AvailabilityContextOperations["getDaySlots"]["result"]
-  >;
+  > &
+    DeclaresRescheduleContext;
 }
 
 /**

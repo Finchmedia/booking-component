@@ -227,7 +227,9 @@ bumping.
   `rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`
   in the argument validators of both host wrappers and deploy them ahead of
   the page: until then the validators reject every slot query.
-  `BookingProvider` rejects a `publicApi` without them at compile time.
+  `BookingProvider` rejects a `publicApi` without them, or whose
+  `rescheduleContext` lacks `uid` or `token`, at compile time (functions
+  with untyped arguments are not checked).
 - Hooks keep the version 1 payloads unless registered with
   `payloadVersion: 2` (N7, D16), so existing hooks need no change. To switch
   one to the version 2 envelope, register a handler that declares

@@ -50,7 +50,11 @@ export const getDaySlots = query({
   `eventTypeId` and, while the Booker reschedules, `rescheduleContext` to both queries. Declare
   both as optional in the argument validators of both wrappers, as above, and deploy them before a
   page turns the prop on: a validator without them rejects every slot query. `BookingProvider`
-  checks `publicApi` for both at compile time (`PublicBookingAPIWithAvailabilityContext`).
+  checks `publicApi` for both at compile time (`PublicBookingAPIWithAvailabilityContext`),
+  including `uid` and `token` inside `rescheduleContext`: declare it exactly as
+  `v.optional(v.object({ uid: v.string(), token: v.string() }))`, since a key the components send
+  and the validator lacks fails every reschedule query. Functions with untyped arguments are not
+  checked.
 - Never forward `excludeBookingUid` from client arguments: it frees a booking from its UID alone.
   Pass it only from code that has authorized the move itself, such as an administrator's screen.
   Passing both arguments throws `INVALID_INPUT`.
