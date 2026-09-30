@@ -69,7 +69,7 @@ export {
   allowedDurations,
   effectiveSlotInterval,
   type EventTypeDurations,
-} from "./utils/durations.js";
+} from "../shared/durations.js";
 
 // Main Components
 export { Booker, type BookerProps } from "./components/booker/index.js";

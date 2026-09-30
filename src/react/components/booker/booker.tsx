@@ -9,7 +9,7 @@ import { useSlotHold } from "../../hooks/use-slot-hold.js";
 import { useBookingValidation } from "../../hooks/use-booking-validation.js";
 import { resolveBookingErrorMessage } from "../../utils/booking-error.js";
 import { toLocalMidnight, todayIn } from "../../utils/civil-date.js";
-import { allowedDurations } from "../../utils/durations.js";
+import { allowedDurations } from "../../../shared/durations.js";
 import { Calendar, CalendarSkeleton } from "../calendar/index.js";
 import { BookingForm, type CurrentUser } from "../form/booking-form.js";
 import { BookingSuccess } from "../form/booking-success.js";

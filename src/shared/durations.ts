@@ -1,10 +1,12 @@
-import type { EventType } from "../types.js";
+// No React or Convex imports: the root entry exports these for host Convex
+// functions, and @mrfinch/booking/react re-exports them.
 
 /** The event type fields that decide its durations and slot grid. */
-export type EventTypeDurations = Pick<
-  EventType,
-  "lengthInMinutes" | "lengthInMinutesOptions" | "slotInterval"
->;
+export type EventTypeDurations = {
+  lengthInMinutes: number;
+  lengthInMinutesOptions?: readonly number[];
+  slotInterval?: number;
+};
 
 /**
  * The durations (minutes) the Booker offers and accepts for an event type:

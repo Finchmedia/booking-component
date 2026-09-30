@@ -12,7 +12,7 @@ import { useConvexSlots } from "../../hooks/use-convex-slots.js";
 import { eventDeletedError } from "../../hooks/use-booking-validation.js";
 import { useIntersectionObserver } from "../../hooks/use-intersection-observer.js";
 import { fromLocalFields, toLocalMidnight, todayIn } from "../../utils/civil-date.js";
-import { effectiveSlotInterval } from "../../utils/durations.js";
+import { effectiveSlotInterval } from "../../../shared/durations.js";
 
 interface CalendarProps {
   resourceId: string;

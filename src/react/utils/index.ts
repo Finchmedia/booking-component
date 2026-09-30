@@ -24,4 +24,4 @@ export {
   allowedDurations,
   effectiveSlotInterval,
   type EventTypeDurations,
-} from "./durations.js";
+} from "../../shared/durations.js";

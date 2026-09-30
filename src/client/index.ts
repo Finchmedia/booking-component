@@ -3,6 +3,13 @@ import { internalQueryGeneric, internalMutationGeneric } from "convex/server";
 import { v } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
 
+// The durations and slot grid the Booker and Calendar use, for host guards
+export {
+  allowedDurations,
+  effectiveSlotInterval,
+  type EventTypeDurations,
+} from "../shared/durations.js";
+
 /**
  * Creates server-only helpers for the booking component.
  *

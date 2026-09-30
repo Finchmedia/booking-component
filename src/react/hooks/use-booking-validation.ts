@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { EventType, Resource } from "../types.js";
-import { allowedDurations } from "../utils/durations.js";
+import { allowedDurations } from "../../shared/durations.js";
 
 export type ValidationErrorType =
   | "event_deleted"

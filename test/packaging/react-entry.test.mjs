@@ -126,7 +126,9 @@ describe("Node ESM import of the compiled package", () => {
     );
 
     expect(result["@mrfinch/booking"].error).toBeUndefined();
-    expect(result["@mrfinch/booking"].exports).toContain("makeInternalBookingAPI");
+    expect(result["@mrfinch/booking"].exports).toEqual(
+      expect.arrayContaining(["makeInternalBookingAPI", "allowedDurations", "effectiveSlotInterval"])
+    );
     expect(result["@mrfinch/booking/react"].error).toBeUndefined();
     expect(result["@mrfinch/booking/react"].exports).toEqual(
       expect.arrayContaining(["Booker", "BookingProvider", "useBookingAPI", "Calendar"])

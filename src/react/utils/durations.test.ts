@@ -3,8 +3,9 @@
 import { createElement, type ReactNode } from "react";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { allowedDurations, effectiveSlotInterval, type EventTypeDurations } from "./durations";
+import { allowedDurations, effectiveSlotInterval, type EventTypeDurations } from "../../shared/durations";
 import { allowedDurations as exportedAllowed, effectiveSlotInterval as exportedInterval } from "../index";
+import { allowedDurations as rootAllowed, effectiveSlotInterval as rootInterval } from "../../client/index";
 import { BookingProvider, type PublicBookingAPI } from "../context";
 import { Calendar } from "../components/calendar/calendar";
 import { useConvexSlots } from "../hooks/use-convex-slots";
@@ -117,9 +118,11 @@ describe("effectiveSlotInterval", () => {
     expect(effectiveSlotInterval(eventType)).toBe(expected);
   });
 
-  it("is exported from @mrfinch/booking/react with allowedDurations", () => {
+  it("is exported from @mrfinch/booking/react and @mrfinch/booking with allowedDurations", () => {
     expect(exportedInterval).toBe(effectiveSlotInterval);
     expect(exportedAllowed).toBe(allowedDurations);
+    expect(rootInterval).toBe(effectiveSlotInterval);
+    expect(rootAllowed).toBe(allowedDurations);
   });
 });
 

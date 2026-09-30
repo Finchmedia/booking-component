@@ -6,7 +6,7 @@ import { useBookingAPI } from "../context.js";
 import { getSessionId } from "../utils/session.js";
 import { formatDateInTimezone } from "../utils/date-utils.js";
 import { isCivilDate, monthGrid } from "../utils/civil-date.js";
-import { effectiveSlotInterval } from "../utils/durations.js";
+import { effectiveSlotInterval } from "../../shared/durations.js";
 import type { TimeSlot, MonthSlots } from "../types.js";
 
 export interface UseConvexSlotsResult {
