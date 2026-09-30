@@ -1,7 +1,14 @@
 import { v } from "convex/values";
-import { mutation, query, internalMutation, type MutationCtx } from "./_generated/server";
+import type { IndexRange } from "convex/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  type DatabaseReader,
+  type MutationCtx,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { presenceDoc } from "./validators";
 
 const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
@@ -342,3 +349,142 @@ export const cleanup = internalMutation({
   },
 });
 
+// ============================================
+// ORPHAN SWEEP (one-time repair after upgrading)
+// ============================================
+
+/**
+ * Largest `limit` of one sweep call. Each marker costs at most one job read,
+ * one presence read and either two deletes or one scheduled job plus a patch,
+ * so a full page stays well inside the transaction limits.
+ */
+const MAX_SWEEP_LIMIT = 500;
+
+/**
+ * A marker's complete by_creation_time index key. Creation times can tie
+ * (imported rows), so the time alone would skip or repeat rows at a page
+ * boundary.
+ */
+type SweepCursor = { creationTime: number; id: Id<"presence_heartbeats"> };
+
+function encodeSweepCursor(marker: Doc<"presence_heartbeats">): string {
+  return JSON.stringify([marker._creationTime, marker._id]);
+}
+
+function parseSweepCursor(db: DatabaseReader, cursor: string): SweepCursor {
+  let key: unknown;
+  try {
+    key = JSON.parse(cursor);
+  } catch {
+    key = null;
+  }
+  if (Array.isArray(key) && key.length === 2 && Number.isFinite(key[0]) && typeof key[1] === "string") {
+    const id = db.normalizeId("presence_heartbeats", key[1]);
+    if (id) return { creationTime: key[0], id };
+  }
+  throw new Error("Invalid sweep cursor");
+}
+
+/**
+ * Up to `limit` markers after `cursor`, in by_creation_time order: the rest of
+ * the cursor's tie group first, then the later creation times — the same split
+ * the convex-helpers paginator uses. The key is compared by value, so a
+ * cursor row deleted in the meantime is fine.
+ */
+async function markersAfter(
+  db: DatabaseReader,
+  cursor: SweepCursor | null,
+  limit: number
+): Promise<Doc<"presence_heartbeats">[]> {
+  if (!cursor) {
+    return await db.query("presence_heartbeats").withIndex("by_creation_time").take(limit);
+  }
+  const tieGroup = await db
+    .query("presence_heartbeats")
+    .withIndex("by_creation_time", (q) =>
+      // Every index ends with _id; the typed builder stops at _creationTime.
+      (
+        q.eq("_creationTime", cursor.creationTime) as unknown as {
+          gt(field: "_id", value: Id<"presence_heartbeats">): IndexRange;
+        }
+      ).gt("_id", cursor.id)
+    )
+    .take(limit);
+  if (tieGroup.length === limit) return tieGroup;
+  const later = await db
+    .query("presence_heartbeats")
+    .withIndex("by_creation_time", (q) => q.gt("_creationTime", cursor.creationTime))
+    .take(limit - tieGroup.length);
+  return [...tieGroup, ...later];
+}
+
+/**
+ * Repairs presence holds whose cleanup job can no longer run (cancelled,
+ * failed or gone), one page of markers per call. A stale orphan loses its
+ * presence row and marker; a fresh one gets one replacement cleanup job.
+ * Markers with a live job are left alone. Only presence tables are touched.
+ *
+ * Steady-state operation creates no orphans; they need an external failure
+ * such as a cancelled job. Run it once after upgrading from 0.4.2 or earlier,
+ * from a host internalMutation: start without a cursor and pass
+ * `continueCursor` back until `isDone`. `dryRun` counts without writing.
+ * Markers created during a sweep sort after the cursor and are visited too;
+ * they come with a live job, so they are left alone.
+ */
+export const sweepOrphanedHolds = mutation({
+  args: {
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.number(),
+    dryRun: v.boolean(),
+  },
+  returns: v.object({
+    scanned: v.number(),
+    deleted: v.number(),
+    rescheduled: v.number(),
+    continueCursor: v.union(v.string(), v.null()),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_SWEEP_LIMIT) {
+      throw new Error(`limit must be an integer from 1 to ${MAX_SWEEP_LIMIT}`);
+    }
+    const cursor =
+      typeof args.cursor === "string" ? parseSweepCursor(ctx.db, args.cursor) : null;
+    const markers = await markersAfter(ctx.db, cursor, args.limit);
+
+    const now = Date.now();
+    let deleted = 0;
+    let rescheduled = 0;
+    for (const marker of markers) {
+      if (await isCleanupJobLive(ctx, marker.markAsGone)) continue;
+
+      const presence = await ctx.db
+        .query("presence")
+        .withIndex("by_user_slot_resource", (q) =>
+          q.eq("user", marker.user).eq("slot", marker.slot).eq("resourceId", marker.resourceId)
+        )
+        .first();
+
+      if (!presence || now - presence.updated > TIMEOUT_MS) {
+        deleted++;
+        if (args.dryRun) continue;
+        if (presence) await ctx.db.delete(presence._id);
+        await ctx.db.delete(marker._id);
+      } else {
+        rescheduled++;
+        if (args.dryRun) continue;
+        const scheduledId = await scheduleCleanup(ctx, marker);
+        await ctx.db.patch(marker._id, { markAsGone: scheduledId });
+      }
+    }
+
+    const last = markers[markers.length - 1];
+    return {
+      scanned: markers.length,
+      deleted,
+      rescheduled,
+      continueCursor: last ? encodeSweepCursor(last) : (args.cursor ?? null),
+      isDone: markers.length < args.limit,
+    };
+  },
+});

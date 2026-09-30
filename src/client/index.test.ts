@@ -15,6 +15,8 @@ export const {
   getDaySlots,
   createBooking,
   getDailyAvailability,
+  heartbeat,
+  sweepOrphanedHolds,
 } = makeInternalBookingAPI(components.booking);
 
 const testApi = (
@@ -29,6 +31,8 @@ const testApi = (
       getDaySlots: typeof getDaySlots;
       createBooking: typeof createBooking;
       getDailyAvailability: typeof getDailyAvailability;
+      heartbeat: typeof heartbeat;
+      sweepOrphanedHolds: typeof sweepOrphanedHolds;
     };
   }>
 )["index.test"];
@@ -161,5 +165,23 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     expect(await t.query(testApi.getDailyAvailability, { resourceId: RESOURCE, date: DATE })).toEqual([
       36, 37, 38, 39,
     ]);
+  });
+
+  test("sweepOrphanedHolds via the presence wrapper", async () => {
+    await t.mutation(testApi.heartbeat, {
+      resourceId: RESOURCE,
+      slots: ["2027-03-09T09:00:00.000Z"],
+      user: "ada",
+    });
+    // A healthy hold: scanned, left alone.
+    expect(await t.mutation(testApi.sweepOrphanedHolds, { limit: 10, dryRun: true })).toMatchObject({
+      scanned: 1,
+      deleted: 0,
+      rescheduled: 0,
+      isDone: true,
+    });
+    await expect(
+      t.mutation(testApi.sweepOrphanedHolds, { limit: 0, dryRun: true })
+    ).rejects.toThrow("limit must be an integer from 1 to 500");
   });
 });

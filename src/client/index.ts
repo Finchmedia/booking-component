@@ -753,6 +753,18 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       },
     }),
 
+    // One-time repair after upgrading from 0.4.2 or earlier; see CHANGELOG.
+    sweepOrphanedHolds: internalMutationGeneric({
+      args: {
+        cursor: v.optional(v.union(v.string(), v.null())),
+        limit: v.number(),
+        dryRun: v.boolean(),
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runMutation(component.presence.sweepOrphanedHolds, args);
+      },
+    }),
+
     // ============================================
     // MAINTENANCE (Sandbox resets / debugging)
     // Internal only. Keep resets inaccessible to browser clients.

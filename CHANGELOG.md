@@ -4,6 +4,12 @@
 
 ### Upgrading
 
+- After upgrading from 0.4.2 or earlier, run the new
+  `presence.sweepOrphanedHolds` once from a host internal mutation (or through
+  `makeInternalBookingAPI`). Start without a cursor and pass `continueCursor`
+  back until `isDone`; `limit` is 1–500 per call and `dryRun: true` only
+  counts. It repairs presence holds whose cleanup job was cancelled or failed
+  and touches only the presence tables. Fresh installs do not need it.
 - Presence cleanup jobs that 0.4.2 already queued keep running; their
   arguments are unchanged. Surplus jobs left by earlier leave/rejoin cycles are
   not merged: they no longer grow, and they end with their session, 10–20 s
@@ -12,7 +18,7 @@
   of the scheduler's cancel behaviour on a deployed backend is recommended
   before release.
 - Do not mass-cancel `presence:cleanup` jobs to tidy up. That orphans live
-  holds until their next heartbeat.
+  holds until their next heartbeat or the sweep.
 
 ### Security
 
@@ -63,6 +69,13 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - A hold whose cleanup job had been cancelled or had failed never expired once
   the visitor left without `leave` (for example by closing the tab). The next
   heartbeat now schedules a replacement job.
+
+### Added
+
+- `presence.sweepOrphanedHolds({ cursor?, limit, dryRun })`, a component
+  mutation, and the matching `makeInternalBookingAPI` wrapper: the one-time
+  repair described under Upgrading. It returns the counts `scanned`, `deleted`
+  and `rescheduled` plus `continueCursor` and `isDone`.
 
 ### Maintenance and documentation
 

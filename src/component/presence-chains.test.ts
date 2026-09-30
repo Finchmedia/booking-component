@@ -1,5 +1,5 @@
 /**
- * Presence cleanup chains (F15, N21).
+ * Presence cleanup chains (F15, N21) and the orphan sweep.
  *
  * Invariant: every presence marker (`presence_heartbeats` row) has exactly one
  * pending `presence:cleanup` job, the one its `markAsGone` names, and a key
@@ -11,9 +11,19 @@
  * does not matter.
  */
 import { describe, expect, test, vi } from "vitest";
+import { convexTest } from "convex-test";
 import { api, internal } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
-import { setup, TUESDAY, type T } from "./setup.test.js";
+import schema from "./schema.js";
+import {
+  book,
+  berlin,
+  modules,
+  seedResourceWithSchedule,
+  setup,
+  TUESDAY,
+  type T,
+} from "./setup.test.js";
 
 const ROOM = "room-1";
 const OTHER_ROOM = "room-2";
@@ -426,3 +436,228 @@ describe("presence chains: markers whose cleanup job ended (N21)", () => {
   );
 });
 
+// ============================================
+// sweepOrphanedHolds (one-time repair)
+// ============================================
+
+type Fixture = "healthy" | "healthyStale" | "freshOrphan" | "staleOrphan" | "markerOnly";
+
+/**
+ * One hold on `slots` for `user`: healthy (pending job), healthy with a stale
+ * row (its pending job will clean it), or orphaned (job cancelled) with a
+ * fresh row, a stale row or no presence row at all.
+ */
+async function seedHold(t: T, kind: Fixture, user: string = kind, slots = [SLOT]) {
+  await t.mutation(api.presence.heartbeat, hold(user, ROOM, slots));
+  if (kind === "freshOrphan" || kind === "staleOrphan" || kind === "markerOnly") {
+    for (const slot of slots) await orphanMarker(t, { resourceId: ROOM, slot, user }, "canceled");
+  }
+  await t.run(async (ctx) => {
+    for (const row of await ctx.db.query("presence").collect()) {
+      if (row.user !== user) continue;
+      if (kind === "healthyStale" || kind === "staleOrphan") {
+        await ctx.db.patch(row._id, { updated: Date.now() - 2 * TIMEOUT_MS });
+      }
+      if (kind === "markerOnly") await ctx.db.delete(row._id);
+    }
+  });
+}
+
+function sweep(t: T, args: { cursor?: string | null; limit: number; dryRun: boolean }) {
+  return t.mutation(api.presence.sweepOrphanedHolds, args);
+}
+
+/** Sweeps page by page from the start; returns every page. */
+async function sweepAll(t: T, limit: number, dryRun: boolean) {
+  const pages = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const page = await sweep(t, { cursor, limit, dryRun });
+    pages.push(page);
+    cursor = page.continueCursor;
+    if (page.isDone) return pages;
+    if (pages.length > 100) throw new Error("sweep did not finish");
+  }
+}
+
+const sum = (pages: { scanned: number }[]) => pages.reduce((n, page) => n + page.scanned, 0);
+
+describe("sweepOrphanedHolds", () => {
+  const ALL: Fixture[] = ["healthy", "healthyStale", "freshOrphan", "staleOrphan", "markerOnly"];
+
+  test("deletes stale orphans, reschedules fresh ones and leaves healthy markers alone", async () => {
+    const { t } = setup();
+    for (const kind of ALL) await seedHold(t, kind);
+    const before = await snapshot(t);
+    // CONTROL: the three orphans break the invariant before the sweep.
+    expect(invariantViolations(before)).toHaveLength(3);
+
+    const result = await sweep(t, { limit: 10, dryRun: false });
+    expect(result).toMatchObject({ scanned: 5, deleted: 2, rescheduled: 1, isDone: true });
+
+    const s = await snapshot(t);
+    expect(invariantViolations(s)).toEqual([]);
+    const remaining = ["freshOrphan", "healthy", "healthyStale"];
+    expect(s.markers.map((row) => row.user).sort()).toEqual(remaining);
+    expect(s.presence.map((row) => row.user).sort()).toEqual(remaining);
+    for (const user of ["healthy", "healthyStale"]) {
+      expect(s.markers.find((row) => row.user === user)).toEqual(
+        before.markers.find((row) => row.user === user)
+      );
+      expect(s.presence.find((row) => row.user === user)).toEqual(
+        before.presence.find((row) => row.user === user)
+      );
+    }
+
+    // The repaired hold lives on while heartbeated and expires after.
+    await keepAlive(t, [hold("freshOrphan")], 20);
+    expect(invariantViolations(await snapshot(t))).toEqual([]);
+    await advance(t, 25);
+    expect((await snapshot(t)).presence).toEqual([]);
+  });
+
+  test("dryRun counts the same work and writes nothing; a second run changes nothing", async () => {
+    const { t } = setup();
+    for (const kind of ALL) await seedHold(t, kind);
+    const before = await snapshot(t);
+
+    const dry = await sweep(t, { limit: 10, dryRun: true });
+    expect(dry).toMatchObject({ scanned: 5, deleted: 2, rescheduled: 1, isDone: true });
+    expect(await snapshot(t)).toEqual(before);
+
+    const real = await sweep(t, { limit: 10, dryRun: false });
+    expect(real).toEqual(dry);
+    const afterFirst = await snapshot(t);
+    expect(afterFirst).not.toEqual(before);
+
+    expect(await sweep(t, { limit: 10, dryRun: false })).toMatchObject({
+      scanned: 3,
+      deleted: 0,
+      rescheduled: 0,
+      isDone: true,
+    });
+    expect(await snapshot(t)).toEqual(afterFirst);
+  });
+
+  test("touches only presence tables", async () => {
+    const { t } = setup();
+    const seed = await seedResourceWithSchedule(t);
+    await book(t, seed, berlin(TUESDAY, "10:00"), berlin(TUESDAY, "11:00"));
+    for (const kind of ALL) await seedHold(t, kind);
+    const otherTables = () =>
+      t.run(async (ctx) => {
+        const rows: Record<string, unknown[]> = {};
+        for (const table of Object.keys(schema.tables) as (keyof typeof schema.tables)[]) {
+          if (table === "presence" || table === "presence_heartbeats") continue;
+          rows[table] = await ctx.db.query(table).collect();
+        }
+        return rows;
+      });
+    const before = await otherTables();
+    // CONTROL: the fixture really has booking data.
+    expect(before.bookings).toHaveLength(1);
+    expect(before.daily_availability).toHaveLength(1);
+
+    expect(await sweep(t, { limit: 10, dryRun: false })).toMatchObject({ deleted: 2, rescheduled: 1 });
+    expect(await otherTables()).toEqual(before);
+  });
+
+  test.each([
+    [7, 3, [3, 3, 1]],
+    [6, 3, [3, 3, 0]],
+    [2, 5, [2]],
+  ])("%i orphans with limit %i: pages of %j, each marker visited once", async (count, limit, sizes) => {
+    const { t } = setup();
+    for (let i = 0; i < count; i++) await seedHold(t, "staleOrphan", `user-${i}`);
+    const isDone = sizes.map((_, i) => i === sizes.length - 1);
+
+    const dry = await sweepAll(t, limit, true);
+    expect(dry.map((page) => page.scanned)).toEqual(sizes);
+    expect(dry.map((page) => page.isDone)).toEqual(isDone);
+
+    // Each page deletes its rows, including the one the next cursor names.
+    const real = await sweepAll(t, limit, false);
+    expect(real.map((page) => page.scanned)).toEqual(sizes);
+    expect(real.map((page) => page.deleted)).toEqual(sizes);
+    expect((await snapshot(t)).markers).toEqual([]);
+
+    // Restarting from the start or from any returned cursor is harmless.
+    expect(await sweep(t, { limit, dryRun: false })).toMatchObject({ scanned: 0, isDone: true });
+    for (const page of real) {
+      expect(await sweep(t, { cursor: page.continueCursor, limit, dryRun: false })).toMatchObject({
+        scanned: 0,
+        isDone: true,
+      });
+    }
+  });
+
+  test("markers with equal creation times are neither skipped nor repeated at a page boundary", async () => {
+    // Far enough in the future that convex-test's +0.001 ms creation-time bump
+    // rounds away: rows inserted at one instant share a _creationTime, as
+    // imported rows can in production.
+    const TIED_NOW = Date.UTC(2600, 0, 1);
+    const { t } = setup({ now: TIED_NOW });
+    await seedHold(t, "staleOrphan", "tied", quanta(SLOT, 5 * 15));
+    vi.setSystemTime(TIED_NOW + 1_000);
+    await seedHold(t, "staleOrphan", "later", quanta(SLOT, 2 * 15));
+    const markers = (await snapshot(t)).markers;
+    // CONTROL: one tie group of five, then two later rows.
+    const tied = markers.filter((row) => row.user === "tied");
+    expect(tied).toHaveLength(5);
+    expect(new Set(tied.map((row) => row._creationTime)).size).toBe(1);
+    expect(markers.filter((row) => row._creationTime > tied[0]._creationTime)).toHaveLength(2);
+
+    // Pages split the tie group twice and then span it and the later rows.
+    const dry = await sweepAll(t, 2, true);
+    expect(dry.map((page) => page.scanned)).toEqual([2, 2, 2, 1]);
+    const real = await sweepAll(t, 2, false);
+    expect(sum(real)).toBe(7);
+    expect((await snapshot(t)).markers).toEqual([]);
+  });
+
+  test("rejects a limit outside 1–500 and a cursor it did not issue", async () => {
+    const { t } = setup();
+    for (let i = 0; i < 2; i++) await seedHold(t, "healthy", `user-${i}`);
+    for (const limit of [0, -1, 2.5, 501, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(sweep(t, { limit, dryRun: true })).rejects.toThrow(
+        "limit must be an integer from 1 to 500"
+      );
+    }
+    const presenceId = (await snapshot(t)).presence[0]._id;
+    for (const cursor of ["", "nope", "[1]", '["1","2"]', "[1,2]", JSON.stringify([1, presenceId])]) {
+      await expect(sweep(t, { cursor, limit: 1, dryRun: true })).rejects.toThrow(
+        "Invalid sweep cursor"
+      );
+    }
+    // CONTROL: the bounds themselves and an issued cursor are accepted.
+    expect(await sweep(t, { limit: 500, dryRun: true })).toMatchObject({ scanned: 2 });
+    const first = await sweep(t, { limit: 1, dryRun: true });
+    expect(await sweep(t, { cursor: first.continueCursor, limit: 1, dryRun: true })).toMatchObject({
+      scanned: 1,
+    });
+  });
+
+  test.each<[string, boolean | { functionsScheduled: number }, boolean]>([
+    ["Convex's default limits", true, true],
+    ["one scheduled function fewer", { functionsScheduled: 499 }, false],
+  ])(
+    "a full page of fresh orphans (the costliest repair) under %s",
+    async (_name, transactionLimits, fits) => {
+      setup(); // fake timers and the frozen clock
+      const t: T = convexTest({ schema, modules, transactionLimits });
+      const slots = quanta(SLOT, 500 * 15);
+      for (const half of [slots.slice(0, 250), slots.slice(250)]) {
+        await t.mutation(api.presence.heartbeat, hold("ada", ROOM, half));
+      }
+      await t.run(async (ctx) => {
+        for (const job of await ctx.db.system.query("_scheduled_functions").collect()) {
+          await ctx.scheduler.cancel(job._id);
+        }
+      });
+
+      const run = sweep(t, { limit: 500, dryRun: false });
+      if (fits) await expect(run).resolves.toMatchObject({ scanned: 500, rescheduled: 500 });
+      else await expect(run).rejects.toThrow("Scheduled too many functions");
+    }
+  );
+});

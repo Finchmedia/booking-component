@@ -349,6 +349,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }>,
         Name
       >;
+      sweepOrphanedHolds: FunctionReference<
+        "mutation",
+        "internal",
+        { cursor?: string | null; dryRun: boolean; limit: number },
+        {
+          continueCursor: string | null;
+          deleted: number;
+          isDone: boolean;
+          rescheduled: number;
+          scanned: number;
+        },
+        Name
+      >;
     };
     public: {
       cancelBookingByToken: FunctionReference<

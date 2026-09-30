@@ -112,7 +112,8 @@ endpoints to authorized host wrappers.
   inventory; presence does not guarantee a reservation. An explicit leave
   releases a selection immediately. An abandoned one (closed tab, lost
   connection) is released 10–20 s after its last heartbeat, plus scheduler
-  latency.
+  latency. After upgrading from 0.4.2 or earlier, run
+  `presence.sweepOrphanedHolds` once; see the CHANGELOG.
 - **Email:** optional Resend notifications and token-based management links.
   Follow the [email guide](https://convexbooking.dev/docs/integrations/email).
   To use your app's own design, add an optional [email renderer](https://github.com/Finchmedia/booking-component/blob/main/docs/custom-emails.md).

@@ -47,6 +47,7 @@ const REGISTERED_FUNCTIONS = [
   "presence:heartbeat (public mutation)",
   "presence:leave (public mutation)",
   "presence:list (public query)",
+  "presence:sweepOrphanedHolds (public mutation)",
   "public:cancelBookingByToken (public mutation)",
   "public:cancelReservation (public mutation)",
   "public:createBooking (public mutation)",
