@@ -16,6 +16,21 @@
   that host change together with the upgrade. Text matching still works on
   `error.data.message`; codes also catch the bundle and move conflicts whose
   texts a needle table missed.
+- An event type with an `organizationId` is linked only to resources of that
+  organization (N13): `linkResourceToEventType`, `setResourcesForEventType`
+  and `setEventTypesForResource` reject a resource of another organization
+  with `ORGANIZATION_MISMATCH`, and the two replace mutations then change
+  nothing. Event types without organization still link any resource. Links
+  stored earlier are kept. Before upgrading, find them in a host query (for
+  each event type with an organization, compare
+  `getResourcesForEventType(...)[i].organizationId`) and unlink them or move
+  the resource.
+- `deleteResource` and `deleteEventType` delete the links of the deleted ID
+  (N12), after their booking check and in the same transaction. A resource
+  or event type created again with that ID starts unlinked; link it
+  explicitly. Links that deletes before 0.5.0 left behind stay: call
+  `deleteAllLinksForResource` or `deleteAllLinksForEventType` once for IDs you
+  deleted, at the latest before re-creating one.
 
 ### Added
 

@@ -4,6 +4,7 @@ import type { WithoutSystemFields } from "convex/server";
 import { v } from "convex/values";
 import { holdsActiveInventory, usesQuantityInventory, validateResourceCapacity } from "./inventory_helpers";
 import { assertTimeZone } from "./input_validation";
+import { deleteLinks } from "./resource_event_types";
 import { throwBookingError } from "../shared/booking-errors.js";
 import {
   resourceDoc,
@@ -280,6 +281,9 @@ export const deleteResource = mutation({
       );
     }
 
+    // Its links go with it, so a resource created later with this id starts
+    // unlinked instead of inheriting the old event types.
+    await deleteLinks(ctx, { resourceId: args.id });
     await ctx.db.delete(resource._id);
     return { success: true };
   },

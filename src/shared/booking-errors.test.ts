@@ -111,6 +111,11 @@ const CODE_DOCS: Record<BookingErrorCode, { meaning: string; thrownBy: string }>
       "A pool (`isFungible: true`) is booked through a single-resource function. Book it with `createMultiResourceBooking` and a quantity. Moves throw it for a single-resource booking whose resource became a pool.",
     thrownBy: "`createBooking`, `createProvisionalBooking`, `createReservation`, `rescheduleBooking`, `rescheduleBookingByToken`",
   },
+  ORGANIZATION_MISMATCH: {
+    meaning:
+      "Organizations do not match: a resource of another organization than an organization-scoped event type.",
+    thrownBy: "`linkResourceToEventType`, `setResourcesForEventType`, `setEventTypesForResource`",
+  },
   SCHEDULE_NOT_FOUND: {
     meaning: "No schedule has this ID.",
     thrownBy: "`updateSchedule`, `deleteSchedule`",
@@ -160,8 +165,9 @@ function renderErrorsDoc(): string {
     "",
     "- `code` is one of the codes below. Codes are public contract: a code keeps its meaning, and a",
     "  new one is announced in the changelog.",
-    "- `message` is the English text the same failure had in 0.4.x, for logs and administrators. The",
-    "  text differs per function and can contain IDs. Show bookers your own text, chosen by `code`.",
+    "- `message` is English text for logs and administrators: for failures 0.4.x already had, the",
+    "  text they had then. The text differs per function and can contain IDs. Show bookers your own",
+    "  text, chosen by `code`.",
     "- Everything else stays a plain `Error`: argument validation by Convex, broken invariants and",
     "  email rendering. Convex redacts the message of a plain `Error` for clients in production.",
     "",

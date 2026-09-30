@@ -378,26 +378,35 @@ describe("resource ↔ event type links", () => {
     expect(await eventTypesFor(RESOURCE)).toEqual([EVENT]);
     expect(await linkedEventTypeIds(t, RESOURCE)).toEqual([EVENT, "et-2"]);
 
-    // Deleting the rows leaves dangling links; the document views filter the nulls.
+    // Deleting the rows removes their links too (0.5.0, N12).
     expect(await t.mutation(api.public.deleteEventType, { id: "et-2" })).toEqual({ success: true });
     expect(await t.mutation(api.resources.deleteResource, { id: "res-2" })).toEqual({
       success: true,
     });
     expect(await eventTypesFor(RESOURCE)).toEqual([EVENT]);
     expect(await resourcesFor(EVENT)).toEqual([RESOURCE]);
-    expect(await linkedEventTypeIds(t, RESOURCE)).toEqual([EVENT, "et-2"]);
-    expect(await linkedResourceIds(t, EVENT)).toEqual([RESOURCE, "res-2"]);
+    expect(await linkedEventTypeIds(t, RESOURCE)).toEqual([EVENT]);
+    expect(await linkedResourceIds(t, EVENT)).toEqual([RESOURCE]);
 
-    // The explicit cleanup mutations are what actually removes them.
+    // Nothing is left for the explicit cleanup mutations.
     expect(
       await t.mutation(api.resource_event_types.deleteAllLinksForEventType, {
         eventTypeId: "et-2",
       })
-    ).toEqual({ deleted: 1 });
+    ).toEqual({ deleted: 0 });
     expect(
       await t.mutation(api.resource_event_types.deleteAllLinksForResource, { resourceId: "res-2" })
+    ).toEqual({ deleted: 0 });
+  });
+
+  test("links a delete left behind before 0.5.0 are still removed by the cleanup mutations", async () => {
+    await seedResource(t, { resourceId: RESOURCE, eventTypeId: EVENT });
+    // A dangling link row as 0.4.x deletes left them.
+    await t.run((ctx) => ctx.db.insert("resource_event_types", { resourceId: "res-gone", eventTypeId: EVENT }));
+    expect(await linkedResourceIds(t, EVENT)).toEqual([RESOURCE, "res-gone"]);
+    expect(
+      await t.mutation(api.resource_event_types.deleteAllLinksForResource, { resourceId: "res-gone" })
     ).toEqual({ deleted: 1 });
-    expect(await linkedEventTypeIds(t, RESOURCE)).toEqual([EVENT]);
     expect(await linkedResourceIds(t, EVENT)).toEqual([RESOURCE]);
   });
 });

@@ -6,7 +6,8 @@
 // wrong management token, an invalid argument) throw
 // `ConvexError({ code, message })`. `code` is one of BOOKING_ERROR_CODES and
 // is public contract; `message` is the human text the same failure had in
-// 0.4.x. Broken invariants and other programming errors stay plain `Error`.
+// 0.4.x (failures new in 0.5.0 have their own). Broken invariants and other
+// programming errors stay plain `Error`.
 // docs/errors.md lists every code with the functions that throw it.
 //
 // Only `convex/values` is imported: the root entry exports the codes for
@@ -31,6 +32,8 @@ export const BOOKING_ERROR_CODES = [
   "RESOURCE_ALREADY_EXISTS",
   "RESOURCE_IN_USE",
   "POOL_REQUIRES_BUNDLE",
+  // Organizations
+  "ORGANIZATION_MISMATCH",
   // Schedules
   "SCHEDULE_NOT_FOUND",
   "SCHEDULE_ALREADY_EXISTS",

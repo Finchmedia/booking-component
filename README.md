@@ -236,12 +236,13 @@ endpoints to authorized host wrappers.
   omitted one, so a field cannot be removed once set. Descriptions and an
   event type's `lengthInMinutesOptions` can be emptied with `""` and `[]`; an
   event type's `scheduleId` and numeric settings cannot be cleared.
-- **Deletes:** `deleteResource` and `deleteEventType` keep the rows that link
-  resources and event types. Also call
-  `resource_event_types.deleteAllLinksForResource` or
-  `deleteAllLinksForEventType`: otherwise a resource or event type created
-  later with the same ID is linked, and bookable, as before.
-  `makeInternalBookingAPI` does not wrap these two mutations.
+- **Links and deletes:** an event type with an `organizationId` links only
+  resources of that organization (`ORGANIZATION_MISMATCH`); an event type
+  without one links any resource. `deleteResource` and `deleteEventType`
+  delete the deleted ID's links, so a resource or event type created later
+  with the same ID starts unlinked. Links left behind by deletes before 0.5.0
+  are removed with `resource_event_types.deleteAllLinksForResource` or
+  `deleteAllLinksForEventType`, which `makeInternalBookingAPI` does not wrap.
 - **Concurrency:** all bookings of one resource on one UTC day share an
   availability document, which keeps overlap checks atomic. Convex serializes
   and retries concurrent writes to it; a busy pool is the likely hotspot.

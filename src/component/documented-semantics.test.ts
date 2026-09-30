@@ -4,13 +4,13 @@
  *
  * - Eligibility (F6, N13): only createBooking and createProvisionalBooking
  *   check that the event type and resource exist, are active and are linked.
- *   Bundles, both moves and confirmations do not, and no path compares
- *   organizations.
+ *   Bundles, both moves and confirmations do not, and no booking path
+ *   compares organizations (links do since 0.5.0).
  * - `scheduleId: ""` means no schedule (F12).
  * - Updates (N25): an omitted field is unchanged, so no field can be removed;
  *   strings and lists can be set to "" and [].
  *
- * Pinned elsewhere: link rows survive deletes (resource-metadata-and-links),
+ * Pinned elsewhere: deletes remove link rows (link-organization),
  * listBookings' resourceId is the primary resource (list-bookings-stream) and
  * the other schedule-argument shapes (schedule-arguments).
  */
@@ -108,7 +108,8 @@ describe("eligibility per entry point", () => {
     const { t } = setup();
     const seed = await seedResource(t); // organization org-1
     await seedResource(t, { resourceId: "res-other", eventTypeId: "et-other", organizationId: "org-2" });
-    await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: "res-other", eventTypeId: seed.eventTypeId });
+    // A cross-organization link as 0.4.x stored it (linkResourceToEventType rejects it since 0.5.0).
+    await t.run((ctx) => ctx.db.insert("resource_event_types", { resourceId: "res-other", eventTypeId: seed.eventTypeId }));
     const bundle = (resourceId: string, hour: number) => outcome(() => t.mutation(api.multi_resource.createMultiResourceBooking, {
       eventTypeId: seed.eventTypeId, resources: [{ resourceId }], start: at(hour), end: at(hour) + HOUR,
       timezone: "UTC", booker: BOOKER, location: LOCATION,

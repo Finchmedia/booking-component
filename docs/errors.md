@@ -6,8 +6,9 @@ Since 0.5.0 the component rejects expected failures with `ConvexError({ code, me
 
 - `code` is one of the codes below. Codes are public contract: a code keeps its meaning, and a
   new one is announced in the changelog.
-- `message` is the English text the same failure had in 0.4.x, for logs and administrators. The
-  text differs per function and can contain IDs. Show bookers your own text, chosen by `code`.
+- `message` is English text for logs and administrators: for failures 0.4.x already had, the
+  text they had then. The text differs per function and can contain IDs. Show bookers your own
+  text, chosen by `code`.
 - Everything else stays a plain `Error`: argument validation by Convex, broken invariants and
   email rendering. Convex redacts the message of a plain `Error` for clients in production.
 
@@ -45,6 +46,7 @@ messages. Map the codes your clients see.
 | `RESOURCE_ALREADY_EXISTS` | A resource with this ID exists. | `createResource` |
 | `RESOURCE_IN_USE` | Bookings or reserved slots prevent the change: deleting a resource with bookings, switching between slot and pool inventory while it holds reservations, or lowering a pool's capacity below its reserved units. | `createResource`, `updateResource`, `deleteResource` |
 | `POOL_REQUIRES_BUNDLE` | A pool (`isFungible: true`) is booked through a single-resource function. Book it with `createMultiResourceBooking` and a quantity. Moves throw it for a single-resource booking whose resource became a pool. | `createBooking`, `createProvisionalBooking`, `createReservation`, `rescheduleBooking`, `rescheduleBookingByToken` |
+| `ORGANIZATION_MISMATCH` | Organizations do not match: a resource of another organization than an organization-scoped event type. | `linkResourceToEventType`, `setResourcesForEventType`, `setEventTypesForResource` |
 | `SCHEDULE_NOT_FOUND` | No schedule has this ID. | `updateSchedule`, `deleteSchedule` |
 | `SCHEDULE_ALREADY_EXISTS` | A schedule with this ID exists. | `createSchedule` |
 | `DATE_OVERRIDE_NOT_FOUND` | The date override no longer exists. | `updateDateOverride`, `deleteDateOverride` |

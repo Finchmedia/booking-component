@@ -19,6 +19,7 @@ import {
     getScheduleDaySlots,
 } from "./schedules";
 import { assertSingleBookable, terminateBooking } from "./booking_lifecycle";
+import { deleteLinks } from "./resource_event_types";
 import { generateManagementToken } from "./tokens";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
@@ -1062,6 +1063,9 @@ export const deleteEventType = mutation({
       );
     }
 
+    // Its links go with it, so an event type created later with this id
+    // starts without resources instead of inheriting the old ones.
+    await deleteLinks(ctx, { eventTypeId: args.id });
     await ctx.db.delete(eventType._id);
     return { success: true };
   },
