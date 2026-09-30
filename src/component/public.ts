@@ -82,7 +82,7 @@ async function slotsHeldOn(
 ): Promise<Map<string, number[]> | null> {
   const items = await ctx.db
     .query("booking_items")
-    .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+    .withIndex("by_bookingId", (q) => q.eq("bookingId", booking._id))
     .collect();
   const holds = items.length > 0
     ? items.some((item) => item.resourceId === resourceId)
@@ -195,7 +195,7 @@ async function loadBusySlots(
 ): Promise<number[]> {
   const availabilityDoc = await ctx.db
     .query("daily_availability")
-    .withIndex("by_resource_date", (q) =>
+    .withIndex("by_resourceId_and_date", (q) =>
       q.eq("resourceId", resourceId).eq("date", date)
     )
     .unique();
@@ -629,7 +629,7 @@ export const createReservation = mutation({
         for (const [date, slots] of requiredSlots.entries()) {
             const existing = await ctx.db
                 .query("daily_availability")
-                .withIndex("by_resource_date", (q) =>
+                .withIndex("by_resourceId_and_date", (q) =>
                     q.eq("resourceId", resourceId).eq("date", date)
                 )
                 .unique();
@@ -753,8 +753,8 @@ export const createBooking = mutation({
       actorId: args.booker.email, // Use email as actorId
       eventTypeId: args.eventTypeId,
       // Scope the booking to the event type's organization so that
-      // listBookings({ organizationId }) (index by_org_start) finds it — the same
-      // scope the booking hooks receive.
+      // listBookings({ organizationId }) (index by_organizationId_and_start)
+      // finds it — the same scope the booking hooks receive.
       organizationId: eventType.organizationId,
       start: args.start,
       end: args.end,
@@ -785,7 +785,7 @@ export const createBooking = mutation({
     for (const [date, slots] of requiredSlots.entries()) {
       const existing = await ctx.db
         .query("daily_availability")
-        .withIndex("by_resource_date", (q) =>
+        .withIndex("by_resourceId_and_date", (q) =>
           q.eq("resourceId", args.resourceId).eq("date", date)
         )
         .unique();
@@ -896,7 +896,7 @@ export const createProvisionalBooking = mutation({
     for (const [date, slots] of requiredSlots.entries()) {
       const existing = await ctx.db
         .query("daily_availability")
-        .withIndex("by_resource_date", (q) =>
+        .withIndex("by_resourceId_and_date", (q) =>
           q.eq("resourceId", args.resourceId).eq("date", date)
         )
         .unique();
@@ -1155,7 +1155,7 @@ export const listEventTypes = query({
     if (args.organizationId) {
       eventTypes = await ctx.db
         .query("event_types")
-        .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+        .withIndex("by_organizationId", (q) => q.eq("organizationId", args.organizationId))
         .collect();
     } else {
       eventTypes = await ctx.db.query("event_types").collect();
@@ -1334,7 +1334,7 @@ export const toggleEventTypeActive = mutation({
 
     const presenceRecords = await ctx.db
       .query("presence")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.id))
+      .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.id))
       .collect();
 
     const activePresence = presenceRecords.filter(
@@ -1401,7 +1401,7 @@ function bookingsInRange(ctx: QueryCtx, args: ListBookingsArgs, order: "asc" | "
   const bookings = ctx.db.query("bookings");
   if (organizationId) {
     return bookings
-      .withIndex("by_org_start", (q) => {
+      .withIndex("by_organizationId_and_start", (q) => {
         const byOrg = q.eq("organizationId", organizationId);
         const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
         return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -1410,7 +1410,7 @@ function bookingsInRange(ctx: QueryCtx, args: ListBookingsArgs, order: "asc" | "
   }
   if (resourceId) {
     return bookings
-      .withIndex("by_resource_start", (q) => {
+      .withIndex("by_resourceId_and_start", (q) => {
         const byResource = q.eq("resourceId", resourceId);
         const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
         return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -1477,16 +1477,17 @@ async function firstMatching(
  * unless `status` asks for them.
  *
  * Pass `organizationId`, `resourceId` or `eventTypeId` (tried in that order):
- * the branch reads the `by_org_start` / `by_resource_start` /
- * `by_eventTypeId_and_start` index, so `dateFrom` / `dateTo` narrow the index
- * range itself and the scan is proportional to the window. With a `limit` the
- * scan also stops once `limit` bookings match, so it reads the limit plus the
- * rows the other filters skip (for `eventTypeId`, plus the rest of the
- * bookings sharing the last one's `start`). Without a limit it reads the whole
- * range; listBookingsPage pages through a range instead. `limit` must be a
- * positive integer (0.5.0; INVALID_INPUT otherwise, where 0.4.x read 0 as no
- * limit). Bookings with equal `start` come newest-created first, except in the
- * `eventTypeId` branch, where they come oldest-created first.
+ * the branch reads the `by_organizationId_and_start` /
+ * `by_resourceId_and_start` / `by_eventTypeId_and_start` index, so
+ * `dateFrom` / `dateTo` narrow the index range itself and the scan is
+ * proportional to the window. With a `limit` the scan also stops once `limit`
+ * bookings match, so it reads the limit plus the rows the other filters skip
+ * (for `eventTypeId`, plus the rest of the bookings sharing the last one's
+ * `start`). Without a limit it reads the whole range; listBookingsPage pages
+ * through a range instead. `limit` must be a positive integer (0.5.0;
+ * INVALID_INPUT otherwise, where 0.4.x read 0 as no limit). Bookings with
+ * equal `start` come newest-created first, except in the `eventTypeId`
+ * branch, where they come oldest-created first.
  *
  * `resourceId` matches a booking's primary resource: a bundle is listed under
  * its first resource only, not under its other items (pools included).
@@ -1583,7 +1584,7 @@ function bookingPageStream(ctx: QueryCtx, { field, value }: PageSelector, args: 
   const bookings = stream(ctx.db, schema).query("bookings");
   if (field === "organizationId") {
     return bookings
-      .withIndex("by_org_start", (q) => {
+      .withIndex("by_organizationId_and_start", (q) => {
         const byOrg = q.eq("organizationId", value);
         const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
         return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -1592,7 +1593,7 @@ function bookingPageStream(ctx: QueryCtx, { field, value }: PageSelector, args: 
   }
   if (field === "resourceId") {
     return bookings
-      .withIndex("by_resource_start", (q) => {
+      .withIndex("by_resourceId_and_start", (q) => {
         const byResource = q.eq("resourceId", value);
         const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
         return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -1819,7 +1820,7 @@ async function moveBooking(
     throwBookingError("INVALID_STATE", `Cannot reschedule booking with status: ${original.status}`);
   }
   const items = await ctx.db.query("booking_items")
-    .withIndex("by_booking", q => q.eq("bookingId", original._id)).collect();
+    .withIndex("by_bookingId", q => q.eq("bookingId", original._id)).collect();
   const resources = items.length > 0
     ? items.map(item => ({ resourceId: item.resourceId, quantity: item.quantity }))
     : [{ resourceId: original.resourceId, quantity: 1 }];

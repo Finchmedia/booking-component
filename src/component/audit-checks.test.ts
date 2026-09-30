@@ -394,7 +394,7 @@ describe("booking_eligibility", () => {
     await t.mutation(api.resources.toggleResourceActive, { id: "res-inactive", isActive: false });
     await t.run(async (ctx) => {
       const itemOf = async (bookingId: Doc<"bookings">["_id"], resourceId: string) =>
-        (await ctx.db.query("booking_items").withIndex("by_booking", (q) => q.eq("bookingId", bookingId)).collect())
+        (await ctx.db.query("booking_items").withIndex("by_bookingId", (q) => q.eq("bookingId", bookingId)).collect())
           .find((item) => item.resourceId === resourceId)!;
       await ctx.db.patch((await itemOf(ghostItem._id, "addon"))._id, { resourceId: "ghost" }); // 0.4.x took unknown ids
       await ctx.db.insert("booking_items", { bookingId: foreign._id, resourceId: "res-foreign", quantity: 1 });
@@ -460,7 +460,7 @@ describe("booking_eligibility", () => {
     const thirdParty = await bundleAt(t, "11:00", [{ resourceId: "ra" }], "et-global", "org-a");
     // As 0.4.3 stored them: a bundle over two organizations, and one under a third.
     await t.run(async (ctx) => {
-      const item = (await ctx.db.query("booking_items").withIndex("by_booking", (q) => q.eq("bookingId", mixed._id)).collect())[1];
+      const item = (await ctx.db.query("booking_items").withIndex("by_bookingId", (q) => q.eq("bookingId", mixed._id)).collect())[1];
       await ctx.db.patch(item._id, { resourceId: "rb" });
       await ctx.db.patch(thirdParty._id, { organizationId: "org-c" });
     });

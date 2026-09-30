@@ -86,7 +86,7 @@ export const checkMultiResourceAvailability = query({
           // Quantity-based resource
           const quantityDoc = await ctx.db
             .query("quantity_availability")
-            .withIndex("by_resource_date", (q) =>
+            .withIndex("by_resourceId_and_date", (q) =>
               q.eq("resourceId", resourceReq.resourceId).eq("date", date)
             )
             .unique();
@@ -107,7 +107,7 @@ export const checkMultiResourceAvailability = query({
           // Regular resource (quantity = 1)
           const availability = await ctx.db
             .query("daily_availability")
-            .withIndex("by_resource_date", (q) =>
+            .withIndex("by_resourceId_and_date", (q) =>
               q.eq("resourceId", resourceReq.resourceId).eq("date", date)
             )
             .unique();
@@ -236,7 +236,7 @@ export const createMultiResourceBooking = mutation({
           // Quantity-based
           const quantityDoc = await ctx.db
             .query("quantity_availability")
-            .withIndex("by_resource_date", (q) =>
+            .withIndex("by_resourceId_and_date", (q) =>
               q.eq("resourceId", resourceReq.resourceId).eq("date", date)
             )
             .unique();
@@ -256,7 +256,7 @@ export const createMultiResourceBooking = mutation({
           // Regular
           const availability = await ctx.db
             .query("daily_availability")
-            .withIndex("by_resource_date", (q) =>
+            .withIndex("by_resourceId_and_date", (q) =>
               q.eq("resourceId", resourceReq.resourceId).eq("date", date)
             )
             .unique();
@@ -372,7 +372,7 @@ export const getBookingWithItems = query({
 
     const items = await ctx.db
       .query("booking_items")
-      .withIndex("by_booking", (q) => q.eq("bookingId", args.bookingId))
+      .withIndex("by_bookingId", (q) => q.eq("bookingId", args.bookingId))
       .collect();
 
     // Get resource details for each item

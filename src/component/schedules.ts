@@ -157,7 +157,7 @@ export const listSchedules = query({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("schedules")
-      .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+      .withIndex("by_organizationId", (q) => q.eq("organizationId", args.organizationId))
       .collect();
   },
 });
@@ -189,7 +189,7 @@ export async function getOrganizationDefaultSchedule(
     marked ??
     (await ctx.db
       .query("schedules")
-      .withIndex("by_org", (q) => q.eq("organizationId", organizationId))
+      .withIndex("by_organizationId", (q) => q.eq("organizationId", organizationId))
       .first())
   );
 }
@@ -232,7 +232,7 @@ export const createSchedule = mutation({
     if (args.isDefault) {
       const schedules = await ctx.db
         .query("schedules")
-        .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+        .withIndex("by_organizationId", (q) => q.eq("organizationId", args.organizationId))
         .collect();
 
       for (const schedule of schedules) {
@@ -294,7 +294,7 @@ export const updateSchedule = mutation({
     if (args.isDefault && !schedule.isDefault) {
       const schedules = await ctx.db
         .query("schedules")
-        .withIndex("by_org", (q) =>
+        .withIndex("by_organizationId", (q) =>
           q.eq("organizationId", schedule.organizationId)
         )
         .collect();
@@ -335,7 +335,7 @@ export const deleteSchedule = mutation({
     // hours (availability reads reject an unknown scheduleId since 0.5.0).
     const user = await ctx.db
       .query("event_types")
-      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.id))
+      .withIndex("by_scheduleId", (q) => q.eq("scheduleId", args.id))
       .first();
     if (user) {
       throwBookingError(
@@ -347,7 +347,7 @@ export const deleteSchedule = mutation({
     // Delete associated date overrides
     const overrides = await ctx.db
       .query("date_overrides")
-      .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id))
+      .withIndex("by_scheduleId_and_date", (q) => q.eq("scheduleId", schedule._id))
       .collect();
 
     for (const override of overrides) {
@@ -381,7 +381,7 @@ export const listDateOverrides = query({
     }
     return await ctx.db
       .query("date_overrides")
-      .withIndex("by_schedule_date", (q) => {
+      .withIndex("by_scheduleId_and_date", (q) => {
         const bySchedule = q.eq("scheduleId", args.scheduleId);
         const from = dateFrom !== undefined ? bySchedule.gte("date", dateFrom) : bySchedule;
         return dateTo !== undefined ? from.lte("date", dateTo) : from;
@@ -402,7 +402,7 @@ export const getDateOverride = query({
     // duplicate (scheduleId, date) row exist; .unique() would throw on it.
     return await ctx.db
       .query("date_overrides")
-      .withIndex("by_schedule_date", (q) =>
+      .withIndex("by_scheduleId_and_date", (q) =>
         q.eq("scheduleId", args.scheduleId).eq("date", date)
       )
       .first();
@@ -445,7 +445,7 @@ export const createDateOverride = mutation({
     // Check for existing override on this date
     const existing = await ctx.db
       .query("date_overrides")
-      .withIndex("by_schedule_date", (q) =>
+      .withIndex("by_scheduleId_and_date", (q) =>
         q.eq("scheduleId", args.scheduleId).eq("date", date)
       )
       .first();
@@ -596,7 +596,7 @@ export async function getScheduleDaySlots(
     ? overridesByDate.get(date)
     : await ctx.db
         .query("date_overrides")
-        .withIndex("by_schedule_date", (q) =>
+        .withIndex("by_scheduleId_and_date", (q) =>
           q.eq("scheduleId", schedule._id).eq("date", date)
         )
         .first();
@@ -626,7 +626,7 @@ export async function getDateOverridesByDate(
 ): Promise<Map<string, Doc<"date_overrides">>> {
   const overrides = await ctx.db
     .query("date_overrides")
-    .withIndex("by_schedule_date", (q) =>
+    .withIndex("by_scheduleId_and_date", (q) =>
       q.eq("scheduleId", schedule._id).gte("date", dateFrom).lte("date", dateTo)
     )
     .collect();

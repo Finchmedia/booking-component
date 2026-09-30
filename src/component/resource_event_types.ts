@@ -23,7 +23,7 @@ import { throwBookingError } from "../shared/booking-errors.js";
 function linkRows(db: DatabaseReader, resourceId: string, eventTypeId: string) {
   return db
     .query("resource_event_types")
-    .withIndex("by_resource_event_type", (q) =>
+    .withIndex("by_resourceId_and_eventTypeId", (q) =>
       q.eq("resourceId", resourceId).eq("eventTypeId", eventTypeId)
     );
 }
@@ -79,7 +79,7 @@ export async function assertLinksAdoptable(
 ): Promise<void> {
   const links = await db
     .query("resource_event_types")
-    .withIndex("by_event_type", (q) => q.eq("eventTypeId", eventTypeId))
+    .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", eventTypeId))
     .collect();
   for (const resourceId of unique(links.map((link) => link.resourceId))) {
     const resource = await db
@@ -107,10 +107,10 @@ export async function deleteLinks(
   const links = await ("resourceId" in of
     ? ctx.db
         .query("resource_event_types")
-        .withIndex("by_resource", (q) => q.eq("resourceId", of.resourceId))
+        .withIndex("by_resourceId", (q) => q.eq("resourceId", of.resourceId))
     : ctx.db
         .query("resource_event_types")
-        .withIndex("by_event_type", (q) => q.eq("eventTypeId", of.eventTypeId))
+        .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", of.eventTypeId))
   ).collect();
   for (const link of links) {
     await ctx.db.delete(link._id);
@@ -133,7 +133,7 @@ export const getEventTypesForResource = query({
     // Get all mappings for this resource
     const mappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+      .withIndex("by_resourceId", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
     // Fetch event types (each once, even over duplicate link rows)
@@ -165,7 +165,7 @@ export const getResourcesForEventType = query({
     // Get all mappings for this event type
     const mappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+      .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
     // Fetch resources (each once, even over duplicate link rows)
@@ -207,7 +207,7 @@ export const getResourceIdsForEventType = query({
   handler: async (ctx, args) => {
     const mappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+      .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
     return unique(mappings.map((m) => m.resourceId));
@@ -223,7 +223,7 @@ export const getEventTypeIdsForResource = query({
   handler: async (ctx, args) => {
     const mappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+      .withIndex("by_resourceId", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
     return unique(mappings.map((m) => m.eventTypeId));
@@ -354,7 +354,7 @@ export const setResourcesForEventType = mutation({
     // Get current links
     const existingMappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+      .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
     const keptResourceIds = new Set<string>();
@@ -422,7 +422,7 @@ export const setEventTypesForResource = mutation({
     // Get current links
     const existingMappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+      .withIndex("by_resourceId", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
     const keptEventTypeIds = new Set<string>();

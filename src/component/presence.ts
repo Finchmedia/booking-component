@@ -60,7 +60,7 @@ export const heartbeat = mutation({
       // 1. Update or create the presence record
       const existingPresence = await ctx.db
         .query("presence")
-        .withIndex("by_user_slot_resource", (q) =>
+        .withIndex("by_user_and_slot_and_resourceId", (q) =>
           q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId)
         )
         .first();
@@ -85,7 +85,7 @@ export const heartbeat = mutation({
       // 2. Ensure a cleanup job is scheduled
       const existingHeartbeat = await ctx.db
         .query("presence_heartbeats")
-        .withIndex("by_user_slot_resource", (q) =>
+        .withIndex("by_user_and_slot_and_resourceId", (q) =>
           q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId)
         )
         .first();
@@ -128,14 +128,14 @@ export const leave = mutation({
     for (const slot of args.slots) {
       const presence = await ctx.db
         .query("presence")
-        .withIndex("by_user_slot_resource", (q) =>
+        .withIndex("by_user_and_slot_and_resourceId", (q) =>
           q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId)
         )
         .first();
 
       const heartbeatDoc = await ctx.db
         .query("presence_heartbeats")
-        .withIndex("by_user_slot_resource", (q) =>
+        .withIndex("by_user_and_slot_and_resourceId", (q) =>
           q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId)
         )
         .first();
@@ -177,7 +177,7 @@ export const list = query({
     const now = Date.now();
     return await ctx.db
       .query("presence")
-      .withIndex("by_resource_slot_updated", (q) =>
+      .withIndex("by_resourceId_and_slot_and_updated", (q) =>
         q
           .eq("resourceId", args.resourceId)
           .eq("slot", args.slot)
@@ -216,7 +216,7 @@ export const getDatePresence = query({
     // Using \u{FFFF} (char 65535) as upper bound ensures we capture all timestamps on that date
     const allPresence = await ctx.db
       .query("presence")
-      .withIndex("by_resource_slot_updated", (q) =>
+      .withIndex("by_resourceId_and_slot_and_updated", (q) =>
         q
           .eq("resourceId", args.resourceId)
           .gte("slot", args.date)
@@ -266,7 +266,7 @@ export const getActivePresenceCount = query({
       // Get all presence for this resource
       presenceRecords = await ctx.db
         .query("presence")
-        .withIndex("by_resource_slot_updated", (q) =>
+        .withIndex("by_resourceId_and_slot_and_updated", (q) =>
           q.eq("resourceId", args.resourceId!)
         )
         .collect();
@@ -274,7 +274,7 @@ export const getActivePresenceCount = query({
       // Get all presence for this event type
       presenceRecords = await ctx.db
         .query("presence")
-        .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+        .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.eventTypeId))
         .collect();
     } else {
       // No filter provided
@@ -311,14 +311,14 @@ export const cleanup = internalMutation({
   handler: async (ctx, args) => {
     const presence = await ctx.db
       .query("presence")
-      .withIndex("by_user_slot_resource", (q) =>
+      .withIndex("by_user_and_slot_and_resourceId", (q) =>
         q.eq("user", args.user).eq("slot", args.slot).eq("resourceId", args.resourceId)
       )
       .first();
 
     const heartbeatDoc = await ctx.db
       .query("presence_heartbeats")
-      .withIndex("by_user_slot_resource", (q) =>
+      .withIndex("by_user_and_slot_and_resourceId", (q) =>
         q.eq("user", args.user).eq("slot", args.slot).eq("resourceId", args.resourceId)
       )
       .first();
@@ -461,7 +461,7 @@ export const sweepOrphanedHolds = mutation({
 
       const presence = await ctx.db
         .query("presence")
-        .withIndex("by_user_slot_resource", (q) =>
+        .withIndex("by_user_and_slot_and_resourceId", (q) =>
           q.eq("user", marker.user).eq("slot", marker.slot).eq("resourceId", marker.resourceId)
         )
         .first();

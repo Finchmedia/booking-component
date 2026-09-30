@@ -90,7 +90,7 @@ function slotQuantities(
   return t.run(async (ctx) => {
     const doc = await ctx.db
       .query("quantity_availability")
-      .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
+      .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
       .unique();
     return doc ? ((doc.slotQuantities ?? {}) as Record<string, number>) : null;
   });
@@ -399,7 +399,7 @@ describe("transitionBookingState: guard", () => {
     await t.run(async (ctx) => {
       const row = await ctx.db
         .query("daily_availability")
-        .withIndex("by_resource_date", (q) => q.eq("resourceId", RESOURCE).eq("date", DAY))
+        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", RESOURCE).eq("date", DAY))
         .unique();
       await ctx.db.delete(row!._id);
     });
@@ -530,7 +530,7 @@ describe("transitionBookingState: multi-resource release", () => {
     await t.run(async (ctx) => {
       const doc = await ctx.db
         .query("quantity_availability")
-        .withIndex("by_resource_date", (q) => q.eq("resourceId", POOL).eq("date", DAY))
+        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", POOL).eq("date", DAY))
         .unique();
       await ctx.db.patch(doc!._id, { slotQuantities: { "36": 1 } });
     });

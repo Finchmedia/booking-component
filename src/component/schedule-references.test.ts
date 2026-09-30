@@ -4,7 +4,7 @@
  * - createEventType / updateEventType reject a scheduleId that names no
  *   schedule (SCHEDULE_NOT_FOUND); "" still means no schedule.
  * - deleteSchedule refuses while an event type references the schedule
- *   (SCHEDULE_IN_USE), through the event_types by_schedule index, since
+ *   (SCHEDULE_IN_USE), through the event_types by_scheduleId index, since
  *   event types may have no organization.
  * - The availability reads and getEffectiveAvailability reject an unknown
  *   scheduleId instead of serving 09:00–17:00 every day (pinned in

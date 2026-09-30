@@ -545,9 +545,9 @@ describe("resources", () => {
 
 describe("hooks", () => {
   test("listHooks returns creation order with and without an eventType filter", async () => {
-    // `by_event` is [eventType, enabled]: a bare prefix scan on eventType
-    // comes back grouped by `enabled` (disabled first). listHooks must hide
-    // that and return creation order from both of its branches.
+    // `by_eventType_and_enabled` is [eventType, enabled]: a bare prefix scan on
+    // eventType comes back grouped by `enabled` (disabled first). listHooks
+    // must hide that and return creation order from both of its branches.
     const first = await t.mutation(api.hooks.registerHook, {
       eventType: "booking.created",
       functionHandle: "function://first",

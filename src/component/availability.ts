@@ -29,7 +29,7 @@ export async function isAvailable(
     for (const [date, slots] of requiredSlotsByDate(start, end)) {
         const availability = await ctx.db
             .query("daily_availability")
-            .withIndex("by_resource_date", (q) =>
+            .withIndex("by_resourceId_and_date", (q) =>
                 q.eq("resourceId", resourceId).eq("date", date)
             )
             .unique();

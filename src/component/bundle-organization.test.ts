@@ -218,7 +218,7 @@ describe("an event type without organization: one organization per bundle", () =
     const own = await bundleOf(t, ["ra"], 13, "org-a"); // control
     // As 0.4.3 stored them: an item of org-b, and org-c's id on org-a's resource.
     await t.run(async (ctx) => {
-      const [, second] = await ctx.db.query("booking_items").withIndex("by_booking", (q) => q.eq("bookingId", spanning._id)).collect();
+      const [, second] = await ctx.db.query("booking_items").withIndex("by_bookingId", (q) => q.eq("bookingId", spanning._id)).collect();
       await ctx.db.patch(second._id, { resourceId: "rb" });
       await ctx.db.patch(thirdParty._id, { organizationId: "org-c" });
     });

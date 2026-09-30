@@ -67,9 +67,9 @@ const uids = (pages: Page[]) => pages.flatMap((page) => page.page.map((booking) 
 async function reference(ctx: QueryCtx, args: PageArgs): Promise<string[]> {
   const [index, field, value] =
     "organizationId" in args
-      ? (["by_org_start", "organizationId", args.organizationId] as const)
+      ? (["by_organizationId_and_start", "organizationId", args.organizationId] as const)
       : "resourceId" in args
-        ? (["by_resource_start", "resourceId", args.resourceId] as const)
+        ? (["by_resourceId_and_start", "resourceId", args.resourceId] as const)
         : (["by_eventTypeId_and_start", "eventTypeId", args.eventTypeId] as const);
   const rows: Booking[] = await ctx.db
     .query("bookings")
@@ -216,7 +216,7 @@ describe("listBookingsPage: bounded reads", () => {
     expect(first.page.map((booking) => booking.uid)).toEqual(["early"]);
     expect(first).toMatchObject({ isDone: false, pageStatus: "SplitRequired" });
     const range = await t.run(async (ctx) =>
-      ctx.db.query("bookings").withIndex("by_org_start", (q) => q.eq("organizationId", ORG)).order("desc").collect(),
+      ctx.db.query("bookings").withIndex("by_organizationId_and_start", (q) => q.eq("organizationId", ORG)).order("desc").collect(),
     );
     const key = jsonToConvex(JSON.parse(first.continueCursor)) as unknown[];
     expect(key).toEqual([ORG, range[999].start, range[999]._creationTime, range[999]._id]);

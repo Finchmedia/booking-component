@@ -318,6 +318,12 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
   `end`, `timezone` and `bookerName`, and every other `Booking` field as
   optional. A callback annotated `(booking: Booking) => …` takes `BookingView`
   or drops the annotation. `BookingSuccess` accepts a `BookingView`.
+- All component indexes follow Convex's `by_field1_and_field2` naming: each
+  is named after its fields, in order, which do not change (`by_external_id`
+  keeps its name, since Convex reserves `by_id`). The deploy builds the
+  renamed indexes and drops the old ones (a rollback to 0.4.x does the
+  reverse), so allow time on large tables. Component tables are internal, so
+  host code is unaffected.
 - Rolling back to 0.4.x: every 0.5.0 emitter queues `triggerHooks` with a
   new `payloadV2` argument, and hooks registered with `payloadVersion: 2`
   store it. 0.4.x's `triggerHooks` validator rejects that argument, so each

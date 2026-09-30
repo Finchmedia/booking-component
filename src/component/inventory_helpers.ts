@@ -100,7 +100,7 @@ export async function reserveResourceSlots(
       if (usesQuantityInventory(resource)) {
         const row = await ctx.db
           .query("quantity_availability")
-          .withIndex("by_resource_date", (q) =>
+          .withIndex("by_resourceId_and_date", (q) =>
             q.eq("resourceId", request.resourceId).eq("date", date),
           )
           .unique();
@@ -125,7 +125,7 @@ export async function reserveResourceSlots(
       } else {
         const row = await ctx.db
           .query("daily_availability")
-          .withIndex("by_resource_date", (q) =>
+          .withIndex("by_resourceId_and_date", (q) =>
             q.eq("resourceId", request.resourceId).eq("date", date),
           )
           .unique();

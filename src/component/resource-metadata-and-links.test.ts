@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 // Feature #9 (free-form `resources.metadata`) and feature #4 (the
-// `by_resource_event_type` compound index behind every resource ↔ event type
-// link lookup, including the createBooking / createProvisionalBooking guard).
+// `by_resourceId_and_eventTypeId` compound index behind every resource ↔ event
+// type link lookup, including the createBooking / createProvisionalBooking
+// guard).
 import { beforeEach, describe, expect, test } from "vitest";
 import { api } from "./_generated/api.js";
 import {

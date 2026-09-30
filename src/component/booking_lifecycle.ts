@@ -329,7 +329,7 @@ export async function assertSingleBookable(
   for (const [date, slots] of requiredSlots.entries()) {
     const dayAvailability = await ctx.db
       .query("daily_availability")
-      .withIndex("by_resource_date", (q) =>
+      .withIndex("by_resourceId_and_date", (q) =>
         q.eq("resourceId", args.resourceId).eq("date", date)
       )
       .unique();
@@ -378,7 +378,7 @@ export async function corroboratedOrganization(
   loadItems: () => Promise<Doc<"booking_items">[]> = () =>
     db
       .query("booking_items")
-      .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+      .withIndex("by_bookingId", (q) => q.eq("bookingId", booking._id))
       .collect(),
 ): Promise<{ organizationId: string } | UncorroboratedOrganization> {
   if (!eventType) return { reason: "event_type_missing" };
@@ -493,7 +493,7 @@ export async function buildHookEventV2(
   if (!booking) throw new Error("Booking not found after write");
   const items = await ctx.db
     .query("booking_items")
-    .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
+    .withIndex("by_bookingId", (q) => q.eq("bookingId", bookingId))
     .collect();
   const payload: BookingHookEventV2 = {
     version: 2,

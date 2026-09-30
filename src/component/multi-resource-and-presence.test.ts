@@ -123,7 +123,7 @@ function pooled(
   return t.run(async (ctx) => {
     const doc = await ctx.db
       .query("quantity_availability")
-      .withIndex("by_resource_date", (q) =>
+      .withIndex("by_resourceId_and_date", (q) =>
         q.eq("resourceId", resourceId).eq("date", date)
       )
       .unique();

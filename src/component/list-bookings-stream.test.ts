@@ -111,7 +111,7 @@ async function listBookingsBefore(ctx: any, args: Args): Promise<Booking[]> {
     const organizationId = args.organizationId;
     bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_org_start", (q: any) => {
+      .withIndex("by_organizationId_and_start", (q: any) => {
         const byOrg = q.eq("organizationId", organizationId);
         const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
         return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -122,7 +122,7 @@ async function listBookingsBefore(ctx: any, args: Args): Promise<Booking[]> {
     const resourceId = args.resourceId;
     bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_resource_start", (q: any) => {
+      .withIndex("by_resourceId_and_start", (q: any) => {
         const byResource = q.eq("resourceId", resourceId);
         const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
         return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -158,9 +158,9 @@ async function listBookingsBefore(ctx: any, args: Args): Promise<Booking[]> {
 /** The selector's index range, newest start first (what the stream walks). */
 async function rangeOf(ctx: any, args: Args): Promise<Booking[] | null> {
   const [index, field, value] = args.organizationId
-    ? ["by_org_start", "organizationId", args.organizationId]
+    ? ["by_organizationId_and_start", "organizationId", args.organizationId]
     : args.resourceId
-      ? ["by_resource_start", "resourceId", args.resourceId]
+      ? ["by_resourceId_and_start", "resourceId", args.resourceId]
       : args.eventTypeId
         ? ["by_eventTypeId_and_start", "eventTypeId", args.eventTypeId]
         : [];

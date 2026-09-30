@@ -15,12 +15,12 @@ import {
 /** A representation change must never reinterpret an existing active hold. */
 async function assertNoActiveBookings(ctx: MutationCtx, resourceId: string): Promise<void> {
   const primaryBookings = await ctx.db.query("bookings")
-    .withIndex("by_resource_start", q => q.eq("resourceId", resourceId)).collect();
+    .withIndex("by_resourceId_and_start", q => q.eq("resourceId", resourceId)).collect();
   if (primaryBookings.some(booking => holdsActiveInventory(booking.status))) {
     throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource has active bookings");
   }
   const items = await ctx.db.query("booking_items")
-    .withIndex("by_resource", q => q.eq("resourceId", resourceId)).collect();
+    .withIndex("by_resourceId", q => q.eq("resourceId", resourceId)).collect();
   for (const item of items) {
     const booking = await ctx.db.get(item.bookingId);
     if (booking && holdsActiveInventory(booking.status)) {
@@ -38,11 +38,11 @@ async function assertNoActiveBookings(ctx: MutationCtx, resourceId: string): Pro
  */
 async function assertNoActiveSingleBookings(ctx: MutationCtx, resourceId: string): Promise<void> {
   const primaryBookings = await ctx.db.query("bookings")
-    .withIndex("by_resource_start", q => q.eq("resourceId", resourceId)).collect();
+    .withIndex("by_resourceId_and_start", q => q.eq("resourceId", resourceId)).collect();
   for (const booking of primaryBookings) {
     if (!holdsActiveInventory(booking.status)) continue;
     const item = await ctx.db.query("booking_items")
-      .withIndex("by_booking", q => q.eq("bookingId", booking._id)).first();
+      .withIndex("by_bookingId", q => q.eq("bookingId", booking._id)).first();
     if (!item) {
       throwBookingError(
         "RESOURCE_IN_USE",
@@ -89,18 +89,19 @@ export const listResources = query({
   },
   returns: v.array(resourceDoc),
   handler: async (ctx, args) => {
-    // by_org_type when a type is given, else by_org (same creation order either way).
+    // by_organizationId_and_type when a type is given, else by_organizationId
+    // (same creation order either way).
     const type = args.type;
     const resources = type
       ? await ctx.db
           .query("resources")
-          .withIndex("by_org_type", (q) =>
+          .withIndex("by_organizationId_and_type", (q) =>
             q.eq("organizationId", args.organizationId).eq("type", type)
           )
           .collect()
       : await ctx.db
           .query("resources")
-          .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+          .withIndex("by_organizationId", (q) => q.eq("organizationId", args.organizationId))
           .collect();
 
     let filtered = resources;
@@ -123,7 +124,7 @@ export const listResourcesByType = query({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("resources")
-      .withIndex("by_org_type", (q) =>
+      .withIndex("by_organizationId_and_type", (q) =>
         q.eq("organizationId", args.organizationId).eq("type", args.type)
       )
       .collect();
@@ -170,7 +171,7 @@ export const createResource = mutation({
       const now = Date.now();
       const today = new Date(now).toISOString().slice(0, 10);
       const reservedRows = await ctx.db.query("daily_availability")
-        .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
+        .withIndex("by_resourceId_and_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
       if (reservedRows.some(row => row.busySlots.some(slot => slotIsCurrentOrFuture(row.date, slot, now)))) {
         throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource slots are reserved");
       }
@@ -242,7 +243,7 @@ export const updateResource = mutation({
       const now = Date.now();
       const today = new Date(now).toISOString().slice(0, 10);
       const quantityRows = await ctx.db.query("quantity_availability")
-        .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
+        .withIndex("by_resourceId_and_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
       for (const row of quantityRows) {
         const reserved = Object.entries(row.slotQuantities)
           .filter(([slot]) => slotIsCurrentOrFuture(row.date, Number(slot), now))
@@ -256,7 +257,7 @@ export const updateResource = mutation({
       }
       if (changesInventoryMode) {
         const bitmapRows = await ctx.db.query("daily_availability")
-          .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
+          .withIndex("by_resourceId_and_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
         if (bitmapRows.some(row => row.busySlots.some(slot => slotIsCurrentOrFuture(row.date, slot, now)))) {
           throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource slots are reserved");
         }
@@ -300,11 +301,11 @@ export const deleteResource = mutation({
     // Check for existing bookings (prefix query on the compound index)
     const bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_resource_start", (q) => q.eq("resourceId", args.id))
+      .withIndex("by_resourceId_and_start", (q) => q.eq("resourceId", args.id))
       .first();
 
     const bookedItem = await ctx.db.query("booking_items")
-      .withIndex("by_resource", q => q.eq("resourceId", args.id)).first();
+      .withIndex("by_resourceId", q => q.eq("resourceId", args.id)).first();
 
     if (bookings || bookedItem) {
       throwBookingError(
@@ -345,7 +346,7 @@ export const toggleResourceActive = mutation({
 
     const presenceRecords = await ctx.db
       .query("presence")
-      .withIndex("by_resource_slot_updated", (q) =>
+      .withIndex("by_resourceId_and_slot_and_updated", (q) =>
         q.eq("resourceId", args.id)
       )
       .collect();
@@ -389,7 +390,7 @@ export const getResourceAvailability = query({
       .withIndex("by_external_id", q => q.eq("id", args.resourceId)).unique();
     if (usesQuantityInventory(resource)) {
       const quantityDoc = await ctx.db.query("quantity_availability")
-        .withIndex("by_resource_date", q => q.eq("resourceId", args.resourceId).eq("date", args.date)).unique();
+        .withIndex("by_resourceId_and_date", q => q.eq("resourceId", args.resourceId).eq("date", args.date)).unique();
       const counts = quantityDoc?.slotQuantities ?? {};
       return Object.entries(counts)
         .filter(([, count]) => count >= (resource?.quantity ?? 1))
@@ -398,7 +399,7 @@ export const getResourceAvailability = query({
 
     const availability = await ctx.db
       .query("daily_availability")
-      .withIndex("by_resource_date", (q) =>
+      .withIndex("by_resourceId_and_date", (q) =>
         q.eq("resourceId", args.resourceId).eq("date", args.date)
       )
       .unique();
@@ -427,7 +428,7 @@ export const getQuantityAvailability = query({
 
     if (!usesQuantityInventory(resource)) {
       const availability = await ctx.db.query("daily_availability")
-        .withIndex("by_resource_date", q => q.eq("resourceId", args.resourceId).eq("date", args.date)).unique();
+        .withIndex("by_resourceId_and_date", q => q.eq("resourceId", args.resourceId).eq("date", args.date)).unique();
       return {
         totalQuantity: resource.quantity ?? 1,
         bookedQuantities: Object.fromEntries((availability?.busySlots ?? []).map(slot => [String(slot), 1])),
@@ -436,7 +437,7 @@ export const getQuantityAvailability = query({
 
     const quantityDoc = await ctx.db
       .query("quantity_availability")
-      .withIndex("by_resource_date", (q) =>
+      .withIndex("by_resourceId_and_date", (q) =>
         q.eq("resourceId", args.resourceId).eq("date", args.date)
       )
       .unique();

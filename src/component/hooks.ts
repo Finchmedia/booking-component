@@ -76,7 +76,7 @@ export const listHooks = query({
     let hooks = eventType
       ? await ctx.db
           .query("hooks")
-          .withIndex("by_event", (q) => q.eq("eventType", eventType))
+          .withIndex("by_eventType_and_enabled", (q) => q.eq("eventType", eventType))
           .collect()
       : await ctx.db.query("hooks").collect();
 
@@ -88,9 +88,9 @@ export const listHooks = query({
       );
     }
 
-    // `by_event` is [eventType, enabled], so the prefix scan above comes back
-    // grouped by `enabled` (disabled first), not by creation time. Pin the
-    // order so both branches agree; the hooks table is tiny.
+    // `by_eventType_and_enabled` is [eventType, enabled], so the prefix scan
+    // above comes back grouped by `enabled` (disabled first), not by creation
+    // time. Pin the order so both branches agree; the hooks table is tiny.
     hooks.sort((a, b) => a._creationTime - b._creationTime);
 
     return hooks;
@@ -363,7 +363,7 @@ export const triggerHooks = internalMutation({
     // ========================================
     const allHooks = await ctx.db
       .query("hooks")
-      .withIndex("by_event", (q) =>
+      .withIndex("by_eventType_and_enabled", (q) =>
         q.eq("eventType", args.eventType).eq("enabled", true)
       )
       .collect();
@@ -455,7 +455,7 @@ export const transitionBookingState = mutation({
     if (args.toStatus === "confirmed" || args.toStatus === "pending") {
       const items = await ctx.db
         .query("booking_items")
-        .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+        .withIndex("by_bookingId", (q) => q.eq("bookingId", booking._id))
         .collect();
       await assertStillBookable(ctx, booking, items);
     }
@@ -555,7 +555,7 @@ export const getBookingHistory = query({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("booking_history")
-      .withIndex("by_booking", (q) => q.eq("bookingId", args.bookingId))
+      .withIndex("by_bookingId", (q) => q.eq("bookingId", args.bookingId))
       .collect();
   },
 });

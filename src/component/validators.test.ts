@@ -452,7 +452,7 @@ describe("bookingWithItemsDoc", () => {
       });
       const items = await ctx.db
         .query("booking_items")
-        .withIndex("by_booking", (q) => q.eq("bookingId", docs.bookings._id))
+        .withIndex("by_bookingId", (q) => q.eq("bookingId", docs.bookings._id))
         .collect();
       expect(items.map((i) => i._id).sort()).toEqual(
         [docs.booking_items._id, orphanItemId].sort()

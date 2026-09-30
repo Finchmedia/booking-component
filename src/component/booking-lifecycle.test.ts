@@ -73,7 +73,7 @@ async function poolUnits(t: T): Promise<Record<string, number>> {
   const row = await t.run((ctx) =>
     ctx.db
       .query("quantity_availability")
-      .withIndex("by_resource_date", (q) => q.eq("resourceId", "pool-1").eq("date", TUESDAY))
+      .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", "pool-1").eq("date", TUESDAY))
       .unique()
   );
   const quantities = (row?.slotQuantities ?? {}) as Record<string, number>;

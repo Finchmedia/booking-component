@@ -290,7 +290,8 @@ describe("listBookings", () => {
   });
 
   // createBooking stamps the event type's organizationId on the booking (the
-  // same scope the hooks receive) so the by_org_start index finds it.
+  // same scope the hooks receive) so the by_organizationId_and_start index
+  // finds it.
   test("scopes bookings to an organization", async () => {
     const seed = await seedResource(t);
     const booking = await book(t, seed, AT("09:00"), AT("10:00"));
