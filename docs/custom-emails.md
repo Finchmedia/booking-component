@@ -109,6 +109,15 @@ must be nonempty. Subjects must contain no CR, LF or NUL characters and are limi
 to 200 UTF-16 code units. Combined UTF-8 subject, HTML and text must fit in 128 KiB.
 These checks validate the payload, not its visual appearance or deliverability.
 
+Since 0.4.3, Booking skips any email whose recipient fails a conservative syntax
+check. The job returns `INVALID_RECIPIENT` and queues nothing, so one malformed
+address cannot fail a Resend batch shared with other bookers' mail. The check is
+exported as `isSendableAddress` from `@mrfinch/booking/emails`, so your booking
+form can apply the same rule. It screens syntax only; it does not prove that an
+address exists or belongs to the guest. A stored time zone that `Intl` rejects
+renders the built-in templates in UTC, while renderers receive the stored value
+unchanged.
+
 Rendering runs after the booking mutation commits. Diagnose a renderer failure
 in the Convex scheduled-function logs, fix and deploy the host renderer, then
 retry the failed internal email mutation with its original arguments and

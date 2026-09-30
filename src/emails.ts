@@ -3,6 +3,9 @@ import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Infer } from "convex/values";
 
+// The recipient screen Booking applies before built-in mail, for reuse in host validation.
+export { isSendableAddress } from "./component/emails/recipient.js";
+
 /** Presentation events, distinct from the component's lifecycle hook names. */
 export const bookingEmailKindValidator = v.union(
   v.literal("confirmed"),

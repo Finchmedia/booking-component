@@ -14,6 +14,7 @@ import type * as emails_context from "../emails/context.js";
 import type * as emails_helpers from "../emails/helpers.js";
 import type * as emails_html from "../emails/html.js";
 import type * as emails_mutations from "../emails/mutations.js";
+import type * as emails_recipient from "../emails/recipient.js";
 import type * as emails_renderer from "../emails/renderer.js";
 import type * as emails_styles from "../emails/styles.js";
 import type * as emails_templates_approved from "../emails/templates/approved.js";
@@ -50,6 +51,7 @@ const fullApi: ApiFromModules<{
   "emails/helpers": typeof emails_helpers;
   "emails/html": typeof emails_html;
   "emails/mutations": typeof emails_mutations;
+  "emails/recipient": typeof emails_recipient;
   "emails/renderer": typeof emails_renderer;
   "emails/styles": typeof emails_styles;
   "emails/templates/approved": typeof emails_templates_approved;

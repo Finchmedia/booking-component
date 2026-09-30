@@ -4,23 +4,36 @@
 
 import { MAX_BOOKING_EMAIL_SUBJECT_LENGTH } from "../../emails.js";
 
-export function formatDate(timestamp: number, timezone: string): string {
+/**
+ * Stored zones are not validated on every write path. An invalid, empty or
+ * missing zone must not fail the notification, so it renders in UTC instead;
+ * formats with a zone name then label the times "UTC".
+ */
+function formatInZone(timestamp: number, timezone: string | undefined, options: Intl.DateTimeFormatOptions): string {
     const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    if (timezone) {
+        try {
+            return date.toLocaleString("en-US", { ...options, timeZone: timezone });
+        } catch (error) {
+            if (!(error instanceof RangeError)) throw error;
+        }
+    }
+    return date.toLocaleString("en-US", { ...options, timeZone: "UTC" });
+}
+
+export function formatDate(timestamp: number, timezone: string): string {
+    return formatInZone(timestamp, timezone, {
         weekday: "long",
         year: "numeric",
         month: "long",
         day: "numeric",
-        timeZone: timezone,
     });
 }
 
 export function formatTime(timestamp: number, timezone: string): string {
-    const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    return formatInZone(timestamp, timezone, {
         hour: "2-digit",
         minute: "2-digit",
-        timeZone: timezone,
         timeZoneName: "short",
     });
 }
@@ -40,25 +53,21 @@ export function formatDuration(milliseconds: number): string {
 }
 
 export function formatDateTimeFull(timestamp: number, timezone: string): string {
-    const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    return formatInZone(timestamp, timezone, {
         weekday: "long",
         year: "numeric",
         month: "long",
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
-        timeZone: timezone,
         timeZoneName: "short",
     });
 }
 
 export function formatTimeShort(timestamp: number, timezone: string): string {
-    const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    return formatInZone(timestamp, timezone, {
         hour: "2-digit",
         minute: "2-digit",
-        timeZone: timezone,
         timeZoneName: "short",
     });
 }

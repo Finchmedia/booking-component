@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 /**
- * The six built-in email templates (F2). Output is parsed with DOMParser,
+ * The six built-in email templates (F2, N4). Output is parsed with DOMParser,
  * so the assertions are about elements, not substrings: booking text must stay
- * text, and management links come only from bookingEmailLinks.
+ * text, management links come only from bookingEmailLinks, and a stored zone
+ * that Intl rejects renders in UTC instead of failing the mail.
  */
 import { describe, expect, test } from "vitest";
 import type { BookingEmailContext } from "../emails.js";
+import { PROCESS_TIME_ZONES, withProcessTimeZones } from "../testing/process-time-zone.js";
 import { bookingEmailLinks } from "./emails/context.js";
 import { generateBookingApprovedHTML } from "./emails/templates/approved.js";
 import { generateBookingCancellationHTML } from "./emails/templates/cancelled.js";
@@ -192,5 +194,23 @@ describe("management links come only from bookingEmailLinks", () => {
         expect(decodeURIComponent(segments[segments.indexOf("booking") + 1])).toBe(uid);
       }
     }
+  });
+});
+
+describe("stored zones that Intl rejects render in UTC (N4)", () => {
+  test.each(TEMPLATES)("$name: invalid and empty zones render, labelled UTC; a valid zone is unchanged", async (template) => {
+    await withProcessTimeZones(PROCESS_TIME_ZONES, () => {
+      for (const timezone of ["Mars/Olympus_Mons", ""]) {
+        const doc = parse(template.render({ ...BENIGN, timezone }));
+        const body = doc.body.textContent!;
+        expect(body).toContain("09:00 AM UTC");
+        expect(body).not.toContain("GMT");
+        expect(text(doc, ".greeting")).toBe("Hi Ada,");
+      }
+      // CONTROL: the stored zone is used when Intl accepts it.
+      const body = parse(template.render(BENIGN)).body.textContent!;
+      expect(body).toContain("10:00 AM GMT+1");
+      expect(body).not.toContain("UTC");
+    });
   });
 });

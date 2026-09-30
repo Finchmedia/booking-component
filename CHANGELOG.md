@@ -24,6 +24,22 @@
 The internal email mutations keep their names and arguments, so jobs queued by
 0.4.2 still run and render with the escaped templates.
 
+### Fixed
+
+- One malformed recipient address no longer takes other bookers' mail down
+  with it. Built-in email to an address that fails a conservative syntax check
+  (for example `x@`) is skipped before it is queued: the job returns
+  `{ success: false, error: "INVALID_RECIPIENT" }` and logs no address.
+  Previously such an address could fail the whole Resend batch it shared with
+  valid mail. This is input hardening, not the provider's full validation.
+  Bookings are still accepted with any address.
+- `isSendableAddress` is exported from `@mrfinch/booking/emails`, so hosts can
+  apply the same rule in their booking forms.
+- A stored booking time zone that `Intl` rejects, or an empty one, no longer
+  fails every email for that booking. The built-in templates render the
+  times in UTC, labelled "UTC"; custom renderers still receive the stored
+  value.
+
 ### Maintenance and documentation
 
 - The npm package excludes every test file (`*.test.*`, `*.test-d.*`) and the

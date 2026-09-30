@@ -9,6 +9,7 @@ import { components } from "../_generated/api";
 import { bookingEmailContextValidator } from "../../emails.js";
 import { bookingEmailLinks } from "./context.js";
 import { defaultSubject } from "./helpers.js";
+import { isSendableAddress } from "./recipient.js";
 import { resolveBookingEmail } from "./renderer.js";
 
 import { generateBookingConfirmationHTML } from "./templates/confirmation.js";
@@ -60,6 +61,12 @@ export const sendBookingConfirmation = internalMutation({
         if (!args.resendApiKey) {
             console.warn("[emails] No resendApiKey provided, skipping confirmation email");
             return { success: false, error: "No API key provided" };
+        }
+
+        // A malformed address can fail the provider batch it shares with other bookers' mail.
+        if (!isSendableAddress(args.to)) {
+            console.warn("[emails] Invalid recipient address, skipping confirmation email");
+            return { success: false, error: "INVALID_RECIPIENT" };
         }
 
         // Create Resend client with API key from args
@@ -149,6 +156,12 @@ export const sendBookingPending = internalMutation({
             return { success: false, error: "No API key provided" };
         }
 
+        // A malformed address can fail the provider batch it shares with other bookers' mail.
+        if (!isSendableAddress(args.to)) {
+            console.warn("[emails] Invalid recipient address, skipping pending email");
+            return { success: false, error: "INVALID_RECIPIENT" };
+        }
+
         // Create Resend client with API key from args
         const resend = new Resend(components.resend, {
             apiKey: args.resendApiKey,
@@ -234,6 +247,12 @@ export const sendBookingApproved = internalMutation({
             return { success: false, error: "No API key provided" };
         }
 
+        // A malformed address can fail the provider batch it shares with other bookers' mail.
+        if (!isSendableAddress(args.to)) {
+            console.warn("[emails] Invalid recipient address, skipping approved email");
+            return { success: false, error: "INVALID_RECIPIENT" };
+        }
+
         // Create Resend client with API key from args
         const resend = new Resend(components.resend, {
             apiKey: args.resendApiKey,
@@ -317,6 +336,12 @@ export const sendBookingDeclined = internalMutation({
             return { success: false, error: "No API key provided" };
         }
 
+        // A malformed address can fail the provider batch it shares with other bookers' mail.
+        if (!isSendableAddress(args.to)) {
+            console.warn("[emails] Invalid recipient address, skipping declined email");
+            return { success: false, error: "INVALID_RECIPIENT" };
+        }
+
         // Create Resend client with API key from args
         const resend = new Resend(components.resend, {
             apiKey: args.resendApiKey,
@@ -396,6 +421,12 @@ export const sendBookingCancellation = internalMutation({
         if (!args.resendApiKey) {
             console.warn("[emails] No resendApiKey provided, skipping cancellation email");
             return { success: false, error: "No API key provided" };
+        }
+
+        // A malformed address can fail the provider batch it shares with other bookers' mail.
+        if (!isSendableAddress(args.to)) {
+            console.warn("[emails] Invalid recipient address, skipping cancellation email");
+            return { success: false, error: "INVALID_RECIPIENT" };
         }
 
         // Create Resend client with API key from args
@@ -481,6 +512,12 @@ export const sendBookingRescheduled = internalMutation({
         if (!args.resendApiKey) {
             console.warn("[emails] No resendApiKey provided, skipping rescheduled email");
             return { success: false, error: "No API key provided" };
+        }
+
+        // A malformed address can fail the provider batch it shares with other bookers' mail.
+        if (!isSendableAddress(args.to)) {
+            console.warn("[emails] Invalid recipient address, skipping rescheduled email");
+            return { success: false, error: "INVALID_RECIPIENT" };
         }
 
         // Create Resend client with API key from args
