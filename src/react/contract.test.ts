@@ -16,6 +16,7 @@ import type {
 } from "convex/server";
 import type { ComponentApi } from "../component/_generated/component.js";
 import type { Doc } from "../component/_generated/dataModel.js";
+import type { BookingStatus } from "../shared/booking-status.js";
 import type {
   BookingAPI,
   BookingView,
@@ -25,6 +26,7 @@ import type {
   ResourceView,
 } from "./contract.js";
 import { BookingProvider, type BookingProviderProps } from "./context.js";
+import type * as ReactEntry from "./index.js";
 import type { Booking, EventType, Resource } from "./types.js";
 
 type Slot<K extends keyof PublicBookingAPI> = PublicBookingAPI[K];
@@ -153,6 +155,12 @@ describe("rejected host references", () => {
     expectTypeOf<Q<DaySlotBase, Array<{ start: number }>>>().toExtend<Slot<"getDaySlots">>();
     // @ts-expect-error a numeric status
     expectTypeOf<M<CreateBase, Omit<ComponentBooking, "status"> & { status: number }>>().toExtend<Slot<"createBooking">>();
+    // CONTROL: a status narrower than BookingStatus
+    expectTypeOf<M<CreateBase, Omit<ComponentBooking, "status"> & { status: "pending" | "confirmed" }>>().toExtend<Slot<"createBooking">>();
+    // @ts-expect-error a status typed as string (a `v.string()` returns validator)
+    expectTypeOf<M<CreateBase, Omit<ComponentBooking, "status"> & { status: string }>>().toExtend<Slot<"createBooking">>();
+    // @ts-expect-error the never-stored "rescheduled"
+    expectTypeOf<M<RescheduleBase, Omit<ComponentBooking, "status"> & { status: BookingStatus | "rescheduled" }>>().toExtend<Slot<"rescheduleBookingByToken">>();
     // @ts-expect-error a booking without uid
     expectTypeOf<M<RescheduleBase, Omit<ComponentBooking, "uid">>>().toExtend<Slot<"rescheduleBookingByToken">>();
     // @ts-expect-error a resource without isActive
@@ -301,7 +309,11 @@ describe("views and documents", () => {
     expectTypeOf<EventType>().toExtend<EventTypeView>();
     expectTypeOf<Doc<"resources">>().toExtend<Resource>();
     expectTypeOf<Resource>().toExtend<ResourceView>();
-    expectTypeOf<Booking["status"]>().toEqualTypeOf<string>();
+    // One status type: the component's, in the documents, the views and the /react entry
+    expectTypeOf<Booking["status"]>().toEqualTypeOf<BookingStatus>();
+    expectTypeOf<BookingView["status"]>().toEqualTypeOf<BookingStatus>();
+    expectTypeOf<ComponentBooking["status"]>().toEqualTypeOf<BookingStatus>();
+    expectTypeOf<ReactEntry.BookingStatus>().toEqualTypeOf<BookingStatus>();
     // CONTROL
     // @ts-expect-error a view is not the whole document
     expectTypeOf<BookingView>().toExtend<Booking>();

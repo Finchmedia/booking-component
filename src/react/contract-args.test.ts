@@ -234,7 +234,7 @@ describe("arguments against a strict host", () => {
     fireEvent.click(screen.getByRole("button", { name: formatTime(SLOT, "24h", "UTC") }));
     await settle();
 
-    // The status is a plain string; "pending" shows the request heading
+    // A "pending" status shows the request heading
     expect(screen.getByText("Reschedule Request Submitted")).toBeTruthy();
     expect(sentKeys()["public:rescheduleBookingByToken"]).toEqual(sorted(DECLARED.rescheduleBookingByToken));
     const withToken = mocks.calls.filter(({ args }) => JSON.stringify(args).includes("tok-1"));

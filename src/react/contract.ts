@@ -41,7 +41,9 @@ type BookingViewKeys = "uid" | "status" | "start" | "end" | "timezone" | "booker
 /**
  * A created or moved booking: the fields the success step shows and `uid`,
  * which `onBookingComplete` hands on. Every other `Booking` field is optional,
- * so a host may leave out what it does not want to return.
+ * so a host may leave out what it does not want to return. `status` is the
+ * component's `BookingStatus`: a host returns validator declares it with
+ * `bookingStatusValidator` from `@mrfinch/booking`, not `v.string()`.
  */
 export type BookingView = Pick<Booking, BookingViewKeys> &
   Partial<Omit<Booking, BookingViewKeys>>;

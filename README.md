@@ -153,9 +153,10 @@ Arguments marked optional are not always sent: declare them with
 `v.optional(…)`. `EventTypeView` is `id`, `title` and `lengthInMinutes`, plus
 `description`, `lengthInMinutesOptions`, `slotInterval`, `locations`,
 `isActive` and `lockTimeZoneToggle` where set. `BookingView` is `uid`,
-`status`, `start`, `end`, `timezone` and `bookerName`; the Booker hands it to
-`onBookingComplete`, with whatever else your function returns.
-`BookingUIOperations` holds the same list as types.
+`status` (a `BookingStatus`, so a returns validator declares it with
+`bookingStatusValidator`, not `v.string()`), `start`, `end`, `timezone` and
+`bookerName`; the Booker hands it to `onBookingComplete`, with whatever else
+your function returns. `BookingUIOperations` holds the same list as types.
 
 | Optional | Notes |
 | --- | --- |
@@ -421,7 +422,9 @@ shows how and lists every check with its repair.
   `cancelled`, `declined` or `completed`, and the schema stores no other
   value. For host types, validators and filters, `@mrfinch/booking` exports
   `BOOKING_STATUSES`, the `BookingStatus` type, `bookingStatusValidator` and
-  the guard `isBookingStatus`. A moved original is `cancelled` with
+  the guard `isBookingStatus`; `@mrfinch/booking/react` types
+  `Booking.status` and `BookingView.status` with the same `BookingStatus`
+  and exports it too. A moved original is `cancelled` with
   `rescheduledToUid` set.
 - **Booking lists:** `listBookings({ resourceId })` lists the bookings whose
   primary resource is `resourceId`. A bundle's primary resource is its first

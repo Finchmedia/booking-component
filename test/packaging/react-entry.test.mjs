@@ -144,8 +144,8 @@ describe("TypeScript consumer with moduleResolution nodenext", () => {
       consumer,
       [
         'import { createElement } from "react";',
-        'import { Booker, type BookerProps } from "@mrfinch/booking/react";',
-        'import { effectiveSlotInterval } from "@mrfinch/booking";',
+        'import { Booker, type BookerProps, type Booking } from "@mrfinch/booking/react";',
+        'import { effectiveSlotInterval, type BookingStatus } from "@mrfinch/booking";',
         "",
         'const props: BookerProps = { eventTypeId: "e", resourceId: "r" };',
         "export const valid = createElement(Booker, props);",
@@ -155,6 +155,12 @@ describe("TypeScript consumer with moduleResolution nodenext", () => {
         "export const grid: number = effectiveSlotInterval({ lengthInMinutes: 30 });",
         "// @ts-expect-error unused (and failing) if the root types collapse to any",
         'export const wrongGrid = effectiveSlotInterval({ lengthInMinutes: "30" });',
+        "",
+        "// Booking.status is the root entry's BookingStatus, resolved from the compiled shared module",
+        'export const status: BookingStatus = "confirmed" satisfies Booking["status"];',
+        "export const fromBooking = (booking: Booking): BookingStatus => booking.status;",
+        "// @ts-expect-error unused (and failing) if the status widens to string or any",
+        'export const rescheduled: Booking["status"] = "rescheduled";',
       ].join("\n")
     );
     const compile = () =>
@@ -188,14 +194,14 @@ describe("TypeScript consumer with moduleResolution nodenext", () => {
 });
 
 describe("deprecation markers in the compiled /react types", () => {
-  it("reach the .d.ts for BookingValidation* and the 'rescheduled' status", () => {
+  it("reach the .d.ts for BookingValidation*; the removed 'rescheduled' status is documented", () => {
     const types = readFileSync(join(packageDir, "dist/react/types.d.ts"), "utf8");
     const documented = (declaration, marker = "@deprecated") =>
       new RegExp(`${marker}[^/]*\\*/\\s*${declaration}`).test(types);
 
     expect(documented("export type BookingValidationError\\b")).toBe(true);
     expect(documented("export interface BookingValidationResult\\b")).toBe(true);
-    expect(documented("status:", '"rescheduled" is deprecated')).toBe(true);
+    expect(documented("status: BookingStatus;", '"rescheduled", which was never')).toBe(true);
     // Control: a current type carries no marker
     expect(types).toMatch(/export interface Booking\b/);
     expect(documented("export interface Booking\\b")).toBe(false);

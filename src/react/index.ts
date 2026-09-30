@@ -45,6 +45,7 @@ export type {
   BookingValidationError,
   BookingValidationResult,
 } from "./types.js";
+export type { BookingStatus } from "../shared/booking-status.js";
 
 // Hooks
 export {
