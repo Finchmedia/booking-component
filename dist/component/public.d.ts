@@ -38,9 +38,17 @@ export declare const getAvailability: import("convex/server").RegisteredQuery<"p
  * Optimized for month view: Returns boolean map, no slot objects
  *
  * TIMEZONE HANDLING:
- * - dateFrom/dateTo are expected to be ISO date strings (e.g., "2025-06-17")
- * - These are interpreted as UTC dates for consistency
- * - The resourceTimezone parameter (optional) can be used for timezone-aware availability
+ * - dateFrom/dateTo are calendar dates ("2025-06-17"; "2025-6-17" is read as
+ *   the same day). With a schedule they are the schedule's local days;
+ *   without one, UTC days.
+ * - With scheduleId, the schedule's hours are read in its own timezone, or in
+ *   resourceTimezone when given (a mismatch is logged). A schedule stored
+ *   with a zone Intl rejects is read as before 0.4.3, its hours as UTC
+ *   (logged), unless resourceTimezone is given.
+ * - Without scheduleId, the legacy 09:00–17:00 UTC window applies.
+ *
+ * Rejects an eventLength that is not a positive number, impossible dates and
+ * dateFrom after dateTo.
  */
 export declare const getMonthAvailability: import("convex/server").RegisteredQuery<"public", {
     scheduleId?: string | undefined;
@@ -57,11 +65,22 @@ export declare const getMonthAvailability: import("convex/server").RegisteredQue
  * Used for day view / slot picker
  *
  * TIMEZONE HANDLING:
- * - date is expected to be an ISO date string (e.g., "2025-06-17")
- * - If resourceTimezone is provided, slots are generated in that timezone context
- * - If availableSlots are provided (from schedule), those are used instead of hardcoded business hours
+ * - date is a calendar date ("2025-06-17"; "2025-6-17" is read as the same day)
+ * - availableSlots (local slot indices from a schedule) together with
+ *   resourceTimezone generate the slots in that timezone
+ * - scheduleId (optional) supplies what is missing: the schedule's effective
+ *   hours for `date` when availableSlots is omitted, and the schedule's own
+ *   timezone when resourceTimezone is omitted (a mismatch is logged).
+ *   `{ scheduleId }` alone equals getEffectiveAvailability followed by this
+ *   query with availableSlots and the schedule's timezone. A schedule stored
+ *   with a zone Intl rejects supplies no zone (logged).
+ * - Otherwise the legacy 09:00–17:00 UTC window applies.
+ *
+ * Rejects an eventLength that is not a positive number, impossible dates and
+ * availableSlots outside 0–95.
  */
 export declare const getDaySlots: import("convex/server").RegisteredQuery<"public", {
+    scheduleId?: string | undefined;
     slotInterval?: number | undefined;
     availableSlots?: number[] | undefined;
     excludeBookingUid?: string | undefined;
@@ -116,6 +135,7 @@ export declare const createBooking: import("convex/server").RegisteredMutation<"
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;
@@ -161,6 +181,7 @@ export declare const createProvisionalBooking: import("convex/server").Registere
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;
@@ -180,6 +201,11 @@ export declare const createProvisionalBooking: import("convex/server").Registere
     createdAt: number;
     updatedAt: number;
 }>>;
+/**
+ * The whole booking document, `managementToken` and booker contact details
+ * included. The token lets its holder cancel and reschedule the booking, so a
+ * host must not pass this result to a caller that only knows the id.
+ */
 export declare const getBooking: import("convex/server").RegisteredQuery<"public", {
     bookingId: import("convex/values").GenericId<"bookings">;
 }, Promise<{
@@ -192,6 +218,7 @@ export declare const getBooking: import("convex/server").RegisteredQuery<"public
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;
@@ -212,12 +239,14 @@ export declare const getBooking: import("convex/server").RegisteredQuery<"public
     updatedAt: number;
 } | null>>;
 export declare const cancelReservation: import("convex/server").RegisteredMutation<"public", {
+    reason?: string | undefined;
     resendOptions?: {
         fromEmail?: string | undefined;
         baseUrl?: string | undefined;
         renderer?: string | undefined;
         apiKey: string;
     } | undefined;
+    cancelledBy?: string | undefined;
     reservationId: import("convex/values").GenericId<"bookings">;
 }, Promise<{
     success: boolean;
@@ -354,6 +383,12 @@ export declare const toggleEventTypeActive: import("convex/server").RegisteredMu
     success: boolean;
     affectedUsers: number;
 }>>;
+/**
+ * The whole booking document, `managementToken` and booker contact details
+ * included. Knowing a uid must not be enough to obtain the token: a host that
+ * serves this to browsers removes the token (and details the caller may not
+ * see) unless the caller already proved ownership.
+ */
 export declare const getBookingByUid: import("convex/server").RegisteredQuery<"public", {
     uid: string;
 }, Promise<{
@@ -366,6 +401,7 @@ export declare const getBookingByUid: import("convex/server").RegisteredQuery<"p
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;
@@ -389,10 +425,21 @@ export declare const getBookingByUid: import("convex/server").RegisteredQuery<"p
  * Lists bookings, newest `start` first, hiding provisional reservations
  * unless `status` asks for them.
  *
- * Pass `organizationId` or `resourceId`: those branches read the
- * `by_org_start` / `by_resource_start` indexes, so `dateFrom` / `dateTo`
- * narrow the index range itself and the scan is proportional to the window.
- * The `eventTypeId` branch uses `by_event_type` and range-filters in JS.
+ * Pass `organizationId`, `resourceId` or `eventTypeId` (tried in that order):
+ * the branch reads the `by_org_start` / `by_resource_start` /
+ * `by_eventTypeId_and_start` index, so `dateFrom` / `dateTo` narrow the index
+ * range itself and the scan is proportional to the window. With a positive
+ * integer `limit` the scan also stops once `limit` bookings match, so it reads
+ * the limit plus the rows the other filters skip (for `eventTypeId`, plus the
+ * rest of the bookings sharing the last one's `start`). Without a limit it
+ * reads the whole range. Other `limit` values keep their earlier meaning (0: no
+ * limit). Bookings with equal `start` come newest-created first, except in
+ * the `eventTypeId` branch, where they come oldest-created first.
+ *
+ * `resourceId` matches a booking's primary resource: a bundle is listed under
+ * its first resource only, not under its other items (pools included).
+ *
+ * Bookings are returned whole, `managementToken` included (see getBookingByUid).
  *
  * With no selector at all the scan is bounded: only the 1000 most recently
  * *created* bookings are considered (then filtered, sorted and limited). That
@@ -403,9 +450,9 @@ export declare const listBookings: import("convex/server").RegisteredQuery<"publ
     organizationId?: string | undefined;
     resourceId?: string | undefined;
     eventTypeId?: string | undefined;
+    limit?: number | undefined;
     dateFrom?: number | undefined;
     dateTo?: number | undefined;
-    limit?: number | undefined;
     status?: string | undefined;
 }, Promise<{
     _id: import("convex/values").GenericId<"bookings">;
@@ -417,6 +464,7 @@ export declare const listBookings: import("convex/server").RegisteredQuery<"publ
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;
@@ -449,6 +497,7 @@ export declare const getBookingByToken: import("convex/server").RegisteredQuery<
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;
@@ -483,6 +532,7 @@ export declare const cancelBookingByToken: import("convex/server").RegisteredMut
 }>>;
 export declare const rescheduleBooking: import("convex/server").RegisteredMutation<"public", {
     reason?: string | undefined;
+    changedBy?: string | undefined;
     resendOptions?: {
         fromEmail?: string | undefined;
         baseUrl?: string | undefined;
@@ -502,6 +552,7 @@ export declare const rescheduleBooking: import("convex/server").RegisteredMutati
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;
@@ -542,6 +593,7 @@ export declare const rescheduleBookingByToken: import("convex/server").Registere
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;

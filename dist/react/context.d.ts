@@ -3,9 +3,15 @@ import type { FunctionReference } from "convex/server";
 type QueryReference = FunctionReference<"query", "public", any, any>;
 type MutationReference = FunctionReference<"mutation", "public", any, any>;
 /**
- * Public API for the booking flow.
- * These functions can be called without authentication.
+ * References to your host's public booking functions.
  * Used by: Booker, Calendar, public booking pages
+ *
+ * Passing a reference does not grant or restrict access: any client can call
+ * any exported Convex function. Your host functions enforce authorization.
+ * Booking reads (getBooking, getBookingByUid, getBookingByToken) return the
+ * booking's contact details and `managementToken`. Check the management token
+ * or the caller's ownership in your host function, and never return
+ * `managementToken` to anonymous callers.
  */
 export interface PublicBookingAPI {
     getEventType: QueryReference;
@@ -31,9 +37,11 @@ export interface PublicBookingAPI {
     getDatePresence: QueryReference;
 }
 /**
- * Admin API for managing booking configuration.
- * These functions require authentication and admin permissions.
+ * References to your host's administration functions.
  * Used by: Admin dashboard, management pages
+ *
+ * Your host functions must check authentication and permissions: omitting
+ * these references from a page does not stop a client from calling them.
  */
 export interface AdminBookingAPI {
     createEventType: MutationReference;
@@ -79,13 +87,21 @@ export interface AdminBookingAPI {
  * Components access functions through this unified interface.
  */
 export type BookingAPI = PublicBookingAPI & Partial<AdminBookingAPI>;
+/** @internal Every PublicBookingAPI operation, resolved from publicApi. */
+export declare const PUBLIC_OPERATIONS: readonly ["getEventType", "getEventTypeBySlug", "listEventTypes", "getAvailability", "getMonthAvailability", "getDaySlots", "createBooking", "getBooking", "getBookingByUid", "getBookingByToken", "cancelBookingByToken", "rescheduleBookingByToken", "getResource", "listResources", "getEventTypesForResource", "hasResourceEventTypeLink", "getEffectiveAvailability", "heartbeat", "leave", "getPresence", "getDatePresence"];
+/** @internal Every AdminBookingAPI operation, resolved from adminApi. */
+export declare const ADMIN_OPERATIONS: readonly ["createEventType", "updateEventType", "deleteEventType", "toggleEventTypeActive", "createReservation", "listBookings", "cancelReservation", "createResource", "updateResource", "deleteResource", "toggleResourceActive", "getResourcesForEventType", "getResourceIdsForEventType", "getEventTypeIdsForResource", "linkResourceToEventType", "unlinkResourceFromEventType", "setResourcesForEventType", "setEventTypesForResource", "getSchedule", "listSchedules", "getDefaultSchedule", "createSchedule", "updateSchedule", "deleteSchedule", "listDateOverrides", "createDateOverride", "deleteDateOverride", "checkMultiResourceAvailability", "createMultiResourceBooking", "getBookingWithItems", "cancelMultiResourceBooking", "registerHook", "unregisterHook", "transitionBookingState", "getBookingHistory", "getActivePresenceCount"];
+/** @internal `true` when the list names every operation of API. */
+export type ListsAllOperations<API, List extends readonly (keyof API)[]> = [
+    Exclude<keyof API, List[number]>
+] extends [never] ? true : false;
 export interface BookingProviderProps {
     /**
-     * The public booking API - functions for anonymous browsing and booking.
-     * Required for all booking flows.
+     * References to your host's public booking functions, usually the generated
+     * `api.public`. Required for all booking flows.
      *
      * @example
-     * // In your convex/public.ts:
+     * // In your convex/public.ts (each function checks its own access rules):
      * export const getEventType = publicQuery({ ... });
      * export const createBooking = publicMutation({ ... });
      *
@@ -95,11 +111,17 @@ export interface BookingProviderProps {
      */
     publicApi: PublicBookingAPI;
     /**
-     * The admin booking API - functions requiring authentication.
-     * Optional - only needed for admin components.
+     * References to your host's administration functions, usually the generated
+     * `api.admin`. Optional - only needed for admin components. Admin operations
+     * resolve from here; public operations resolve from publicApi unless a
+     * hand-built adminApi defines them itself.
+     *
+     * Without adminApi (or without a given operation in a hand-built adminApi),
+     * admin operations resolve from publicApi. This fallback is deprecated and
+     * may be removed in 0.5.0; pass adminApi wherever admin operations are used.
      *
      * @example
-     * // In your convex/admin.ts:
+     * // In your convex/admin.ts (each function checks the caller's role):
      * export const createResource = adminMutation({ ... });
      *
      * // In your admin layout:
@@ -111,20 +133,28 @@ export interface BookingProviderProps {
 }
 /**
  * Provider component that makes the booking API available to all child components.
- * Implements dependency injection pattern for separating public and admin APIs.
  *
- * ## Two-Gateway Architecture
+ * ## Two gateways
  *
- * This provider merges two API gateways:
- * - **publicApi** (required): Functions for anonymous browsing and booking
- * - **adminApi** (optional): Functions requiring authentication
+ * - **publicApi** (required): your host's public booking functions
+ * - **adminApi** (optional): your host's administration functions
  *
- * Components access both through a single `useBookingAPI()` hook.
- * The app controls authorization by deciding which functions to provide.
+ * Components access both through a single `useBookingAPI()` hook. Each
+ * operation resolves from the gateway that owns it: PublicBookingAPI names
+ * from publicApi, AdminBookingAPI names from adminApi. A hand-built adminApi
+ * that defines a public name itself still overrides it.
+ *
+ * The provider only chooses which function references the UI calls. It is not
+ * access control: any client can call any exported Convex function directly.
+ * Authorization is enforced by your host Convex functions, which check the
+ * caller before calling the component. Booking reads must check the management
+ * token or the caller's ownership and must not return `managementToken` to
+ * anonymous callers. See the README's "Backend integration" section and the
+ * authorization guide (https://convexbooking.dev/docs/authentication).
  *
  * @example
  * ```tsx
- * // Public booking pages (no auth required)
+ * // Public booking pages
  * import { BookingProvider, Booker } from "@mrfinch/booking/react";
  * import { api } from "./convex/_generated/api";
  *
@@ -139,7 +169,7 @@ export interface BookingProviderProps {
  *
  * @example
  * ```tsx
- * // Admin pages (auth required)
+ * // Admin pages: the host's admin functions check the caller's role
  * import { BookingProvider } from "@mrfinch/booking/react";
  * import { api } from "./convex/_generated/api";
  *
@@ -156,8 +186,9 @@ export declare function BookingProvider({ publicApi, adminApi, children, }: Book
 /**
  * Hook to access the booking API from within a BookingProvider.
  *
- * Returns the merged API object containing both public and admin functions
- * (if adminApi was provided to the BookingProvider).
+ * Returns the merged API object: public operations from publicApi, admin
+ * operations from adminApi (see BookingProvider). Calling a reference does not
+ * bypass authorization; your host functions decide who may run them.
  *
  * @throws Error if used outside of a BookingProvider
  *
@@ -165,27 +196,19 @@ export declare function BookingProvider({ publicApi, adminApi, children, }: Book
  * ```tsx
  * function MyBookingComponent() {
  *   const api = useBookingAPI();
- *
- *   // Public functions - always available
  *   const eventType = useQuery(api.getEventType, { eventTypeId: "event-1" });
  *   const createBooking = useMutation(api.createBooking);
+ * }
  *
- *   // Admin functions - only available if adminApi was provided
- *   // TypeScript will show these as optional (with ?)
- *   const createResource = api.createResource
- *     ? useMutation(api.createResource)
- *     : null;
+ * // Admin UI: render it only inside a provider that has adminApi, and call
+ * // hooks unconditionally (a generated reference is never undefined).
+ * function CreateResourceButton() {
+ *   const api = useBookingAPI();
+ *   const createResource = useMutation(api.createResource!);
+ *   return <button onClick={() => createResource({ ... })}>Add room</button>;
  * }
  * ```
  */
 export declare function useBookingAPI(): BookingAPI;
-/**
- * @deprecated Use BookingProviderProps with publicApi/adminApi instead.
- * This type is kept for documentation purposes only.
- */
-export interface LegacyBookingProviderProps {
-    api: PublicBookingAPI & AdminBookingAPI;
-    children: ReactNode;
-}
 export {};
 //# sourceMappingURL=context.d.ts.map

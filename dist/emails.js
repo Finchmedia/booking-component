@@ -1,5 +1,7 @@
 import { createFunctionHandle } from "convex/server";
 import { v } from "convex/values";
+// The recipient screen Booking applies before built-in mail, for reuse in host validation.
+export { isSendableAddress } from "./component/emails/recipient.js";
 /** Presentation events, distinct from the component's lifecycle hook names. */
 export const bookingEmailKindValidator = v.union(v.literal("confirmed"), v.literal("pending"), v.literal("approved"), v.literal("declined"), v.literal("cancelled"), v.literal("rescheduled"));
 /** A snapshot captured for one notification. It contains no delivery credentials. */
@@ -39,7 +41,12 @@ export const bookingEmailResultValidator = v.union(v.null(), v.object({
     html: v.string(),
     text: v.optional(v.string()),
 }));
-/** Wire format. Only trusted host functions should construct these options. */
+/**
+ * Wire format. Only trusted host functions should construct these options.
+ * Every `apiKey` one booking instance receives must belong to the same Resend
+ * account: queued mail is sent in batches with the most recent key. Rotating
+ * the key is fine (see docs/custom-emails.md).
+ */
 export const bookingEmailOptionsValidator = v.object({
     apiKey: v.string(),
     fromEmail: v.optional(v.string()),
@@ -49,6 +56,7 @@ export const bookingEmailOptionsValidator = v.object({
 /**
  * Call inside a host Convex function, not at module initialization.
  * The renderer stays in the app; only its function handle crosses the boundary.
+ * Use one Resend account per booking instance (see bookingEmailOptionsValidator).
  */
 export async function createBookingEmailOptions(options) {
     const { renderer, ...delivery } = options;

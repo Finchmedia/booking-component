@@ -4,17 +4,10 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, assertValidRange } from "./utils";
-import { releaseAllSlotsForBooking } from "./slot_helpers";
+import { terminateBooking } from "./booking_lifecycle";
+import { generateManagementToken } from "./tokens";
 import { holdsActiveInventory, reserveResourceSlots, usesQuantityInventory, validateRequestedQuantity, validateResourceRequests, } from "./inventory_helpers";
 import { bookingDoc, bookingWithItemsDoc, successResult } from "./validators";
-// Generate a secure random token (64 hex chars = 256 bits)
-function generateSecureToken() {
-    const segments = [];
-    for (let i = 0; i < 8; i++) {
-        segments.push(Math.random().toString(36).substring(2));
-    }
-    return segments.join('') + Date.now().toString(36);
-}
 // ============================================
 // MULTI-RESOURCE AVAILABILITY CHECK
 // ============================================
@@ -147,6 +140,10 @@ export const createMultiResourceBooking = mutation({
         if (!eventType) {
             throw new Error(`Event type "${args.eventTypeId}" not found`);
         }
+        // The bundle belongs to its event type's organization, as single bookings
+        // do, unless the caller names one (stored as given). Used for the row and
+        // for hook routing alike.
+        const organizationId = args.organizationId ?? eventType.organizationId;
         // 2. Check ALL resources are available (fail-fast)
         const requiredSlots = getRequiredSlots(args.start, args.end);
         // `isStandalone: false` marks an add-on (e.g. rental equipment) that can
@@ -202,7 +199,7 @@ export const createMultiResourceBooking = mutation({
         // 3. Create main booking record (use first resource as primary)
         const primaryResourceId = args.resources[0].resourceId;
         const bookingUid = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-        const managementToken = generateSecureToken();
+        const managementToken = generateManagementToken();
         const now = Date.now();
         const bookingId = await ctx.db.insert("bookings", {
             resourceId: primaryResourceId,
@@ -213,7 +210,7 @@ export const createMultiResourceBooking = mutation({
             uid: bookingUid,
             managementToken,
             eventTypeId: args.eventTypeId,
-            organizationId: args.organizationId,
+            organizationId,
             timezone: args.timezone,
             bookerName: args.booker.name,
             bookerEmail: args.booker.email,
@@ -251,7 +248,7 @@ export const createMultiResourceBooking = mutation({
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.created",
             emailContext: createBookingEmailContext(eventType.requiresConfirmation ? "pending" : "confirmed", booking, args.resendOptions),
-            organizationId: args.organizationId,
+            organizationId,
             payload: {
                 bookingId,
                 resourceId: primaryResourceId,
@@ -277,6 +274,7 @@ export const createMultiResourceBooking = mutation({
 // ============================================
 // GET BOOKING WITH ITEMS
 // ============================================
+/** The whole booking, `managementToken` included (see public.getBookingByUid), plus its items. */
 export const getBookingWithItems = query({
     args: { bookingId: v.id("bookings") },
     returns: v.union(bookingWithItemsDoc, v.null()),
@@ -328,26 +326,14 @@ export const cancelMultiResourceBooking = mutation({
         if (!holdsActiveInventory(booking.status)) {
             throw new Error(`Cannot cancel booking with status: ${booking.status}`);
         }
-        // Release slots for each booked resource (quantity_availability for pooled
-        // resources, daily_availability otherwise). Shared with the state-machine
-        // cancel/decline path so both leave the availability tables identical.
-        await releaseAllSlotsForBooking(ctx, booking);
-        // Update booking status
-        const now = Date.now();
-        await ctx.db.patch(args.bookingId, {
-            status: "cancelled",
-            cancelledAt: now,
-            cancellationReason: args.reason,
-            updatedAt: now,
-        });
-        // Record in history
-        await ctx.db.insert("booking_history", {
-            bookingId: args.bookingId,
-            fromStatus: booking.status,
-            toStatus: "cancelled",
-            changedBy: args.cancelledBy ?? "unknown",
+        // Release every booked resource (quantity_availability for pooled
+        // resources, daily_availability otherwise), record history and stamp the
+        // cancellation — shared with every other cancel path.
+        await terminateBooking(ctx, booking, {
+            to: "cancelled",
             reason: args.reason,
-            timestamp: now,
+            changedBy: args.cancelledBy ?? "unknown",
+            now: Date.now(),
         });
         // Trigger booking.cancelled hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {

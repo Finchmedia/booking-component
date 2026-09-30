@@ -1,3 +1,3 @@
-export { BookingForm } from "./booking-form";
-export { BookingSuccess } from "./booking-success";
+export { BookingForm } from "./booking-form.js";
+export { BookingSuccess } from "./booking-success.js";
 //# sourceMappingURL=index.js.map

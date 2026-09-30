@@ -5,18 +5,13 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, isCandidateAvailable, isDayAvailable, assertValidRange, } from "./utils";
 import { isAvailable } from "./availability";
-import { computeAvailabilityForDate } from "./schedules";
-import { releaseAllSlotsForBooking } from "./slot_helpers";
+import { getDateOverridesByDate, getScheduleByExternalId, getScheduleDaySlots, } from "./schedules";
+import { assertSingleBookable, terminateBooking } from "./booking_lifecycle";
+import { generateManagementToken } from "./tokens";
+import { parseCivilDate } from "../shared/time.js";
+import { assertDateOrder, assertEventLength, assertSlotIndices, assertTimeZone, isValidTimeZone, } from "./input_validation";
 import { assertSingleResourceSupported, holdsActiveInventory, isFungibleResource, reserveResourceSlots, } from "./inventory_helpers";
 import { bookingDoc, cancelResult, eventTypeDoc, successResult, successWithAffectedUsers, } from "./validators";
-// Generate a secure random token (64 hex chars = 256 bits)
-function generateSecureToken() {
-    const segments = [];
-    for (let i = 0; i < 8; i++) {
-        segments.push(Math.random().toString(36).substring(2));
-    }
-    return segments.join('') + Date.now().toString(36);
-}
 /**
  * Resolves the busy slots currently held by ONE specific booking so that the
  * availability queries can treat them as free. Reschedule flow: a booking's own
@@ -91,6 +86,31 @@ function candidateDates(candidates) {
     }
     return dates;
 }
+/**
+ * The zone that interprets a schedule's local hours in the availability
+ * queries. A caller-supplied resourceTimezone wins, as before; when it differs
+ * from the schedule's own zone that is logged, since the hours then shift by
+ * the difference. Without one, the schedule's zone applies — until 0.4.2 the
+ * schedule's local hours were then read as UTC (month view) or ignored (day
+ * view). Undefined for an unknown schedule without resourceTimezone, which
+ * keeps the legacy path. Also undefined, with a warning, for a schedule stored
+ * before 0.4.3 with a zone Intl rejects: reads stay tolerant and take the
+ * legacy path, the month view's 0.4.2 answer, instead of throwing.
+ */
+function resolveScheduleZone(functionName, schedule, resourceTimezone) {
+    if (!schedule)
+        return resourceTimezone;
+    if (resourceTimezone === undefined || resourceTimezone === "") {
+        if (isValidTimeZone(schedule.timezone))
+            return schedule.timezone;
+        console.warn(`[booking] ${functionName}: schedule "${schedule.id}" has the invalid time zone "${schedule.timezone}"; using the legacy path. Set a valid zone with updateSchedule.`);
+        return undefined;
+    }
+    if (resourceTimezone !== schedule.timezone) {
+        console.warn(`[booking] ${functionName}: resourceTimezone "${resourceTimezone}" differs from the timezone "${schedule.timezone}" of schedule "${schedule.id}"; using resourceTimezone. Omit it to use the schedule's zone.`);
+    }
+    return resourceTimezone;
+}
 export const getEventType = query({
     args: {
         eventTypeId: v.string(),
@@ -123,9 +143,17 @@ export const getAvailability = query({
  * Optimized for month view: Returns boolean map, no slot objects
  *
  * TIMEZONE HANDLING:
- * - dateFrom/dateTo are expected to be ISO date strings (e.g., "2025-06-17")
- * - These are interpreted as UTC dates for consistency
- * - The resourceTimezone parameter (optional) can be used for timezone-aware availability
+ * - dateFrom/dateTo are calendar dates ("2025-06-17"; "2025-6-17" is read as
+ *   the same day). With a schedule they are the schedule's local days;
+ *   without one, UTC days.
+ * - With scheduleId, the schedule's hours are read in its own timezone, or in
+ *   resourceTimezone when given (a mismatch is logged). A schedule stored
+ *   with a zone Intl rejects is read as before 0.4.3, its hours as UTC
+ *   (logged), unless resourceTimezone is given.
+ * - Without scheduleId, the legacy 09:00–17:00 UTC window applies.
+ *
+ * Rejects an eventLength that is not a positive number, impossible dates and
+ * dateFrom after dateTo.
  */
 export const getMonthAvailability = query({
     args: {
@@ -140,8 +168,22 @@ export const getMonthAvailability = query({
     },
     returns: v.record(v.string(), v.boolean()),
     handler: async (ctx, args) => {
-        const { resourceId, dateFrom, dateTo, eventLength } = args;
+        const { resourceId, eventLength } = args;
+        const dateFrom = parseCivilDate(args.dateFrom);
+        const dateTo = parseCivilDate(args.dateTo);
+        assertDateOrder(dateFrom, dateTo);
+        assertEventLength(eventLength);
         const pooledResource = await isFungibleResource(ctx, resourceId);
+        // The schedule and its overrides are read once for the whole range.
+        const schedule = args.scheduleId
+            ? await getScheduleByExternalId(ctx, args.scheduleId)
+            : null;
+        const overridesByDate = schedule && !pooledResource
+            ? await getDateOverridesByDate(ctx, schedule, dateFrom, dateTo)
+            : undefined;
+        const timezone = args.scheduleId
+            ? resolveScheduleZone("getMonthAvailability", schedule, args.resourceTimezone)
+            : args.resourceTimezone;
         // Parse dates with explicit UTC context to avoid timezone bugs
         // Adding T00:00:00.000Z ensures we get UTC midnight, not local midnight
         const startDate = new Date(dateFrom + "T00:00:00.000Z");
@@ -158,7 +200,8 @@ export const getMonthAvailability = query({
         // Iterate through each day in the range
         const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
-            // Extract date string in UTC context
+            // Extract date string in UTC context (canonical: the range was
+            // validated by parseCivilDate, so years have four digits)
             const dateStr = currentDate.toISOString().split("T")[0];
             if (pooledResource) {
                 availabilityByDate[dateStr] = false;
@@ -168,8 +211,7 @@ export const getMonthAvailability = query({
             // If a scheduleId is provided, use it to determine the available slots window
             let scheduleSlots;
             if (args.scheduleId) {
-                const eff = await computeAvailabilityForDate(ctx, args.scheduleId, dateStr);
-                scheduleSlots = eff.availableSlots;
+                scheduleSlots = await getScheduleDaySlots(ctx, schedule, dateStr, overridesByDate);
             }
             // Decide availability via the SAME slot-generation path as
             // getDaySlots, so month- and day-view always agree.
@@ -186,12 +228,12 @@ export const getMonthAvailability = query({
             // bookable in the month view. The legacy branch remains only for
             // schedule-less setups.
             let hasAvailability;
-            if (args.resourceTimezone && scheduleSlots) {
+            if (timezone && scheduleSlots) {
                 if (scheduleSlots.length === 0) {
                     hasAvailability = false;
                 }
                 else {
-                    const possibleSlots = generateDaySlotsWithTimezone(dateStr, eventLength, args.slotInterval ?? 15, scheduleSlots, args.resourceTimezone);
+                    const possibleSlots = generateDaySlotsWithTimezone(dateStr, eventLength, args.slotInterval ?? 15, scheduleSlots, timezone);
                     // Each candidate is checked against the row(s) of ITS
                     // OWN UTC date(s) — the same keying getRequiredSlots
                     // uses when a booking is written.
@@ -217,9 +259,19 @@ export const getMonthAvailability = query({
  * Used for day view / slot picker
  *
  * TIMEZONE HANDLING:
- * - date is expected to be an ISO date string (e.g., "2025-06-17")
- * - If resourceTimezone is provided, slots are generated in that timezone context
- * - If availableSlots are provided (from schedule), those are used instead of hardcoded business hours
+ * - date is a calendar date ("2025-06-17"; "2025-6-17" is read as the same day)
+ * - availableSlots (local slot indices from a schedule) together with
+ *   resourceTimezone generate the slots in that timezone
+ * - scheduleId (optional) supplies what is missing: the schedule's effective
+ *   hours for `date` when availableSlots is omitted, and the schedule's own
+ *   timezone when resourceTimezone is omitted (a mismatch is logged).
+ *   `{ scheduleId }` alone equals getEffectiveAvailability followed by this
+ *   query with availableSlots and the schedule's timezone. A schedule stored
+ *   with a zone Intl rejects supplies no zone (logged).
+ * - Otherwise the legacy 09:00–17:00 UTC window applies.
+ *
+ * Rejects an eventLength that is not a positive number, impossible dates and
+ * availableSlots outside 0–95.
  */
 export const getDaySlots = query({
     args: {
@@ -230,12 +282,23 @@ export const getDaySlots = query({
         resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
         availableSlots: v.optional(v.array(v.number())), // Schedule-based available slot indices (in resource's local timezone)
         excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
+        scheduleId: v.optional(v.string()), // Resolves the day's hours and/or the timezone from this schedule
     },
     returns: v.array(v.object({ time: v.string() })),
     handler: async (ctx, args) => {
-        const { resourceId, date, eventLength, slotInterval, resourceTimezone, availableSlots } = args;
+        const { resourceId, eventLength, slotInterval } = args;
+        const date = parseCivilDate(args.date);
+        assertEventLength(eventLength);
+        if (args.availableSlots)
+            assertSlotIndices(args.availableSlots);
         if (await isFungibleResource(ctx, resourceId))
             return [];
+        let { resourceTimezone, availableSlots } = args;
+        if (args.scheduleId) {
+            const schedule = await getScheduleByExternalId(ctx, args.scheduleId);
+            resourceTimezone = resolveScheduleZone("getDaySlots", schedule, resourceTimezone);
+            availableSlots ??= await getScheduleDaySlots(ctx, schedule, date);
+        }
         // Generate all possible slots for this day
         let possibleSlots;
         if (resourceTimezone && availableSlots) {
@@ -381,68 +444,13 @@ export const createBooking = mutation({
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {
-        // 0. Basic range validation (shared guard): NaN/Infinity and end <= start
-        // would otherwise silently reserve zero slots.
-        assertValidRange(args.start, args.end);
-        await assertSingleResourceSupported(ctx, args.resourceId);
-        // 1. Fetch event type (for snapshot)
-        const eventType = await ctx.db
-            .query("event_types")
-            .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
-            .first();
-        if (!eventType)
-            throw new Error("Event type not found");
-        // Validate event type is active
-        if (eventType.isActive === false) {
-            throw new Error("Event type is no longer active");
-        }
-        // 2. Validate resource exists and is active
-        const resource = await ctx.db
-            .query("resources")
-            .withIndex("by_external_id", (q) => q.eq("id", args.resourceId))
-            .unique();
-        if (!resource)
-            throw new Error("Resource not found");
-        if (resource.isActive === false) {
-            throw new Error("Resource is no longer active");
-        }
-        // A single-resource booking books the resource on its own — not allowed
-        // for add-ons (isStandalone: false); use createMultiResourceBooking with a
-        // standalone resource instead.
-        if (resource.isStandalone === false) {
-            throw new Error(`Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`);
-        }
-        // 3. Validate resource is linked to event type
-        const link = await ctx.db
-            .query("resource_event_types")
-            .withIndex("by_resource_event_type", (q) => q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId))
-            .unique();
-        if (!link) {
-            throw new Error("Resource is not available for this event type");
-        }
-        // 4. Check availability per calendar day.
-        // Uses getRequiredSlots so a range spanning UTC midnight blocks the
-        // correct slots on each day. The previous `start % 86400000` chunk math
-        // produced endChunk < startChunk across midnight, so the conflict loop
-        // never ran and zero slots were reserved (double bookings possible).
-        const requiredSlots = getRequiredSlots(args.start, args.end);
-        for (const [date, slots] of requiredSlots.entries()) {
-            const dayAvailability = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
-                .unique();
-            if (dayAvailability) {
-                for (const slot of slots) {
-                    if (dayAvailability.busySlots.includes(slot)) {
-                        throw new Error("Time slot no longer available");
-                    }
-                }
-            }
-        }
+        // 0–4. Range, pool, event type, resource, link and free slots — shared
+        // with createProvisionalBooking, including the order of the checks.
+        const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
         // 5. Generate unique booking UID
         const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         // 6. Generate secure management token
-        const managementToken = generateSecureToken();
+        const managementToken = generateManagementToken();
         // 7. Determine initial status based on requiresConfirmation flag
         const initialStatus = eventType.requiresConfirmation ? "pending" : "confirmed";
         const now = Date.now();
@@ -547,56 +555,10 @@ export const createProvisionalBooking = mutation({
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {
-        // Basic range validation — parallel to createBooking.
-        assertValidRange(args.start, args.end);
-        await assertSingleResourceSupported(ctx, args.resourceId);
-        const eventType = await ctx.db
-            .query("event_types")
-            .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
-            .first();
-        if (!eventType)
-            throw new Error("Event type not found");
-        if (eventType.isActive === false) {
-            throw new Error("Event type is no longer active");
-        }
-        const resource = await ctx.db
-            .query("resources")
-            .withIndex("by_external_id", (q) => q.eq("id", args.resourceId))
-            .unique();
-        if (!resource)
-            throw new Error("Resource not found");
-        if (resource.isActive === false) {
-            throw new Error("Resource is no longer active");
-        }
-        // Parallel to createBooking: an add-on cannot be held on its own.
-        if (resource.isStandalone === false) {
-            throw new Error(`Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`);
-        }
-        const link = await ctx.db
-            .query("resource_event_types")
-            .withIndex("by_resource_event_type", (q) => q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId))
-            .unique();
-        if (!link) {
-            throw new Error("Resource is not available for this event type");
-        }
-        // Check availability per calendar day (spans UTC midnight correctly) —
-        // parallel to createBooking.
-        const requiredSlots = getRequiredSlots(args.start, args.end);
-        for (const [date, slots] of requiredSlots.entries()) {
-            const dayAvailability = await ctx.db
-                .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
-                .unique();
-            if (dayAvailability) {
-                for (const slot of slots) {
-                    if (dayAvailability.busySlots.includes(slot)) {
-                        throw new Error("Time slot no longer available");
-                    }
-                }
-            }
-        }
+        // The same checks, in the same order, as createBooking.
+        const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
         const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const managementToken = generateSecureToken();
+        const managementToken = generateManagementToken();
         const now = Date.now();
         const bookingId = await ctx.db.insert("bookings", {
             uid,
@@ -651,6 +613,11 @@ export const createProvisionalBooking = mutation({
         return doc;
     },
 });
+/**
+ * The whole booking document, `managementToken` and booker contact details
+ * included. The token lets its holder cancel and reschedule the booking, so a
+ * host must not pass this result to a caller that only knows the id.
+ */
 export const getBooking = query({
     args: { bookingId: v.id("bookings") },
     returns: v.union(bookingDoc, v.null()),
@@ -661,6 +628,8 @@ export const getBooking = query({
 export const cancelReservation = mutation({
     args: {
         reservationId: v.id("bookings"),
+        reason: v.optional(v.string()),
+        cancelledBy: v.optional(v.string()), // History actor; default "unknown"
         // Resend config passed from main app (components can't access process.env)
         resendOptions: v.optional(bookingEmailOptionsValidator),
     },
@@ -678,13 +647,17 @@ export const cancelReservation = mutation({
         if (!holdsActiveInventory(booking.status)) {
             throw new Error(`Cannot cancel booking with status: ${booking.status}`);
         }
-        await releaseAllSlotsForBooking(ctx, booking);
-        // 3. Update booking status
-        await ctx.db.patch(args.reservationId, { status: "cancelled" });
-        // 4. Trigger booking.cancelled hook
+        // 3. Release, record history and stamp the cancellation
+        await terminateBooking(ctx, booking, {
+            to: "cancelled",
+            reason: args.reason,
+            changedBy: args.cancelledBy ?? "unknown",
+            now: Date.now(),
+        });
+        // 4. Trigger booking.cancelled hook (v1 payload unchanged: no reason)
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
-            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions),
+            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason: args.reason }),
             organizationId: booking.organizationId,
             payload: {
                 bookingId: args.reservationId,
@@ -721,21 +694,11 @@ export const expireProvisionalBooking = mutation({
         if (booking.status !== "provisional") {
             return { success: false, reason: `Booking is ${booking.status}` };
         }
-        const now = Date.now();
-        await ctx.db.insert("booking_history", {
-            bookingId: args.bookingId,
-            fromStatus: "provisional",
-            toStatus: "cancelled",
-            changedBy: "system",
+        await terminateBooking(ctx, booking, {
+            to: "cancelled",
             reason: args.reason ?? "Provisional booking expired",
-            timestamp: now,
-        });
-        await releaseAllSlotsForBooking(ctx, booking);
-        await ctx.db.patch(args.bookingId, {
-            status: "cancelled",
-            cancelledAt: now,
-            cancellationReason: args.reason ?? "Provisional booking expired",
-            updatedAt: now,
+            changedBy: "system",
+            now: Date.now(),
         });
         return { success: true };
     },
@@ -768,6 +731,7 @@ export const createEventType = mutation({
     },
     returns: v.id("event_types"),
     handler: async (ctx, args) => {
+        assertTimeZone(args.timezone);
         const existing = await ctx.db
             .query("event_types")
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
@@ -857,6 +821,9 @@ export const updateEventType = mutation({
     },
     returns: v.id("event_types"),
     handler: async (ctx, args) => {
+        if (args.timezone !== undefined) {
+            assertTimeZone(args.timezone);
+        }
         const eventType = await ctx.db
             .query("event_types")
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
@@ -864,11 +831,14 @@ export const updateEventType = mutation({
         if (!eventType) {
             throw new Error(`Event type "${args.id}" not found`);
         }
-        const { id: _id, ...updates } = args;
+        // The arguments besides `id` are event_types columns (their types are
+        // checked here); only the ones given are patched.
+        const { id: _id, ...fields } = args;
+        const updates = fields;
         const filteredUpdates = { updatedAt: Date.now() };
         for (const [key, value] of Object.entries(updates)) {
             if (value !== undefined) {
-                filteredUpdates[key] = value;
+                Object.assign(filteredUpdates, { [key]: value });
             }
         }
         await ctx.db.patch(eventType._id, filteredUpdates);
@@ -889,7 +859,7 @@ export const deleteEventType = mutation({
         // Check for existing bookings
         const bookings = await ctx.db
             .query("bookings")
-            .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.id))
+            .withIndex("by_eventTypeId_and_start", (q) => q.eq("eventTypeId", args.id))
             .first();
         if (bookings) {
             throw new Error("Cannot delete event type with existing bookings. Deactivate it instead.");
@@ -937,6 +907,12 @@ export const toggleEventTypeActive = mutation({
 // ============================================
 // BOOKING LIST & DETAIL QUERIES
 // ============================================
+/**
+ * The whole booking document, `managementToken` and booker contact details
+ * included. Knowing a uid must not be enough to obtain the token: a host that
+ * serves this to browsers removes the token (and details the caller may not
+ * see) unless the caller already proved ownership.
+ */
 export const getBookingByUid = query({
     args: { uid: v.string() },
     returns: v.union(bookingDoc, v.null()),
@@ -948,13 +924,107 @@ export const getBookingByUid = query({
     },
 });
 /**
+ * listBookings' selector as an index range in `order`, with `dateFrom` /
+ * `dateTo` narrowing `start`; null without a selector. As in the filters, an
+ * empty id selects nothing.
+ */
+function bookingsInRange(ctx, args, order) {
+    const { organizationId, resourceId, eventTypeId, dateFrom, dateTo } = args;
+    const bookings = ctx.db.query("bookings");
+    if (organizationId) {
+        return bookings
+            .withIndex("by_org_start", (q) => {
+            const byOrg = q.eq("organizationId", organizationId);
+            const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
+            return dateTo !== undefined ? from.lte("start", dateTo) : from;
+        })
+            .order(order);
+    }
+    if (resourceId) {
+        return bookings
+            .withIndex("by_resource_start", (q) => {
+            const byResource = q.eq("resourceId", resourceId);
+            const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
+            return dateTo !== undefined ? from.lte("start", dateTo) : from;
+        })
+            .order(order);
+    }
+    if (eventTypeId) {
+        return bookings
+            .withIndex("by_eventTypeId_and_start", (q) => {
+            const byEventType = q.eq("eventTypeId", eventTypeId);
+            const from = dateFrom !== undefined ? byEventType.gte("start", dateFrom) : byEventType;
+            return dateTo !== undefined ? from.lte("start", dateTo) : from;
+        })
+            .order(order);
+    }
+    return null;
+}
+function matchesListing(booking, args) {
+    // The ids that did not pick the index still narrow the result — a caller
+    // asking for one resource's bookings of one event type must not get that
+    // resource's bookings of every event type. (Redundant for the indexed id.)
+    if (args.organizationId && booking.organizationId !== args.organizationId)
+        return false;
+    if (args.resourceId && booking.resourceId !== args.resourceId)
+        return false;
+    if (args.eventTypeId && booking.eventTypeId !== args.eventTypeId)
+        return false;
+    // Hide provisional reservations from regular booking lists unless explicitly requested.
+    if (args.status ? booking.status !== args.status : booking.status === "provisional")
+        return false;
+    // Redundant for the index ranges, still needed for the no-selector branch.
+    if (args.dateFrom !== undefined && !(booking.start >= args.dateFrom))
+        return false;
+    if (args.dateTo !== undefined && !(booking.start <= args.dateTo))
+        return false;
+    return true;
+}
+/**
+ * The first `limit` matching bookings of `rows` (newest `start` first),
+ * reading no further than needed. With `oldestFirstTies`, equal starts come
+ * out oldest first although `rows` yields them newest first: each group is
+ * buffered, so the rest of the group at the cut is read as well.
+ */
+async function firstMatching(rows, args, limit, oldestFirstTies) {
+    const result = [];
+    let group = [];
+    for await (const booking of rows) {
+        if (group.length > 0 && booking.start !== group[0].start) {
+            result.push(...group.reverse());
+            group = [];
+            if (result.length >= limit)
+                break;
+        }
+        if (!matchesListing(booking, args))
+            continue;
+        if (oldestFirstTies)
+            group.push(booking);
+        else if (result.push(booking) >= limit)
+            break;
+    }
+    result.push(...group.reverse());
+    return result.slice(0, limit);
+}
+/**
  * Lists bookings, newest `start` first, hiding provisional reservations
  * unless `status` asks for them.
  *
- * Pass `organizationId` or `resourceId`: those branches read the
- * `by_org_start` / `by_resource_start` indexes, so `dateFrom` / `dateTo`
- * narrow the index range itself and the scan is proportional to the window.
- * The `eventTypeId` branch uses `by_event_type` and range-filters in JS.
+ * Pass `organizationId`, `resourceId` or `eventTypeId` (tried in that order):
+ * the branch reads the `by_org_start` / `by_resource_start` /
+ * `by_eventTypeId_and_start` index, so `dateFrom` / `dateTo` narrow the index
+ * range itself and the scan is proportional to the window. With a positive
+ * integer `limit` the scan also stops once `limit` bookings match, so it reads
+ * the limit plus the rows the other filters skip (for `eventTypeId`, plus the
+ * rest of the bookings sharing the last one's `start`). Without a limit it
+ * reads the whole range. Other `limit` values keep their earlier meaning (0: no
+ * limit). Bookings with equal `start` come newest-created first, except in
+ * the `eventTypeId` branch, where they come oldest-created first.
+ *
+ * `resourceId` matches a booking's primary resource: a bundle is listed under
+ * its first resource only, not under its other items (pools included).
+ *
+ * Bookings are returned whole, `managementToken` included (see getBookingByUid).
  *
  * With no selector at all the scan is bounded: only the 1000 most recently
  * *created* bookings are considered (then filtered, sorted and limited). That
@@ -973,76 +1043,27 @@ export const listBookings = query({
     },
     returns: v.array(bookingDoc),
     handler: async (ctx, args) => {
-        let bookings;
-        const { dateFrom, dateTo } = args;
-        // Use the most specific index available
-        if (args.organizationId) {
-            const organizationId = args.organizationId;
-            bookings = await ctx.db
-                .query("bookings")
-                .withIndex("by_org_start", (q) => {
-                const byOrg = q.eq("organizationId", organizationId);
-                const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
-                return dateTo !== undefined ? from.lte("start", dateTo) : from;
-            })
-                .order("desc")
-                .collect();
+        const { limit } = args;
+        // The eventTypeId branch used to read `by_event_type` (creation order) and
+        // then sort by start, so its equal starts come oldest first.
+        const oldestFirstTies = !args.organizationId && !args.resourceId && !!args.eventTypeId;
+        if (limit !== undefined && Number.isInteger(limit) && limit > 0) {
+            const rows = bookingsInRange(ctx, args, "desc");
+            if (rows)
+                return await firstMatching(rows, args, limit, oldestFirstTies);
         }
-        else if (args.resourceId) {
-            const resourceId = args.resourceId;
-            bookings = await ctx.db
-                .query("bookings")
-                .withIndex("by_resource_start", (q) => {
-                const byResource = q.eq("resourceId", resourceId);
-                const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
-                return dateTo !== undefined ? from.lte("start", dateTo) : from;
-            })
-                .order("desc")
-                .collect();
-        }
-        else if (args.eventTypeId) {
-            bookings = await ctx.db
-                .query("bookings")
-                .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
-                .collect();
-        }
-        else {
-            // No selector: bounded scan of the most recently created bookings (see docstring).
-            bookings = await ctx.db.query("bookings").order("desc").take(1000);
-        }
-        // The ids that did not pick the index still narrow the result — a caller
-        // asking for one resource's bookings of one event type must not get that
-        // resource's bookings of every event type. (Redundant for the indexed id.)
-        if (args.organizationId) {
-            bookings = bookings.filter((b) => b.organizationId === args.organizationId);
-        }
-        if (args.resourceId) {
-            bookings = bookings.filter((b) => b.resourceId === args.resourceId);
-        }
-        if (args.eventTypeId) {
-            bookings = bookings.filter((b) => b.eventTypeId === args.eventTypeId);
-        }
-        // Hide provisional reservations from regular booking lists unless explicitly requested.
-        if (!args.status) {
-            bookings = bookings.filter((b) => b.status !== "provisional");
-        }
-        if (args.status) {
-            bookings = bookings.filter((b) => b.status === args.status);
-        }
-        // Redundant for the org/resource branches (already an index range), still
-        // needed for the event-type and no-selector branches.
-        if (dateFrom !== undefined) {
-            bookings = bookings.filter((b) => b.start >= dateFrom);
-        }
-        if (dateTo !== undefined) {
-            bookings = bookings.filter((b) => b.start <= dateTo);
-        }
+        const range = bookingsInRange(ctx, args, oldestFirstTies ? "asc" : "desc");
+        // No selector: bounded scan of the most recently created bookings (see docstring).
+        let bookings = range
+            ? await range.collect()
+            : await ctx.db.query("bookings").order("desc").take(1000);
+        bookings = bookings.filter((booking) => matchesListing(booking, args));
         // Sort by start time descending (newest first). A no-op for the org/resource
         // branches (index order, stable sort keeps it); orders the other two.
         bookings.sort((a, b) => b.start - a.start);
         // Apply limit
-        if (args.limit) {
-            bookings = bookings.slice(0, args.limit);
+        if (limit) {
+            bookings = bookings.slice(0, limit);
         }
         return bookings;
     },
@@ -1091,35 +1112,25 @@ export const cancelBookingByToken = mutation({
         if (!holdsActiveInventory(booking.status)) {
             throw new Error(`Cannot cancel booking with status: ${booking.status}`);
         }
-        const now = Date.now();
-        // 3. Record history
-        await ctx.db.insert("booking_history", {
-            bookingId: booking._id,
-            fromStatus: booking.status,
-            toStatus: "cancelled",
+        const reason = args.reason || "Cancelled by booker";
+        // 3–5. Release every item (pooled add-ons and legacy bookings included),
+        // record history and stamp the cancellation.
+        await terminateBooking(ctx, booking, {
+            to: "cancelled",
+            reason,
             changedBy: "user",
-            reason: args.reason || "Cancelled by booker",
-            timestamp: now,
+            now: Date.now(),
         });
-        // 4. Update booking
-        await ctx.db.patch(booking._id, {
-            status: "cancelled",
-            cancelledAt: now,
-            cancellationReason: args.reason || "Cancelled by booker",
-            updatedAt: now,
-        });
-        // 5. Release every item, including pooled add-ons and legacy bookings.
-        await releaseAllSlotsForBooking(ctx, booking);
         // 6. Trigger booking.cancelled hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
-            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason: args.reason || "Cancelled by booker" }),
+            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason }),
             organizationId: booking.organizationId,
             payload: {
                 bookingId: booking._id,
                 booking: { ...booking, status: "cancelled" },
                 previousStatus: booking.status,
-                reason: args.reason || "Cancelled by booker",
+                reason,
                 bookerEmail: booking.bookerEmail,
                 bookerName: booking.bookerName,
                 eventTitle: booking.eventTitle,
@@ -1147,11 +1158,14 @@ async function moveBooking(ctx, original, args) {
     // reinterpret it after a host has changed the resource into a pool.
     if (items.length === 0)
         await assertSingleResourceSupported(ctx, original.resourceId);
-    // Read-your-writes lets overlapping moves reuse only the original's inventory.
-    // Any destination conflict aborts this mutation and restores ALL old items.
-    await releaseAllSlotsForBooking(ctx, original);
-    await reserveResourceSlots(ctx, resources, args.newStart, args.newEnd);
+    // The original ends first: read-your-writes lets overlapping moves reuse
+    // only its inventory. Any destination conflict aborts this mutation and
+    // restores the original with ALL its items.
     const now = Date.now();
+    const reason = args.reason ?? "Rescheduled to new time";
+    const changedBy = args.changedBy ?? "system";
+    await terminateBooking(ctx, original, { to: "cancelled", reason, changedBy, now });
+    await reserveResourceSlots(ctx, resources, args.newStart, args.newEnd);
     const newUid = `bk_${now}_${Math.random().toString(36).slice(2, 9)}`;
     const newBookingId = await ctx.db.insert("bookings", {
         uid: newUid,
@@ -1182,28 +1196,16 @@ async function moveBooking(ctx, original, args) {
             quantity: item.quantity,
         });
     }
-    const reason = args.reason ?? "Rescheduled to new time";
-    await ctx.db.insert("booking_history", {
-        bookingId: original._id,
-        fromStatus: original.status,
-        toStatus: "cancelled",
-        changedBy: "system",
-        reason,
-        timestamp: now,
-    });
+    // Forward link: the original stays "cancelled" but names its successor, so
+    // a move is told apart from a cancellation without reading the reason.
+    await ctx.db.patch(original._id, { rescheduledToUid: newUid });
     await ctx.db.insert("booking_history", {
         bookingId: newBookingId,
         fromStatus: "",
         toStatus: original.status,
-        changedBy: "system",
+        changedBy,
         reason: `Rescheduled from ${original.uid}`,
         timestamp: now,
-    });
-    await ctx.db.patch(original._id, {
-        status: "cancelled",
-        cancelledAt: now,
-        cancellationReason: reason,
-        updatedAt: now,
     });
     const booking = await ctx.db.get(newBookingId);
     if (!booking)
@@ -1242,6 +1244,7 @@ export const rescheduleBooking = mutation({
         newStart: v.number(),
         newEnd: v.number(),
         reason: v.optional(v.string()),
+        changedBy: v.optional(v.string()), // History actor of the move; default "system"
         resendOptions: v.optional(bookingEmailOptionsValidator),
     },
     returns: bookingDoc,

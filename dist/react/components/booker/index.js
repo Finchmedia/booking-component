@@ -1,3 +1,3 @@
-export { Booker } from "./booker";
-export { BookingErrorDialog } from "./booking-error-dialog";
+export { Booker } from "./booker.js";
+export { BookingErrorDialog } from "./booking-error-dialog.js";
 //# sourceMappingURL=index.js.map

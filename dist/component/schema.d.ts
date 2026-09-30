@@ -69,6 +69,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
     }, "required", "id" | "organizationId" | "timezone" | "name" | "isDefault" | "weeklyHours" | "createdAt" | "updatedAt">, {
         by_external_id: ["id", "_creationTime"];
         by_org: ["organizationId", "_creationTime"];
+        by_organizationId_and_isDefault: ["organizationId", "isDefault", "_creationTime"];
     }, {}, {}>;
     date_overrides: import("convex/server").TableDefinition<import("convex/values").VObject<{
         customHours?: {
@@ -199,6 +200,7 @@ declare const _default: import("convex/server").SchemaDefinition<{
         eventDescription?: string | undefined;
         cancelledAt?: number | undefined;
         rescheduleUid?: string | undefined;
+        rescheduledToUid?: string | undefined;
         cancellationReason?: string | undefined;
         resourceId: string;
         eventTypeId: string;
@@ -245,12 +247,13 @@ declare const _default: import("convex/server").SchemaDefinition<{
         updatedAt: import("convex/values").VFloat64<number, "required">;
         cancelledAt: import("convex/values").VFloat64<number | undefined, "optional">;
         rescheduleUid: import("convex/values").VString<string | undefined, "optional">;
+        rescheduledToUid: import("convex/values").VString<string | undefined, "optional">;
         cancellationReason: import("convex/values").VString<string | undefined, "optional">;
-    }, "required", "organizationId" | "resourceId" | "eventTypeId" | "bookerName" | "bookerEmail" | "eventTitle" | "start" | "end" | "timezone" | "location" | "location.type" | "location.value" | "uid" | "actorId" | "status" | "createdAt" | "updatedAt" | "managementToken" | "bookerPhone" | "bookerNotes" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "cancellationReason">, {
+    }, "required", "organizationId" | "resourceId" | "eventTypeId" | "bookerName" | "bookerEmail" | "eventTitle" | "start" | "end" | "timezone" | "location" | "location.type" | "location.value" | "uid" | "actorId" | "status" | "createdAt" | "updatedAt" | "managementToken" | "bookerPhone" | "bookerNotes" | "eventDescription" | "cancelledAt" | "rescheduleUid" | "rescheduledToUid" | "cancellationReason">, {
         by_org_start: ["organizationId", "start", "_creationTime"];
         by_resource_start: ["resourceId", "start", "_creationTime"];
+        by_eventTypeId_and_start: ["eventTypeId", "start", "_creationTime"];
         by_uid: ["uid", "_creationTime"];
-        by_event_type: ["eventTypeId", "_creationTime"];
     }, {}, {}>;
     booking_items: import("convex/server").TableDefinition<import("convex/values").VObject<{
         bookingId: import("convex/values").GenericId<"bookings">;

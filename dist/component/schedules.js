@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { getDayOfWeekInTimezone } from "./utils";
+import { parseCivilDate, weekdayOf } from "../shared/time.js";
+import { assertDateOrder, assertTimeZone } from "./input_validation";
 import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 // ============================================
 // TIME WINDOW VALIDATION
@@ -106,13 +107,25 @@ export const getDefaultSchedule = query({
     args: { organizationId: v.string() },
     returns: v.union(scheduleDoc, v.null()),
     handler: async (ctx, args) => {
-        const schedules = await ctx.db
-            .query("schedules")
-            .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
-            .collect();
-        return schedules.find((s) => s.isDefault) ?? schedules[0] ?? null;
+        return await getOrganizationDefaultSchedule(ctx, args.organizationId);
     },
 });
+/**
+ * An organization's default schedule: the first one created that is marked
+ * default, else its first schedule, else null. At most two indexed reads of
+ * one document each, however many schedules the organization has.
+ */
+export async function getOrganizationDefaultSchedule(ctx, organizationId) {
+    const marked = await ctx.db
+        .query("schedules")
+        .withIndex("by_organizationId_and_isDefault", (q) => q.eq("organizationId", organizationId).eq("isDefault", true))
+        .first();
+    return (marked ??
+        (await ctx.db
+            .query("schedules")
+            .withIndex("by_org", (q) => q.eq("organizationId", organizationId))
+            .first()));
+}
 // ============================================
 // SCHEDULE MUTATIONS
 // ============================================
@@ -131,6 +144,7 @@ export const createSchedule = mutation({
     },
     returns: v.id("schedules"),
     handler: async (ctx, args) => {
+        assertTimeZone(args.timezone);
         assertValidWeeklyHours(args.weeklyHours);
         // Check for existing ID
         const existing = await ctx.db
@@ -179,6 +193,9 @@ export const updateSchedule = mutation({
     },
     returns: v.id("schedules"),
     handler: async (ctx, args) => {
+        if (args.timezone !== undefined) {
+            assertTimeZone(args.timezone);
+        }
         if (args.weeklyHours !== undefined) {
             assertValidWeeklyHours(args.weeklyHours);
         }
@@ -250,8 +267,12 @@ export const listDateOverrides = query({
     handler: async (ctx, args) => {
         // The index is [scheduleId, date] and ISO dates sort lexicographically ==
         // chronologically, so both the range and the ascending date order come
-        // straight from the index.
-        const { dateFrom, dateTo } = args;
+        // straight from the index. Bounds are compared in canonical form.
+        const dateFrom = args.dateFrom !== undefined ? parseCivilDate(args.dateFrom) : undefined;
+        const dateTo = args.dateTo !== undefined ? parseCivilDate(args.dateTo) : undefined;
+        if (dateFrom !== undefined && dateTo !== undefined) {
+            assertDateOrder(dateFrom, dateTo);
+        }
         return await ctx.db
             .query("date_overrides")
             .withIndex("by_schedule_date", (q) => {
@@ -269,11 +290,12 @@ export const getDateOverride = query({
     },
     returns: v.union(dateOverrideDoc, v.null()),
     handler: async (ctx, args) => {
+        const date = parseCivilDate(args.date);
         // Full-depth lookup. .first() keeps first-match semantics should a legacy
         // duplicate (scheduleId, date) row exist; .unique() would throw on it.
         return await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", args.date))
+            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", date))
             .first();
     },
 });
@@ -292,13 +314,15 @@ export const createDateOverride = mutation({
     },
     returns: v.id("date_overrides"),
     handler: async (ctx, args) => {
+        // Stored in canonical form, the form every availability lookup uses.
+        const date = parseCivilDate(args.date);
         if (args.customHours !== undefined) {
             assertValidCustomHours(args.customHours);
         }
         // Check for existing override on this date
         const existing = await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", args.date))
+            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", date))
             .first();
         if (existing) {
             // Update existing
@@ -310,7 +334,7 @@ export const createDateOverride = mutation({
         }
         return await ctx.db.insert("date_overrides", {
             scheduleId: args.scheduleId,
-            date: args.date,
+            date,
             type: args.type,
             customHours: args.customHours,
         });
@@ -366,59 +390,93 @@ function timeToSlot(time) {
     return hours * 4 + Math.floor(minutes / 15);
 }
 /**
- * Plain async helper that computes effective available slots for a scheduleId + date.
- * Exported so other component files (e.g. public.ts) can call it directly with ctx.db
- * instead of going through ctx.runQuery.
+ * Slot indices of one stored window, limited to the day's integers 0–95.
+ * Rows stored before window validation (0.3.0) can reach past the day, for
+ * example with an endTime of "25:00"; their quarter hours outside the day are
+ * dropped, so availability reads of such rows do not fail the 0–95 check.
  */
-export async function computeAvailabilityForDate(ctx, scheduleId, date) {
-    const schedule = await ctx.db
+function windowToSlots(window) {
+    const slots = [];
+    const end = Math.min(timeToSlot(window.endTime), 96);
+    for (let i = Math.max(timeToSlot(window.startTime), 0); i < end; i++) {
+        if (Number.isInteger(i))
+            slots.push(i);
+    }
+    return slots;
+}
+/** The schedule with this external id, or null. */
+export async function getScheduleByExternalId(ctx, scheduleId) {
+    return await ctx.db
         .query("schedules")
         .withIndex("by_external_id", (q) => q.eq("id", scheduleId))
         .unique();
+}
+/**
+ * Effective LOCAL slot indices (0–95, in the schedule's zone) of a schedule on
+ * a calendar day: the date override when one exists, otherwise the weekly
+ * hours of that day's own weekday. The weekday is the calendar day's, not the
+ * weekday some instant of it has in the zone — reading `${date}T12:00Z` in the
+ * zone used the NEXT day's hours in zones at UTC+12 and beyond (New Zealand,
+ * Fiji, Tonga, Samoa, Kiribati; Norfolk Island in summer).
+ * A missing schedule yields the default business hours 09:00–17:00.
+ * `overridesByDate` (from getDateOverridesByDate) replaces the per-day
+ * override read when a caller walks a range of days.
+ */
+export async function getScheduleDaySlots(ctx, schedule, date, overridesByDate) {
     if (!schedule) {
         // No schedule = default business hours (9-17)
-        return { availableSlots: Array.from({ length: 32 }, (_, i) => i + 36) };
+        return Array.from({ length: 32 }, (_, i) => i + 36);
     }
     // Check for date override
-    const override = await ctx.db
-        .query("date_overrides")
-        .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id).eq("date", date))
-        .first();
+    const override = overridesByDate
+        ? overridesByDate.get(date)
+        : await ctx.db
+            .query("date_overrides")
+            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id).eq("date", date))
+            .first();
     if (override) {
         if (override.type === "unavailable") {
-            return { availableSlots: [] };
+            return [];
         }
         if (override.customHours && override.customHours.length > 0) {
-            const slots = [];
-            for (const range of override.customHours) {
-                const startSlot = timeToSlot(range.startTime);
-                const endSlot = timeToSlot(range.endTime);
-                for (let i = startSlot; i < endSlot; i++) {
-                    slots.push(i);
-                }
-            }
-            return { availableSlots: slots };
+            return override.customHours.flatMap(windowToSlots);
         }
     }
-    // Get day of week for the date in the schedule's timezone
-    // This ensures correct day-of-week even when querying from different timezones
-    const dayOfWeek = getDayOfWeekInTimezone(date, schedule.timezone);
-    // Find weekly hours for this day
+    return getWeeklySlots(schedule, date);
+}
+/**
+ * A schedule's date overrides from `dateFrom` to `dateTo`, by date, read with
+ * one index range. Of several rows for one date the first stored wins, as in
+ * getScheduleDaySlots' own lookup.
+ */
+export async function getDateOverridesByDate(ctx, schedule, dateFrom, dateTo) {
+    const overrides = await ctx.db
+        .query("date_overrides")
+        .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id).gte("date", dateFrom).lte("date", dateTo))
+        .collect();
+    const byDate = new Map();
+    for (const override of overrides) {
+        if (!byDate.has(override.date))
+            byDate.set(override.date, override);
+    }
+    return byDate;
+}
+/** Local slot indices of a schedule's weekly hours on the weekday of `date` (overrides ignored). */
+export function getWeeklySlots(schedule, date) {
+    const dayOfWeek = weekdayOf(date);
     const dayEntries = schedule.weeklyHours.filter((h) => h.dayOfWeek === dayOfWeek);
     if (dayEntries.length === 0) {
-        return { availableSlots: [] };
+        return [];
     }
     const slots = [];
     for (const entry of dayEntries) {
-        const startSlot = timeToSlot(entry.startTime);
-        const endSlot = timeToSlot(entry.endTime);
-        for (let i = startSlot; i < endSlot; i++) {
+        for (const i of windowToSlots(entry)) {
             if (!slots.includes(i)) {
                 slots.push(i);
             }
         }
     }
-    return { availableSlots: slots.sort((a, b) => a - b) };
+    return slots.sort((a, b) => a - b);
 }
 /**
  * Get the effective available slots for a resource on a specific date.
@@ -430,6 +488,10 @@ export const getEffectiveAvailability = query({
         date: v.string(),
     },
     returns: v.object({ availableSlots: v.array(v.number()) }),
-    handler: async (ctx, args) => computeAvailabilityForDate(ctx, args.scheduleId, args.date),
+    handler: async (ctx, args) => {
+        const date = parseCivilDate(args.date);
+        const schedule = await getScheduleByExternalId(ctx, args.scheduleId);
+        return { availableSlots: await getScheduleDaySlots(ctx, schedule, date) };
+    },
 });
 //# sourceMappingURL=schedules.js.map

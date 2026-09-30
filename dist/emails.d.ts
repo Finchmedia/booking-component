@@ -1,5 +1,6 @@
 import type { FunctionReference } from "convex/server";
 import type { Infer } from "convex/values";
+export { isSendableAddress } from "./component/emails/recipient.js";
 /** Presentation events, distinct from the component's lifecycle hook names. */
 export declare const bookingEmailKindValidator: import("convex/values").VUnion<"confirmed" | "pending" | "approved" | "declined" | "cancelled" | "rescheduled", [import("convex/values").VLiteral<"confirmed", "required">, import("convex/values").VLiteral<"pending", "required">, import("convex/values").VLiteral<"approved", "required">, import("convex/values").VLiteral<"declined", "required">, import("convex/values").VLiteral<"cancelled", "required">, import("convex/values").VLiteral<"rescheduled", "required">], "required", never>;
 export type BookingEmailKind = Infer<typeof bookingEmailKindValidator>;
@@ -84,7 +85,12 @@ export declare const bookingEmailResultValidator: import("convex/values").VUnion
     text: import("convex/values").VString<string | undefined, "optional">;
 }, "required", "subject" | "html" | "text">], "required", "subject" | "html" | "text">;
 export type RenderedBookingEmail = Infer<typeof bookingEmailResultValidator>;
-/** Wire format. Only trusted host functions should construct these options. */
+/**
+ * Wire format. Only trusted host functions should construct these options.
+ * Every `apiKey` one booking instance receives must belong to the same Resend
+ * account: queued mail is sent in batches with the most recent key. Rotating
+ * the key is fine (see docs/custom-emails.md).
+ */
 export declare const bookingEmailOptionsValidator: import("convex/values").VObject<{
     fromEmail?: string | undefined;
     baseUrl?: string | undefined;
@@ -101,6 +107,7 @@ export type BookingEmailRenderer = FunctionReference<"query", "internal", Bookin
 /**
  * Call inside a host Convex function, not at module initialization.
  * The renderer stays in the app; only its function handle crosses the boundary.
+ * Use one Resend account per booking instance (see bookingEmailOptionsValidator).
  */
 export declare function createBookingEmailOptions(options: Omit<BookingEmailOptions, "renderer"> & {
     renderer?: BookingEmailRenderer;

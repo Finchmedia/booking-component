@@ -3,35 +3,36 @@ export declare const SLOTS_PER_DAY: number;
 export declare const BUSINESS_HOURS_START = 36;
 export declare const BUSINESS_HOURS_END = 68;
 /**
- * Get the day of week for a date in a specific timezone
- * @param dateStr - ISO date string "2025-12-03"
- * @param timezone - IANA timezone "Europe/Berlin"
- * @returns Day of week (0=Sunday, 6=Saturday)
- */
-export declare function getDayOfWeekInTimezone(dateStr: string, timezone: string): number;
-/**
  * Get the date string (YYYY-MM-DD) for a timestamp in a specific timezone
  * @param timestamp - Unix timestamp in milliseconds
  * @param timezone - IANA timezone "Europe/Berlin"
  * @returns Date string "2025-12-03"
  */
 export declare function getDateInTimezone(timestamp: number, timezone: string): string;
+/** The local calendar date ("YYYY-MM-DD") and 15-minute slot index (0–95) of an instant in a timezone. */
+export declare function getLocalDateAndSlot(instantMs: number, timezone: string): {
+    date: string;
+    slot: number;
+};
 /**
  * Convert a wall-clock time in a specific timezone to a UTC timestamp
  *
- * The zone offset depends on the instant, and the instant is what is being
- * computed — so the offset read at the naive instant (wall clock taken as
- * UTC) is only a first guess. In the hour before a DST switch that guess
- * already carries the post-switch offset and lands one hour off (01:00 CET on
- * the spring-forward day came back as 23:00Z instead of 00:00Z; 01:00 CEST on
- * the fall-back day as 00:00Z, which is 02:00 local). The offset is therefore
- * re-read at the guessed instant and corrected once — the same fix-up
- * date-fns-tz applies. Resolution of the two DST edge cases:
- * - ambiguous time (fall-back hour occurs twice): the LATER instant, i.e. the
- *   offset in force after the switch;
- * - non-existent time (spring-forward gap): folded forward with the larger
- *   offset (02:30 → the instant of 01:30). generateDaySlotsWithTimezone skips
- *   such times so that the fold never duplicates a candidate.
+ * The instant is the wall clock read as UTC minus the zone offset in force AT
+ * that instant. Offsets lie within ±14 h, so the only offsets that can be in
+ * force there are the ones a day before and a day after the naive instant
+ * (a zone changes its offset at most once in that span). Each offset gives a
+ * candidate, and a candidate counts when the offset in force at it is the one
+ * it was computed with. Resolution of the two DST edge cases:
+ * - ambiguous time (the fall-back hour occurs twice): the EARLIER instant, the
+ *   first occurrence, for zones east and west of UTC and half-hour shifts
+ *   alike (RFC 5545, Temporal's "compatible"). Europe/Berlin 2027-10-31 02:30
+ *   is 00:30Z (CEST), America/New_York 2027-11-07 01:30 is 05:30Z (EDT);
+ *   until 0.4.2 the Berlin case resolved to the later 01:30Z;
+ * - non-existent time (the spring-forward gap): no candidate counts, and the
+ *   instant one gap length EARLIER is returned (Berlin 02:30 on the
+ *   spring-forward day → 00:30Z, the instant of 01:30 CET). Callers that must
+ *   not use such a time check it with isWallClockInstant;
+ *   generateDaySlotsWithTimezone skips it.
  *
  * @param dateStr - ISO date string "2025-12-03"
  * @param time - Time string "09:00" or "14:30"
@@ -68,6 +69,12 @@ export declare function timestampToSlot(timestamp: number): {
     slot: number;
 };
 export declare function getRequiredSlots(start: number, end: number): Map<string, number[]>;
+/**
+ * getRequiredSlots one UTC date at a time: yields `[date, slots]` in date
+ * order and computes a date only when the caller asks for it, so a reader can
+ * stop at the first busy date without walking the rest of a long range.
+ */
+export declare function requiredSlotsByDate(start: number, end: number): Generator<[string, number[]]>;
 /**
  * Converts a slot index to a time string in ISO format
  * @param date - ISO date string (e.g., "2025-06-17")
@@ -115,7 +122,10 @@ export declare function generateDaySlots(date: string, eventLengthMinutes: numbe
  * @param date - ISO date string (e.g., "2025-12-03") in resource's timezone context
  * @param eventLengthMinutes - Event duration in minutes
  * @param intervalMinutes - Step between slots in minutes
- * @param availableSlots - Array of available slot indices in resource's LOCAL timezone (from schedule)
+ * @param availableSlots - Array of available slot indices in resource's LOCAL timezone (from schedule).
+ *   Integers 0–95: getDaySlots rejects other caller input and
+ *   getScheduleDaySlots derives only those, also from rows stored before
+ *   window validation.
  * @param timezone - Resource's IANA timezone (e.g., "Europe/Berlin")
  * @returns Candidates (see SlotCandidate). The UTC instants — and therefore
  *   the daily_availability rows the slots live on — can fall on the UTC date
@@ -138,7 +148,9 @@ export declare function isCandidateAvailable(candidate: SlotCandidate, busyByDat
  * Shared range guard for every write path that reserves slots: NaN/Infinity
  * and `end <= start` are rejected, because getRequiredSlots maps such a range
  * to ZERO slots and the booking would be created without holding anything.
- * Past-/notice-window checks stay the caller's responsibility by design.
+ * Instants beyond what a Date can hold are rejected too; they used to fail
+ * later with a RangeError. Past-/notice-window checks stay the caller's
+ * responsibility by design.
  */
 export declare function assertValidRange(start: number, end: number): void;
 /**
@@ -147,9 +159,10 @@ export declare function assertValidRange(start: number, end: number): void;
  *
  * WARNING: `availableSlots` and `busySlots` MUST be in the SAME coordinate
  * system. This function does NO timezone conversion. If you pass a schedule's
- * LOCAL wall-clock slot indices (e.g. from computeAvailabilityForDate) while
- * `busySlots` are UTC indices, the comparison is meaningless (e.g. Europe/Berlin
- * days read as free regardless of bookings). For any timezone-aware schedule,
+ * LOCAL wall-clock slot indices (e.g. from getScheduleDaySlots or
+ * getEffectiveAvailability) while `busySlots` are UTC indices, the
+ * comparison is meaningless (e.g. Europe/Berlin days read as free regardless
+ * of bookings). For any timezone-aware schedule,
  * use generateDaySlotsWithTimezone + areSlotsAvailable instead — that is how
  * getMonthAvailability / getDaySlots decide availability. This function is only
  * used by the legacy (schedule-less, hardcoded 9–17 UTC) path.

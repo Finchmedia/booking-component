@@ -51,6 +51,7 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;
@@ -70,6 +71,7 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
     createdAt: number;
     updatedAt: number;
 }>>;
+/** The whole booking, `managementToken` included (see public.getBookingByUid), plus its items. */
 export declare const getBookingWithItems: import("convex/server").RegisteredQuery<"public", {
     bookingId: import("convex/values").GenericId<"bookings">;
 }, Promise<{
@@ -106,6 +108,7 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
     eventDescription?: string | undefined;
     cancelledAt?: number | undefined;
     rescheduleUid?: string | undefined;
+    rescheduledToUid?: string | undefined;
     cancellationReason?: string | undefined;
     resourceId: string;
     eventTypeId: string;

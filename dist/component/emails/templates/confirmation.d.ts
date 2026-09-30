@@ -1,3 +1,4 @@
+import type { BookingEmailContext } from "../../../emails.js";
 export interface BookingConfirmationDetails {
     bookerName: string;
     eventTitle: string;
@@ -5,9 +6,8 @@ export interface BookingConfirmationDetails {
     end: number;
     timezone: string;
     resourceId?: string;
-    bookingUid?: string;
-    managementToken?: string;
-    baseUrl?: string;
+    /** From bookingEmailLinks; without links the mail asks the guest to get in touch instead. */
+    links?: BookingEmailContext["links"];
 }
 export declare function generateBookingConfirmationHTML(details: BookingConfirmationDetails): string;
 //# sourceMappingURL=confirmation.d.ts.map

@@ -1,3 +1,6 @@
+import { type DatabaseReader } from "./_generated/server";
+/** Whether the pair is linked; tolerates duplicate rows and writes nothing. */
+export declare function isLinked(db: DatabaseReader, resourceId: string, eventTypeId: string): Promise<boolean>;
 /**
  * Get all event types linked to a resource
  * Usage: User selects Studio A → show available event types

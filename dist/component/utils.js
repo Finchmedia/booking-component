@@ -1,3 +1,4 @@
+import { assertEventLength } from "./input_validation";
 export const SLOT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 export const SLOTS_PER_DAY = 24 * 4; // 96
 // Default business hours (in slot indices, 0-95) - used as fallback
@@ -11,26 +12,6 @@ export const BUSINESS_HOURS_END = 68; // 5:00 PM
 // These use native Intl API which works correctly in Convex queries/mutations
 // ============================================================================
 /**
- * Get the day of week for a date in a specific timezone
- * @param dateStr - ISO date string "2025-12-03"
- * @param timezone - IANA timezone "Europe/Berlin"
- * @returns Day of week (0=Sunday, 6=Saturday)
- */
-export function getDayOfWeekInTimezone(dateStr, timezone) {
-    // Parse the date string and get what day it is in the target timezone
-    // We use noon UTC to avoid edge cases around midnight
-    const timestamp = new Date(dateStr + "T12:00:00.000Z").getTime();
-    const formatter = new Intl.DateTimeFormat("en-US", {
-        weekday: "short",
-        timeZone: timezone,
-    });
-    const weekdayStr = formatter.format(new Date(timestamp));
-    const dayMap = {
-        "Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6
-    };
-    return dayMap[weekdayStr] ?? 0;
-}
-/**
  * Get the date string (YYYY-MM-DD) for a timestamp in a specific timezone
  * @param timestamp - Unix timestamp in milliseconds
  * @param timezone - IANA timezone "Europe/Berlin"
@@ -42,7 +23,7 @@ export function getDateInTimezone(timestamp, timezone) {
     return date.toLocaleDateString("sv-SE", { timeZone: timezone });
 }
 // One formatter per timezone: the month view converts ~16 candidates × ~31
-// days × up to 3 offset look-ups, and constructing Intl.DateTimeFormat is the
+// days × up to 4 offset look-ups, and constructing Intl.DateTimeFormat is the
 // expensive part of each conversion.
 const wallClockFormatters = new Map();
 function getWallClockFormatter(timezone) {
@@ -86,6 +67,15 @@ function getOffsetMs(instantMs, timezone) {
     // formatToParts has second precision; compare against whole seconds.
     return wallClockAsUtc - (instantMs - (instantMs % 1000));
 }
+/** The local calendar date ("YYYY-MM-DD") and 15-minute slot index (0–95) of an instant in a timezone. */
+export function getLocalDateAndSlot(instantMs, timezone) {
+    const p = getWallClockParts(instantMs, timezone);
+    const pad = (value, length) => String(value).padStart(length, "0");
+    return {
+        date: `${pad(p.year, 4)}-${pad(p.month, 2)}-${pad(p.day, 2)}`,
+        slot: p.hour * 4 + Math.floor(p.minute / 15),
+    };
+}
 /**
  * True when `instantMs` reads as exactly `dateStr time` on the wall clock of
  * `timezone` — i.e. the wall-clock time exists on that date. In the DST
@@ -102,22 +92,26 @@ function isWallClockInstant(instantMs, dateStr, time, timezone) {
         p.hour === hours &&
         p.minute === minutes);
 }
+const DAY_MS = 24 * 60 * 60 * 1000;
 /**
  * Convert a wall-clock time in a specific timezone to a UTC timestamp
  *
- * The zone offset depends on the instant, and the instant is what is being
- * computed — so the offset read at the naive instant (wall clock taken as
- * UTC) is only a first guess. In the hour before a DST switch that guess
- * already carries the post-switch offset and lands one hour off (01:00 CET on
- * the spring-forward day came back as 23:00Z instead of 00:00Z; 01:00 CEST on
- * the fall-back day as 00:00Z, which is 02:00 local). The offset is therefore
- * re-read at the guessed instant and corrected once — the same fix-up
- * date-fns-tz applies. Resolution of the two DST edge cases:
- * - ambiguous time (fall-back hour occurs twice): the LATER instant, i.e. the
- *   offset in force after the switch;
- * - non-existent time (spring-forward gap): folded forward with the larger
- *   offset (02:30 → the instant of 01:30). generateDaySlotsWithTimezone skips
- *   such times so that the fold never duplicates a candidate.
+ * The instant is the wall clock read as UTC minus the zone offset in force AT
+ * that instant. Offsets lie within ±14 h, so the only offsets that can be in
+ * force there are the ones a day before and a day after the naive instant
+ * (a zone changes its offset at most once in that span). Each offset gives a
+ * candidate, and a candidate counts when the offset in force at it is the one
+ * it was computed with. Resolution of the two DST edge cases:
+ * - ambiguous time (the fall-back hour occurs twice): the EARLIER instant, the
+ *   first occurrence, for zones east and west of UTC and half-hour shifts
+ *   alike (RFC 5545, Temporal's "compatible"). Europe/Berlin 2027-10-31 02:30
+ *   is 00:30Z (CEST), America/New_York 2027-11-07 01:30 is 05:30Z (EDT);
+ *   until 0.4.2 the Berlin case resolved to the later 01:30Z;
+ * - non-existent time (the spring-forward gap): no candidate counts, and the
+ *   instant one gap length EARLIER is returned (Berlin 02:30 on the
+ *   spring-forward day → 00:30Z, the instant of 01:30 CET). Callers that must
+ *   not use such a time check it with isWallClockInstant;
+ *   generateDaySlotsWithTimezone skips it.
  *
  * @param dateStr - ISO date string "2025-12-03"
  * @param time - Time string "09:00" or "14:30"
@@ -129,23 +123,20 @@ export function wallClockToUTC(dateStr, time, timezone) {
     const [year, month, day] = dateStr.split("-").map(Number);
     // Create a naive UTC timestamp at the wall-clock time
     const naiveUtcMs = Date.UTC(year, month - 1, day, hours, minutes, 0, 0);
-    // First guess: the offset in force at the naive instant.
-    const offset1 = getOffsetMs(naiveUtcMs, timezone);
-    const guess1 = naiveUtcMs - offset1;
-    const offset2 = getOffsetMs(guess1, timezone);
-    if (offset2 === offset1) {
-        return guess1;
+    const offsetBefore = getOffsetMs(naiveUtcMs - DAY_MS, timezone);
+    const offsetAfter = getOffsetMs(naiveUtcMs + DAY_MS, timezone);
+    if (offsetBefore === offsetAfter) {
+        return naiveUtcMs - offsetBefore;
     }
-    // The offset changed between the naive and the guessed instant (we are
-    // near a DST switch): retry with the offset actually in force there.
-    const guess2 = naiveUtcMs - offset2;
-    const offset3 = getOffsetMs(guess2, timezone);
-    if (offset3 === offset2) {
-        return guess2;
+    // Near an offset change: keep the candidates that read as this wall
+    // clock. Both do in the repeated hour (take the earlier), none in a gap.
+    const candidates = [offsetBefore, offsetAfter]
+        .filter((offset) => getOffsetMs(naiveUtcMs - offset, timezone) === offset)
+        .map((offset) => naiveUtcMs - offset);
+    if (candidates.length > 0) {
+        return Math.min(...candidates);
     }
-    // Still inconsistent: the wall-clock time falls into a gap and exists
-    // under neither offset. Fold it forward with the larger offset.
-    return naiveUtcMs - Math.max(offset2, offset3);
+    return naiveUtcMs - Math.max(offsetBefore, offsetAfter);
 }
 /**
  * Convert a "HH:MM" time string to a slot index (0-95)
@@ -191,26 +182,34 @@ export function timestampToSlot(timestamp) {
     return { date, slot };
 }
 export function getRequiredSlots(start, end) {
-    const slots = new Map();
+    return new Map(requiredSlotsByDate(start, end));
+}
+/**
+ * getRequiredSlots one UTC date at a time: yields `[date, slots]` in date
+ * order and computes a date only when the caller asks for it, so a reader can
+ * stop at the first busy date without walking the rest of a long range.
+ */
+export function* requiredSlotsByDate(start, end) {
     // A non-finite bound requires nothing — the write paths reject it up
     // front (assertValidRange); here it only keeps `end = Infinity` from
     // looping forever in a read path.
     if (!Number.isFinite(start) || !Number.isFinite(end)) {
-        return slots;
+        return;
     }
+    // An unaligned start occupies its containing slot (14:05 → the
+    // 14:00–14:15 slot); the walk then continues on slot boundaries.
     let current = start;
-    // Normalize start to the beginning of the slot?
-    // For now, let's assume inputs are already aligned or we just take the containing slot.
-    // Actually, if start is 14:05, it occupies the 14:00-14:15 slot.
+    let date = null;
+    let daySlots = [];
     while (current < end) {
-        const { date, slot } = timestampToSlot(current);
-        if (!slots.has(date)) {
-            slots.set(date, []);
+        const slot = timestampToSlot(current);
+        if (slot.date !== date) {
+            if (date !== null)
+                yield [date, daySlots];
+            date = slot.date;
+            daySlots = [];
         }
-        const daySlots = slots.get(date);
-        if (!daySlots.includes(slot)) {
-            daySlots.push(slot);
-        }
+        daySlots.push(slot.slot);
         // Move to next slot
         current += SLOT_DURATION_MS;
         // Align current to exact slot boundary to avoid drift
@@ -219,7 +218,8 @@ export function getRequiredSlots(start, end) {
             current -= remainder;
         }
     }
-    return slots;
+    if (date !== null)
+        yield [date, daySlots];
 }
 /**
  * Converts a slot index to a time string in ISO format
@@ -258,6 +258,7 @@ function intervalToStep(intervalMinutes) {
  * @returns Candidates (see SlotCandidate); all slots lie on `date`
  */
 export function generateDaySlots(date, eventLengthMinutes, intervalMinutes = 15) {
+    assertEventLength(eventLengthMinutes);
     const slotsNeeded = Math.ceil(eventLengthMinutes / 15);
     const step = intervalToStep(intervalMinutes);
     const possibleSlots = [];
@@ -281,7 +282,10 @@ export function generateDaySlots(date, eventLengthMinutes, intervalMinutes = 15)
  * @param date - ISO date string (e.g., "2025-12-03") in resource's timezone context
  * @param eventLengthMinutes - Event duration in minutes
  * @param intervalMinutes - Step between slots in minutes
- * @param availableSlots - Array of available slot indices in resource's LOCAL timezone (from schedule)
+ * @param availableSlots - Array of available slot indices in resource's LOCAL timezone (from schedule).
+ *   Integers 0–95: getDaySlots rejects other caller input and
+ *   getScheduleDaySlots derives only those, also from rows stored before
+ *   window validation.
  * @param timezone - Resource's IANA timezone (e.g., "Europe/Berlin")
  * @returns Candidates (see SlotCandidate). The UTC instants — and therefore
  *   the daily_availability rows the slots live on — can fall on the UTC date
@@ -290,6 +294,7 @@ export function generateDaySlots(date, eventLengthMinutes, intervalMinutes = 15)
  *   consumers must check `slotsByDate` against the row of EACH date it names.
  */
 export function generateDaySlotsWithTimezone(date, eventLengthMinutes, intervalMinutes, availableSlots, timezone) {
+    assertEventLength(eventLengthMinutes);
     if (availableSlots.length === 0) {
         return [];
     }
@@ -316,15 +321,31 @@ export function generateDaySlotsWithTimezone(date, eventLengthMinutes, intervalM
     // Slots within a run are contiguous by construction, so every candidate
     // that fits the run is fully available — no per-slot membership check.
     for (const run of runs) {
+        if (run.start + slotsNeeded > run.end + 1) {
+            continue; // the event does not fit this window at all
+        }
+        const runClose = getRunCloseMs(date, run, timezone);
+        if (runClose === null) {
+            continue; // the whole window lies in a spring-forward gap
+        }
         for (let localSlotIndex = run.start; localSlotIndex + slotsNeeded <= run.end + 1; localSlotIndex += step) {
             // Convert the local start time to UTC
             const localTime = slotIndexToTime(localSlotIndex);
             const utcTimestamp = wallClockToUTC(date, localTime, timezone);
             // A wall-clock time that does not exist on this date (the DST
             // spring-forward gap) has no instant of its own: wallClockToUTC
-            // folds it onto the instant an hour later, which is another
-            // candidate's instant. Offering it would list one instant twice.
+            // maps it onto the instant one gap length earlier, which is
+            // another candidate's instant. Offering it would list one
+            // instant twice.
             if (!isWallClockInstant(utcTimestamp, date, localTime, timezone)) {
+                continue;
+            }
+            // The local-index fit above counts wall-clock quarter hours. On
+            // a spring-forward day a run reaching into or across the gap
+            // lasts less than that, so the booking must also END by the
+            // time the run closes (Berlin 01:00–04:00 on 2027-03-28 lasts
+            // two hours: a 120-minute event starts at 01:00 or not at all).
+            if (utcTimestamp + slotsNeeded * SLOT_DURATION_MS > runClose) {
                 continue;
             }
             // Slot indices keyed by UTC date, so a booking that crosses UTC
@@ -334,6 +355,26 @@ export function generateDaySlotsWithTimezone(date, eventLengthMinutes, intervalM
         }
     }
     return possibleSlots;
+}
+/**
+ * The instant a run of local slots closes: its last quarter hour that exists
+ * on `date`, plus 15 minutes. A run that ends inside a spring-forward gap, or
+ * where the gap starts, closes at the transition (Berlin 00:00–02:00 on
+ * 2027-03-28 closes at 01:00Z; America/Santiago 20:00–24:00 on the eve of its
+ * midnight transition closes at 04:00Z) — not at the converted wall-clock end,
+ * which lands one gap length early. A repeated end hour resolves to its
+ * earlier occurrence like every other wall-clock time, which keeps fall-back
+ * days conservative. Null when no slot of the run exists.
+ */
+function getRunCloseMs(date, run, timezone) {
+    for (let localSlotIndex = run.end; localSlotIndex >= run.start; localSlotIndex--) {
+        const localTime = slotIndexToTime(localSlotIndex);
+        const instant = wallClockToUTC(date, localTime, timezone);
+        if (isWallClockInstant(instant, date, localTime, timezone)) {
+            return instant + SLOT_DURATION_MS;
+        }
+    }
+    return null;
 }
 /**
  * Checks if a set of slots are available (not in busySlots array)
@@ -354,15 +395,22 @@ export function isCandidateAvailable(candidate, busyByDate) {
     }
     return true;
 }
+/** The largest instant a Date can hold (±8.64e15 ms, about ±275,000 years). */
+const MAX_INSTANT_MS = 8.64e15;
 /**
  * Shared range guard for every write path that reserves slots: NaN/Infinity
  * and `end <= start` are rejected, because getRequiredSlots maps such a range
  * to ZERO slots and the booking would be created without holding anything.
- * Past-/notice-window checks stay the caller's responsibility by design.
+ * Instants beyond what a Date can hold are rejected too; they used to fail
+ * later with a RangeError. Past-/notice-window checks stay the caller's
+ * responsibility by design.
  */
 export function assertValidRange(start, end) {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
         throw new Error("Invalid time range: end must be after start");
+    }
+    if (Math.abs(start) > MAX_INSTANT_MS || Math.abs(end) > MAX_INSTANT_MS) {
+        throw new Error("Invalid time range: start and end must be representable dates");
     }
 }
 /**
@@ -371,9 +419,10 @@ export function assertValidRange(start, end) {
  *
  * WARNING: `availableSlots` and `busySlots` MUST be in the SAME coordinate
  * system. This function does NO timezone conversion. If you pass a schedule's
- * LOCAL wall-clock slot indices (e.g. from computeAvailabilityForDate) while
- * `busySlots` are UTC indices, the comparison is meaningless (e.g. Europe/Berlin
- * days read as free regardless of bookings). For any timezone-aware schedule,
+ * LOCAL wall-clock slot indices (e.g. from getScheduleDaySlots or
+ * getEffectiveAvailability) while `busySlots` are UTC indices, the
+ * comparison is meaningless (e.g. Europe/Berlin days read as free regardless
+ * of bookings). For any timezone-aware schedule,
  * use generateDaySlotsWithTimezone + areSlotsAvailable instead — that is how
  * getMonthAvailability / getDaySlots decide availability. This function is only
  * used by the legacy (schedule-less, hardcoded 9–17 UTC) path.
@@ -385,6 +434,7 @@ export function assertValidRange(start, end) {
  * @returns boolean
  */
 export function isDayAvailable(eventLengthMinutes, busySlots, intervalMinutes = 15, availableSlots) {
+    assertEventLength(eventLengthMinutes);
     const slotsNeeded = Math.ceil(eventLengthMinutes / 15);
     const step = intervalToStep(intervalMinutes);
     if (availableSlots && availableSlots.length > 0) {

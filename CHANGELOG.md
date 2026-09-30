@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.3 — Unreleased
+## 0.4.3 — 30 September 2026
 
 ### Upgrading
 

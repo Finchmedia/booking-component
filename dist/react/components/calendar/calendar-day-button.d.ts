@@ -1,5 +1,5 @@
 import React from "react";
-import type { CalendarDay } from "../../utils/date-utils";
+import type { CalendarDay } from "../../utils/date-utils.js";
 interface CalendarDayButtonProps {
     day: CalendarDay;
     onDateSelect: (date: Date) => void;
