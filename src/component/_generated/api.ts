@@ -9,6 +9,7 @@
  */
 
 import type * as availability from "../availability.js";
+import type * as booking_lifecycle from "../booking_lifecycle.js";
 import type * as emails from "../emails.js";
 import type * as emails_context from "../emails/context.js";
 import type * as emails_helpers from "../emails/helpers.js";
@@ -47,6 +48,7 @@ import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
   availability: typeof availability;
+  booking_lifecycle: typeof booking_lifecycle;
   emails: typeof emails;
   "emails/context": typeof emails_context;
   "emails/helpers": typeof emails_helpers;

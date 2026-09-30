@@ -14,7 +14,7 @@ import {
 } from "./utils";
 import { isAvailable } from "./availability";
 import { getScheduleByExternalId, getScheduleDaySlots } from "./schedules";
-import { isLinked } from "./resource_event_types";
+import { assertSingleBookable } from "./booking_lifecycle";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import {
     assertDateOrder,
@@ -573,72 +573,9 @@ export const createBooking = mutation({
   },
   returns: bookingDoc,
   handler: async (ctx, args) => {
-    // 0. Basic range validation (shared guard): NaN/Infinity and end <= start
-    // would otherwise silently reserve zero slots.
-    assertValidRange(args.start, args.end);
-    await assertSingleResourceSupported(ctx, args.resourceId);
-
-    // 1. Fetch event type (for snapshot)
-    const eventType = await ctx.db
-      .query("event_types")
-      .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
-      .first();
-
-    if (!eventType) throw new Error("Event type not found");
-
-    // Validate event type is active
-    if (eventType.isActive === false) {
-      throw new Error("Event type is no longer active");
-    }
-
-    // 2. Validate resource exists and is active
-    const resource = await ctx.db
-      .query("resources")
-      .withIndex("by_external_id", (q) => q.eq("id", args.resourceId))
-      .unique();
-
-    if (!resource) throw new Error("Resource not found");
-
-    if (resource.isActive === false) {
-      throw new Error("Resource is no longer active");
-    }
-
-    // A single-resource booking books the resource on its own — not allowed
-    // for add-ons (isStandalone: false); use createMultiResourceBooking with a
-    // standalone resource instead.
-    if (resource.isStandalone === false) {
-      throw new Error(
-        `Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`
-      );
-    }
-
-    // 3. Validate resource is linked to event type
-    if (!(await isLinked(ctx.db, args.resourceId, args.eventTypeId))) {
-      throw new Error("Resource is not available for this event type");
-    }
-
-    // 4. Check availability per calendar day.
-    // Uses getRequiredSlots so a range spanning UTC midnight blocks the
-    // correct slots on each day. The previous `start % 86400000` chunk math
-    // produced endChunk < startChunk across midnight, so the conflict loop
-    // never ran and zero slots were reserved (double bookings possible).
-    const requiredSlots = getRequiredSlots(args.start, args.end);
-    for (const [date, slots] of requiredSlots.entries()) {
-      const dayAvailability = await ctx.db
-        .query("daily_availability")
-        .withIndex("by_resource_date", (q) =>
-          q.eq("resourceId", args.resourceId).eq("date", date)
-        )
-        .unique();
-
-      if (dayAvailability) {
-        for (const slot of slots) {
-          if (dayAvailability.busySlots.includes(slot)) {
-            throw new Error("Time slot no longer available");
-          }
-        }
-      }
-    }
+    // 0–4. Range, pool, event type, resource, link and free slots — shared
+    // with createProvisionalBooking, including the order of the checks.
+    const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
 
     // 5. Generate unique booking UID
     const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -758,59 +695,8 @@ export const createProvisionalBooking = mutation({
   },
   returns: bookingDoc,
   handler: async (ctx, args) => {
-    // Basic range validation — parallel to createBooking.
-    assertValidRange(args.start, args.end);
-    await assertSingleResourceSupported(ctx, args.resourceId);
-
-    const eventType = await ctx.db
-      .query("event_types")
-      .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
-      .first();
-
-    if (!eventType) throw new Error("Event type not found");
-    if (eventType.isActive === false) {
-      throw new Error("Event type is no longer active");
-    }
-
-    const resource = await ctx.db
-      .query("resources")
-      .withIndex("by_external_id", (q) => q.eq("id", args.resourceId))
-      .unique();
-
-    if (!resource) throw new Error("Resource not found");
-    if (resource.isActive === false) {
-      throw new Error("Resource is no longer active");
-    }
-    // Parallel to createBooking: an add-on cannot be held on its own.
-    if (resource.isStandalone === false) {
-      throw new Error(
-        `Resource "${args.resourceId}" cannot be booked alone (isStandalone: false)`
-      );
-    }
-
-    if (!(await isLinked(ctx.db, args.resourceId, args.eventTypeId))) {
-      throw new Error("Resource is not available for this event type");
-    }
-
-    // Check availability per calendar day (spans UTC midnight correctly) —
-    // parallel to createBooking.
-    const requiredSlots = getRequiredSlots(args.start, args.end);
-    for (const [date, slots] of requiredSlots.entries()) {
-      const dayAvailability = await ctx.db
-        .query("daily_availability")
-        .withIndex("by_resource_date", (q) =>
-          q.eq("resourceId", args.resourceId).eq("date", date)
-        )
-        .unique();
-
-      if (dayAvailability) {
-        for (const slot of slots) {
-          if (dayAvailability.busySlots.includes(slot)) {
-            throw new Error("Time slot no longer available");
-          }
-        }
-      }
-    }
+    // The same checks, in the same order, as createBooking.
+    const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
 
     const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const managementToken = generateSecureToken();
