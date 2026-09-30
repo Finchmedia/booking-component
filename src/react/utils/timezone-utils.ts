@@ -152,13 +152,10 @@ const sortTimezones = (timezones: TimezoneOption[]): TimezoneOption[] => {
 // Get available timezones dynamically
 export const getAvailableTimezones = (): TimezoneOption[] => {
   try {
-    // Try modern API first (cast to any for older TypeScript versions)
-    const intl = Intl as any;
-    if (
-      "supportedValuesOf" in intl &&
-      typeof intl.supportedValuesOf === "function"
-    ) {
-      const timezones: string[] = intl.supportedValuesOf("timeZone");
+    // Try modern API first (ES2022; this package compiles against ES2021)
+    const intl: typeof Intl & { supportedValuesOf?: (key: "timeZone") => string[] } = Intl;
+    if (typeof intl.supportedValuesOf === "function") {
+      const timezones = intl.supportedValuesOf("timeZone");
       const filteredTimezones = timezones
         .filter((tz: string) => {
           // Filter out some less common or deprecated timezones

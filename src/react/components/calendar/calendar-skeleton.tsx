@@ -56,7 +56,7 @@ export const CalendarSkeleton: React.FC = () => {
 
           {/* Calendar Days Grid (6 rows x 7 cols = 42 days) */}
           <div className="grid grid-cols-7 gap-2">
-            {[...Array(42)].map((_, i) => (
+            {Array.from({ length: 42 }, (_, i) => (
               <div
                 key={i}
                 className="h-14 w-14 bg-muted animate-pulse rounded-full"
@@ -77,7 +77,7 @@ export const CalendarSkeleton: React.FC = () => {
 
           {/* Time Slots */}
           <div className="px-6 pb-4 space-y-2">
-            {[...Array(6)].map((_, i) => (
+            {Array.from({ length: 6 }, (_, i) => (
               <div
                 key={i}
                 className="h-9 bg-muted animate-pulse rounded-md"

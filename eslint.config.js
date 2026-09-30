@@ -90,6 +90,23 @@ export default [
       ],
     },
   },
+  // React library code: no any-typed flows (L2). An exception needs a local
+  // disable with its reason, at an interop seam only. Tests stub freely; the
+  // in-memory fixtures of test/lint are linted without type information.
+  {
+    files: ["src/react/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.{ts,tsx}", "**/*.test-d.{ts,tsx}", "**/lint-fixture.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/no-unsafe-argument": "error",
+      "@typescript-eslint/no-unsafe-assignment": "error",
+      "@typescript-eslint/no-unsafe-call": "error",
+      "@typescript-eslint/no-unsafe-member-access": "error",
+      "@typescript-eslint/no-unsafe-return": "error",
+      "@typescript-eslint/no-unsafe-enum-comparison": "error",
+      "@typescript-eslint/no-unsafe-unary-minus": "error",
+    },
+  },
   // Tests - stubs may keep deliberately unused '_'-prefixed bindings
   {
     files: ["**/*.test.{ts,tsx}"],

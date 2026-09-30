@@ -314,6 +314,11 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   status stay deprecated. `"rescheduled"` is documented on `Booking.status`
   but is no longer part of its type; it was never stored.
 
+### Maintenance and documentation
+
+- `npm run lint` rejects `any` and the `no-unsafe-*` flows in the React sources
+  (tests excepted). No exception is needed today.
+
 ## 0.4.3 — Unreleased
 
 ### Upgrading
