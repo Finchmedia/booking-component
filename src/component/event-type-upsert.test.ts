@@ -5,7 +5,9 @@
  * does not reactivate a deactivated event type, and an omitted
  * organizationId keeps the stored one. It never re-homes an event type to a
  * different organization (ORGANIZATION_MISMATCH); adopting one stored
- * without organization stays allowed.
+ * without organization stays allowed while every linked resource belongs to
+ * the adopting organization (0.5.0 review: the links stay, so the adoption
+ * must not create links across organizations).
  *
  * Converted from the verification probe gb/zz-cv-gb-n1-eventtype-upsert,
  * which pinned the 0.4.x reactivation and re-homing.
@@ -81,6 +83,42 @@ describe("createEventType on an existing id", () => {
     await t.mutation(api.public.createEventType, etArgs(seed.eventTypeId, { title: "No org given", organizationId: undefined }));
     const stored = (await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId }))!;
     expect([stored.title, stored.organizationId]).toEqual(["No org given", ORG]);
+  });
+
+  test("adoption is refused while a resource of another organization is linked, and writes nothing", async () => {
+    const { t } = setup();
+    await t.mutation(api.public.createEventType, etArgs("et-g", { organizationId: undefined }));
+    for (const [id, organizationId] of [["res-a", "org-a"], ["res-b", "org-b"]]) {
+      await t.mutation(api.resources.createResource, { id, organizationId, name: id, type: "room", timezone: "UTC" });
+      await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: id, eventTypeId: "et-g" });
+    }
+    // A link whose resource was deleted before 0.5.0 does not count.
+    await t.run((ctx) => ctx.db.insert("resource_event_types", { resourceId: "gone", eventTypeId: "et-g" }));
+    const booking = await book(t, { resourceId: "res-b", eventTypeId: "et-g", timezone: "UTC" }, utc(TUESDAY, "09:00"), utc(TUESDAY, "10:00"));
+    const before = (await t.query(api.public.getEventType, { eventTypeId: "et-g" }))!;
+
+    await expect(
+      t.mutation(api.public.createEventType, etArgs("et-g", { organizationId: "org-a", title: "Adopted" })),
+    ).rejects.toMatchObject({
+      data: {
+        code: "ORGANIZATION_MISMATCH",
+        message: 'Event type "et-g" cannot join organization "org-a": its linked resource "res-b" belongs to organization "org-b". Unlink it first',
+      },
+    });
+    expect(await t.query(api.public.getEventType, { eventTypeId: "et-g" })).toEqual(before);
+    expect((await t.query(api.resource_event_types.getResourceIdsForEventType, { eventTypeId: "et-g" })).sort()).toEqual(["gone", "res-a", "res-b"]);
+    // The booking on org-b's resource can still be moved (no ORGANIZATION_MISMATCH).
+    const moved = await t.mutation(api.public.rescheduleBooking, { bookingId: booking._id, newStart: utc(TUESDAY, "11:00"), newEnd: utc(TUESDAY, "12:00") });
+    expect([moved.status, moved.organizationId]).toEqual(["confirmed", undefined]);
+
+    // CONTROL: unlinked, the adoption goes through and keeps the remaining link.
+    await t.mutation(api.resource_event_types.unlinkResourceFromEventType, { resourceId: "res-b", eventTypeId: "et-g" });
+    await t.mutation(api.public.createEventType, etArgs("et-g", { organizationId: "org-a", title: "Adopted" }));
+    const adopted = (await t.query(api.public.getEventType, { eventTypeId: "et-g" }))!;
+    expect([adopted.organizationId, adopted.title]).toEqual(["org-a", "Adopted"]);
+    expect(await t.query(api.maintenance.audit, { check: "link_integrity", limit: 10 })).toMatchObject({
+      issues: [{ check: "link_integrity", resourceId: "gone", eventTypeId: "et-g", problems: ["resourceMissing"] }],
+    });
   });
 
   test("an event type stored without organization can be adopted", async () => {

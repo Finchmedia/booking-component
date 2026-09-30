@@ -217,7 +217,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
               }
             | {
                 check: "booking_integrity";
-                problems: Array<"organizationMissing" | "poolWithoutItems">;
+                problems: Array<
+                  | "organizationMissing"
+                  | "organizationMismatch"
+                  | "poolWithoutItems"
+                >;
                 uid: string;
               }
             | {
@@ -240,7 +244,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           isDone: boolean;
           mismatches: Array<{
             eventTypeOrganizationId: string;
-            organizationId: string;
+            organizationId?: string;
             uid: string;
           }>;
           scanned: number;

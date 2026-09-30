@@ -27,7 +27,7 @@ import {
     buildHookEventV2,
     terminateBooking,
 } from "./booking_lifecycle";
-import { deleteLinks } from "./resource_event_types";
+import { assertLinksAdoptable, deleteLinks } from "./resource_event_types";
 import { generateManagementToken } from "./tokens";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
@@ -1063,7 +1063,8 @@ export const createEventType = mutation({
       // isActive does not reactivate a deactivated event type, and an
       // omitted organizationId keeps the stored one. It never moves an event
       // type to another organization; adopting one stored without
-      // organization is allowed.
+      // organization is allowed when its linked resources belong to the
+      // adopting organization.
       if (
         existing.organizationId !== undefined &&
         args.organizationId !== undefined &&
@@ -1073,6 +1074,11 @@ export const createEventType = mutation({
           "ORGANIZATION_MISMATCH",
           `Event type "${args.id}" belongs to another organization than "${args.organizationId}"`
         );
+      }
+      // Adopting one without organization keeps its links: each linked
+      // resource must belong to the adopting organization.
+      if (existing.organizationId === undefined && args.organizationId !== undefined) {
+        await assertLinksAdoptable(ctx.db, args.id, args.organizationId);
       }
       // Omitted options stay, so the length is checked against the options
       // the upsert leaves behind.
@@ -1779,7 +1785,12 @@ async function moveBooking(
   // The destination follows the current booking rules, for every item, before
   // anything is released: a move after deactivation, unlinking or a change of
   // organization is rejected, by token and by id alike (no admin override).
-  await assertStillBookable(ctx, original, items);
+  const eventType = await assertStillBookable(ctx, original, items);
+  // The new row belongs to its event type's organization, as a new booking
+  // does: a missing or different organization stored before 0.5.0 is not
+  // carried over (the rules above passed, so every resource belongs to it).
+  // Legacy rows and event types without organization keep the stored one.
+  const organizationId = eventType?.organizationId ?? original.organizationId;
 
   // The original ends first: read-your-writes lets overlapping moves reuse
   // only its inventory. Any destination conflict aborts this mutation and
@@ -1794,7 +1805,7 @@ async function moveBooking(
   const newBookingId = await ctx.db.insert("bookings", {
     uid: newUid,
     resourceId: original.resourceId,
-    organizationId: original.organizationId,
+    organizationId,
     eventTypeId: original.eventTypeId,
     eventTitle: original.eventTitle,
     eventDescription: original.eventDescription,
@@ -1840,7 +1851,7 @@ async function moveBooking(
       previousEnd: original.end,
       reason: args.reason,
     }),
-    organizationId: original.organizationId,
+    organizationId,
     payload: {
       originalBookingId: original._id,
       newBookingId,

@@ -65,9 +65,12 @@ bumping.
   (a new one is still active), and an omitted `organizationId` keeps the
   stored one. An ID stored for another organization is rejected with
   `ORGANIZATION_MISMATCH` instead of being moved, links included, to the
-  caller's organization; adopting an event type without organization still
-  works. Scripts that re-run `createEventType` to reactivate must pass
-  `isActive: true` or call `toggleEventTypeActive`.
+  caller's organization. Adopting an event type without organization still
+  works while every resource linked to it belongs to the adopting
+  organization; otherwise `ORGANIZATION_MISMATCH` names the resource, since
+  the kept links would cross organizations: unlink it first. Scripts that
+  re-run `createEventType` to reactivate must pass `isActive: true` or call
+  `toggleEventTypeActive`.
 - `createDateOverride` and `updateDateOverride` take
   `type: "unavailable" | "custom"` (other strings fail argument validation,
   and the generated types narrow), and a `custom` override needs at least one
@@ -111,15 +114,32 @@ bumping.
   resources of that organization: `linkResourceToEventType`,
   `setResourcesForEventType` and `setEventTypesForResource` reject another
   organization's resource with the new code `ORGANIZATION_MISMATCH`, and the
-  two replace mutations then change nothing. Event types without organization
-  still link any resource. The booking rules reject such a resource too, also
-  over links stored before 0.5.0. `createMultiResourceBooking` rejects an
-  `organizationId` that differs from its event type's (0.4.3 stored it): omit
-  it or pass the same one. For an event type without organization the
-  argument is still stored. Unlink the pairs `link_integrity` lists as
-  `crossOrganization`, and link a resource of the event type's organization
-  instead; `backfillBookingOrganizations` reports stored bundles of another
-  organization in `mismatches`.
+  two replace mutations then change nothing. The booking rules reject such a
+  resource too, also over links stored before 0.5.0.
+  `createMultiResourceBooking` rejects an `organizationId` that differs from
+  its event type's (0.4.3 stored it): omit it or pass the same one. Event
+  types without organization still link any resource, but one booking holds
+  resources of one organization only: a bundle that mixes organizations is
+  rejected, and its `organizationId`, when given, must be the organization of
+  its resources (0.4.3 stored any value; without it the bundle has none, like
+  a single booking of that event type). Moves and confirmations apply this
+  to stored bundles too. A move gives the new booking its event type's
+  organization, so a booking stored without one or with another one moves
+  into it. Unlink the pairs `link_integrity` lists as `crossOrganization`,
+  and link a resource of the event type's organization instead;
+  `booking_integrity` lists stored bookings of another organization as
+  `organizationMismatch`.
+- `backfillBookingOrganizations` (new in 0.4.3) gives a booking without
+  organization its event type's only when every resource the booking holds
+  (every item of a bundle) exists and belongs to that organization;
+  otherwise that organization would list the booking and its hooks would
+  receive the booker's data although it owns none of the resources. It lists
+  the other rows in `mismatches` without an `organizationId`, which is
+  therefore optional in the result type: handle its absence where you read
+  `mismatches`. Nothing assigns these bookings an organization; cancel them
+  or leave them unscoped. `booking_integrity` reports them as
+  `organizationMismatch` and keeps `organizationMissing` for the rows the
+  backfill fills.
 - `getMonthAvailability` and `getDaySlots` need complete schedule arguments
   (F12): `resourceTimezone` alone, `availableSlots` without
   `resourceTimezone` or `scheduleId`, and a `resourceTimezone` other than the
@@ -252,7 +272,14 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
 - Slot queries no longer open days a schedule keeps closed when given
   partial schedule arguments or an unknown schedule (F12, N15).
 - Re-running `createEventType` no longer reactivates an event type or moves
-  another organization's event type to the caller's (N14).
+  another organization's event type to the caller's (N14), and adopting an
+  event type without organization no longer keeps its links to other
+  organizations' resources.
+- A bundle of an event type without organization no longer holds resources
+  of two organizations or names a third organization, and a move no longer
+  carries a missing or foreign organization over to the new booking.
+- `backfillBookingOrganizations` no longer gives a booking an organization
+  that owns none of its resources.
 - The pool flag no longer strands a resource's single-resource bookings
   (N16).
 - A resource or event type created again with a deleted ID starts unlinked

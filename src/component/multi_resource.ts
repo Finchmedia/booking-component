@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, assertValidRange } from "./utils";
 import {
+  assertOrganizationOfResources,
   assertResourcesBookable,
   buildHookEventV2,
   loadBookableEventType,
@@ -186,8 +187,9 @@ export const createMultiResourceBooking = mutation({
 
     // The bundle belongs to its event type's organization, as single bookings
     // do. A different organizationId is rejected; for an event type without
-    // organization the argument is the fallback. Used for the row and for
-    // hook routing alike.
+    // organization the argument is the fallback, and it must be the
+    // organization of the booked resources (checked below). Used for the row
+    // and for hook routing alike.
     if (
       eventType.organizationId !== undefined &&
       args.organizationId !== undefined &&
@@ -201,14 +203,17 @@ export const createMultiResourceBooking = mutation({
     const organizationId = eventType.organizationId ?? args.organizationId;
 
     // 2. Every item exists, is active, is linked and shares the event type's
-    // organization; at least one of them is standalone (the add-on rule
-    // counts only these eligible resources). Unknown ids are rejected.
-    await assertResourcesBookable(
+    // organization, all items share one organization (also under an event
+    // type without organization), and at least one of them is standalone
+    // (the add-on rule counts only these eligible resources). Unknown ids are
+    // rejected.
+    const resourcesOrganizationId = await assertResourcesBookable(
       ctx,
       eventType,
       args.resources.map((r) => r.resourceId),
       "bundle"
     );
+    assertOrganizationOfResources(eventType, args.organizationId, resourcesOrganizationId, args.resources[0].resourceId);
 
     // 3. Check ALL resources are available (fail-fast)
     const requiredSlots = getRequiredSlots(args.start, args.end);

@@ -113,7 +113,7 @@ const CODE_DOCS: Record<BookingErrorCode, { meaning: string; thrownBy: string }>
   },
   ORGANIZATION_MISMATCH: {
     meaning:
-      "Organizations do not match: a resource of another organization than an organization-scoped event type, a bundle's `organizationId` that differs from its event type's, or an existing event type ID of another organization in `createEventType`.",
+      "Organizations do not match: a resource of another organization than an organization-scoped event type, resources of two organizations in one booking, a bundle's `organizationId` that differs from its event type's or, for an event type without organization, from its resources' (also a stored one on a move or confirmation), an existing event type ID of another organization in `createEventType`, or adopting an event type without organization while a resource of another organization is linked to it.",
     thrownBy: "`createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`), `createEventType`, `linkResourceToEventType`, `setResourcesForEventType`, `setEventTypesForResource`",
   },
   SCHEDULE_NOT_FOUND: {

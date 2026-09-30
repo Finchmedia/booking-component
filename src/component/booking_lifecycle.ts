@@ -25,7 +25,9 @@ import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 // (pending or provisional -> confirmed):
 // - the event type exists and is active;
 // - every resource exists, is active, is linked to the event type and
-//   belongs to the event type's organization when it has one;
+//   belongs to the event type's organization when it has one; for an event
+//   type without organization all resources belong to one organization, and
+//   the organization a booking names (argument or stored) is theirs;
 // - at least one resource is standalone (not an add-on, isStandalone: false).
 // Cancelling, declining and expiring never check them, and deactivating or
 // unlinking configuration never ends an existing booking. Legacy
@@ -42,6 +44,21 @@ function subject(kind: "Event type" | "Resource", id: string, texts: RuleTexts):
   return texts === "bundle" ? `${kind} "${id}"` : kind;
 }
 
+/** An event type takes bookings unless deactivated. */
+function isActiveEventType(eventType: Doc<"event_types">): boolean {
+  return eventType.isActive !== false;
+}
+
+/** A resource takes bookings unless deactivated. */
+function isActiveResource(resource: Doc<"resources">): boolean {
+  return resource.isActive !== false;
+}
+
+/** A resource may be booked on its own unless it is an add-on (isStandalone: false). */
+function isStandaloneResource(resource: Doc<"resources">): boolean {
+  return resource.isStandalone !== false;
+}
+
 /** The event type of a booking: it exists and is active. */
 export async function loadBookableEventType(
   ctx: QueryCtx,
@@ -56,7 +73,7 @@ export async function loadBookableEventType(
   if (!eventType) {
     throwBookingError("EVENT_TYPE_NOT_FOUND", `${subject("Event type", eventTypeId, texts)} not found`);
   }
-  if (eventType.isActive === false) {
+  if (!isActiveEventType(eventType)) {
     throwBookingError("EVENT_TYPE_INACTIVE", `${subject("Event type", eventTypeId, texts)} is no longer active`);
   }
   return eventType;
@@ -64,17 +81,20 @@ export async function loadBookableEventType(
 
 /**
  * The resources of a booking under `eventType`, in the order given: each
- * exists, is active, is linked and shares the event type's organization, and
- * one of them is standalone. For "single" the one resource must be
- * standalone itself, checked before its link, as createBooking always did.
+ * exists, is active, is linked and shares the event type's organization, all
+ * share one organization, and one of them is standalone. For "single" the
+ * one resource must be standalone itself, checked before its link, as
+ * createBooking always did. Returns the organization of the resources: the
+ * event type's when it has one, else the one they share.
  */
 export async function assertResourcesBookable(
   ctx: QueryCtx,
   eventType: Doc<"event_types">,
   resourceIds: string[],
   texts: RuleTexts,
-): Promise<void> {
+): Promise<string | undefined> {
   let hasStandaloneResource = false;
+  let first: Doc<"resources"> | undefined;
   for (const resourceId of resourceIds) {
     const resource = await ctx.db
       .query("resources")
@@ -83,14 +103,14 @@ export async function assertResourcesBookable(
 
     const name = subject("Resource", resourceId, texts);
     if (!resource) throwBookingError("RESOURCE_NOT_FOUND", `${name} not found`);
-    if (resource.isActive === false) {
+    if (!isActiveResource(resource)) {
       throwBookingError("RESOURCE_INACTIVE", `${name} is no longer active`);
     }
 
     // A single-resource booking books the resource on its own — not allowed
     // for add-ons (isStandalone: false); use createMultiResourceBooking with a
     // standalone resource instead.
-    if (texts === "single" && resource.isStandalone === false) {
+    if (texts === "single" && !isStandaloneResource(resource)) {
       throwBookingError(
         "RESOURCE_NOT_STANDALONE",
         `Resource "${resourceId}" cannot be booked alone (isStandalone: false)`
@@ -106,7 +126,17 @@ export async function assertResourcesBookable(
         `${name} belongs to another organization than the event type`
       );
     }
-    if (resource.isStandalone !== false) hasStandaloneResource = true;
+    // An event type without organization links any organization's
+    // resources, but one booking never spans two organizations. (With an
+    // organization, the check above already admits only its own.)
+    first ??= resource;
+    if (resource.organizationId !== first.organizationId) {
+      throwBookingError(
+        "ORGANIZATION_MISMATCH",
+        `${name} belongs to another organization than resource "${first.id}"`
+      );
+    }
+    if (isStandaloneResource(resource)) hasStandaloneResource = true;
   }
 
   // An add-on (e.g. rental equipment) needs a standalone companion, and only
@@ -118,6 +148,31 @@ export async function assertResourcesBookable(
       `Resource ${ids} cannot be booked alone (isStandalone: false): add a standalone resource to the booking`
     );
   }
+  return eventType.organizationId ?? first?.organizationId;
+}
+
+/**
+ * Rejects an organization a booking of an event type without organization
+ * names (the bundle argument, or the stored value on a move or
+ * confirmation) when it is not the one its resources share: that booking
+ * would be listed for, and notify, an organization that owns none of them.
+ */
+export function assertOrganizationOfResources(
+  eventType: Doc<"event_types">,
+  organizationId: string | undefined,
+  resourcesOrganizationId: string | undefined,
+  firstResourceId: string,
+): void {
+  if (
+    eventType.organizationId === undefined &&
+    organizationId !== undefined &&
+    organizationId !== resourcesOrganizationId
+  ) {
+    throwBookingError(
+      "ORGANIZATION_MISMATCH",
+      `Organization "${organizationId}" does not match the organization of resource "${firstResourceId}"`
+    );
+  }
 }
 
 /**
@@ -125,23 +180,22 @@ export async function assertResourcesBookable(
  * configuration: its event type and every resource it holds (all
  * booking_items of a bundle, else its resource). Moves call it for the
  * destination before releasing anything; confirmations before confirming.
+ * Returns the event type, or null for a legacy row.
  */
 export async function assertStillBookable(
   ctx: QueryCtx,
   booking: Doc<"bookings">,
   items: Array<{ resourceId: string }>,
-): Promise<void> {
+): Promise<Doc<"event_types"> | null> {
   // A legacy createReservation row has no event type; it keeps the legacy
   // path's rules.
-  if (booking.eventTypeId === "legacy") return;
+  if (booking.eventTypeId === "legacy") return null;
   const texts = items.length > 0 ? "bundle" : "single";
+  const resourceIds = items.length > 0 ? items.map((item) => item.resourceId) : [booking.resourceId];
   const eventType = await loadBookableEventType(ctx, booking.eventTypeId, texts);
-  await assertResourcesBookable(
-    ctx,
-    eventType,
-    items.length > 0 ? items.map((item) => item.resourceId) : [booking.resourceId],
-    texts,
-  );
+  const organizationId = await assertResourcesBookable(ctx, eventType, resourceIds, texts);
+  assertOrganizationOfResources(eventType, booking.organizationId, organizationId, resourceIds[0]);
+  return eventType;
 }
 
 /**

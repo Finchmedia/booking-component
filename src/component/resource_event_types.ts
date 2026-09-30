@@ -66,6 +66,36 @@ function assertLinkable(resource: Doc<"resources">, eventType: Doc<"event_types"
 }
 
 /**
+ * Before an event type without organization is adopted into
+ * `organizationId` (createEventType on its id): the links stay, so every
+ * linked resource must belong to that organization, as the link mutations
+ * require. Links whose resource no longer exists do not count
+ * (link_integrity lists them).
+ */
+export async function assertLinksAdoptable(
+  db: DatabaseReader,
+  eventTypeId: string,
+  organizationId: string
+): Promise<void> {
+  const links = await db
+    .query("resource_event_types")
+    .withIndex("by_event_type", (q) => q.eq("eventTypeId", eventTypeId))
+    .collect();
+  for (const resourceId of unique(links.map((link) => link.resourceId))) {
+    const resource = await db
+      .query("resources")
+      .withIndex("by_external_id", (q) => q.eq("id", resourceId))
+      .first();
+    if (resource && resource.organizationId !== organizationId) {
+      throwBookingError(
+        "ORGANIZATION_MISMATCH",
+        `Event type "${eventTypeId}" cannot join organization "${organizationId}": its linked resource "${resource.id}" belongs to organization "${resource.organizationId}". Unlink it first`
+      );
+    }
+  }
+}
+
+/**
  * Deletes every link row of a resource or of an event type and returns how
  * many there were. deleteResource and deleteEventType call it, so an id
  * created again later starts unlinked.

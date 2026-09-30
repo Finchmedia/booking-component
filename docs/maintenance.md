@@ -89,7 +89,7 @@ Each issue names its check and the row (`eventTypeId`, `scheduleId`, `resourceId
 | `resource_config` | resources | `timezone`: a zone `Intl` rejects. | `updateResource` with a valid zone. |
 | `date_override_config` | date overrides | `type`: neither `unavailable` nor `custom`. `customHours`: `custom` without windows. Both read as the weekly hours. `date`: not a padded `YYYY-MM-DD` day, so lookups by date miss it. | `updateDateOverride` to `unavailable`, or to `custom` with `customHours`. For `date`, create the override on the padded date and delete the old row with `deleteDateOverride`. |
 | `link_integrity` | resource ↔ event type links | `resourceMissing`, `eventTypeMissing`: the link names a deleted row. `crossOrganization`: the event type has an organization and the resource another one; bookings over the link are rejected. `duplicate`: a second row of the same pair. | `resource_event_types.deleteAllLinksForResource` or `deleteAllLinksForEventType` for the deleted ID. `unlinkResourceFromEventType` for a cross-organization pair; link a resource of the event type's organization instead. `linkResourceToEventType` again for a duplicate, which collapses the pair. |
-| `booking_integrity` | bookings | `organizationMissing`: no organization although the event type has one. `poolWithoutItems`: an active single-resource booking on a resource that became a pool; it cannot be moved. | `maintenance.backfillBookingOrganizations`. Cancel a `poolWithoutItems` booking, or set `isFungible: false` on its resource again (a pool of capacity one accepts that). |
+| `booking_integrity` | bookings and their items | `organizationMissing`: no organization although the event type has one, and every resource the booking holds belongs to it. `organizationMismatch`: another organization than the event type's, or none while a resource it holds is missing or belongs to another organization; the backfill lists these and leaves them. `poolWithoutItems`: an active single-resource booking on a resource that became a pool; it cannot be moved. | `maintenance.backfillBookingOrganizations` for `organizationMissing`. An `organizationMismatch` booking whose resources belong to the event type's organization takes it when moved; cancel the others, or keep them as they are. Cancel a `poolWithoutItems` booking, or set `isFungible: false` on its resource again (a pool of capacity one accepts that). |
 | `booking_status_invalid` | bookings and their history | `status`: the booking's status is not one of the six. `historyStatus`: a history row's is not. The issue's `status` is the stored value. | The 0.5.0 deploy refuses such rows and names them; correct them in the dashboard. On a deployed 0.5.0 the check confirms that none is left. |
 | `event_length_invalid` (0.4.3) | event types | A length or length option that is not a positive number; the slot queries reject it. The issue shows the stored values. | `updateEventType`. `event_type_config` lists these rows too. |
 | `f10_weekday` (0.4.3) | bookings | An upcoming booking that 0.4.2 admitted on a weekday without opening hours (schedules at UTC+12 and beyond). The issue shows `start`, `scheduleId` and the local `date`. | Bookings are not moved; contact the booker or keep it. |
@@ -97,8 +97,10 @@ Each issue names its check and the row (`eventTypeId`, `scheduleId`, `resourceId
 ## One-time repairs
 
 - `maintenance.backfillBookingOrganizations({ cursor, limit, dryRun })` gives bookings without an
-  organization their event type's. It never rewrites a booking whose organization differs from
-  its event type's; it lists those in `mismatches`. A second run updates nothing.
+  organization their event type's when every resource they hold (every item of a bundle) exists
+  and belongs to it. It never rewrites a booking whose organization differs from its event
+  type's, and never stamps one on a booking whose resources belong elsewhere; it lists both in
+  `mismatches` (the latter without `organizationId`). A second run updates nothing.
 - `presence.sweepOrphanedHolds({ cursor, limit, dryRun })` removes presence holds whose cleanup
   job was lost; run it once after upgrading from 0.4.2 or earlier.
 - `resource_event_types.deleteAllLinksForResource({ resourceId })` and

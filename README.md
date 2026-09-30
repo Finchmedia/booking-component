@@ -355,8 +355,9 @@ shows how and lists every check with its repair.
   [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).
   Pool quantities use this API; ordinary single-resource flows reject pools.
   A bundle belongs to its event type's organization: an `organizationId` that
-  differs is rejected, and for an event type without organization the
-  argument is used. After upgrading from 0.4.2 or earlier, run
+  differs is rejected. For an event type without organization the argument
+  is used, and it must be the organization of the booked resources, which
+  all belong to one. After upgrading from 0.4.2 or earlier, run
   `maintenance.backfillBookingOrganizations` once to fill that organization on
   older bundles; see the CHANGELOG.
 - **Lifecycle:** confirmation, decline, cancellation and atomic rescheduling.
@@ -388,7 +389,10 @@ shows how and lists every check with its repair.
   resource exist and are active, each resource is linked to the event type
   and belongs to its organization when it has one, and one resource is not
   an add-on (`isStandalone: false`). A booking belongs to its event type's
-  organization. A bundle's primary resource is its first item and may be an
+  organization; under an event type without organization its resources
+  belong to one organization, and a bundle's `organizationId`, when given, is
+  theirs. A move gives the new booking its event type's organization. A
+  bundle's primary resource is its first item and may be an
   add-on. There is no administrator override: to move or
   confirm after deactivating or unlinking, reactivate or relink first.
   Cancelling, declining and expiring are always allowed, and deactivating

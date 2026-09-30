@@ -11,8 +11,9 @@
  *   that is not a canonical calendar day;
  * - "link_integrity": links to deleted rows, across organizations, and
  *   second rows of a pair;
- * - "booking_integrity": a missing organization the event type has, and
- *   active item-less bookings on pools;
+ * - "booking_integrity": a missing organization the event type has (only
+ *   when the booking's resources belong to it), another one or a missing
+ *   one that must not be filled, and active item-less bookings on pools;
  * - "booking_status_invalid": a booking or history status outside
  *   BOOKING_STATUSES.
  * Invalid rows are seeded with raw inserts, because the component's writes
@@ -281,6 +282,56 @@ describe("booking_integrity", () => {
     ]);
     await t.mutation(api.maintenance.backfillBookingOrganizations, { limit: 100, dryRun: false });
     expect((await audit(t, "booking_integrity")).issues).toEqual([]);
+  });
+});
+
+describe("booking_integrity: organizations follow the booking's resources", () => {
+  test("a missing organization is fillable only when every resource belongs to the event type's; other ones are mismatches", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t); // res-1 ↔ et-1, org-1
+    await seedResource(t, { resourceId: "res-2", eventTypeId: "et-2", organizationId: "org-2" });
+    const single = await book(t, seed, at("08:00"), at("08:00") + HOUR);
+    const bundleOfOwn = await t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId: seed.eventTypeId, resources: [{ resourceId: seed.resourceId }],
+      start: at("09:00"), end: at("09:00") + HOUR, timezone: "UTC", booker: BOOKER, location: LOCATION,
+    });
+    const bundleWithForeign = await t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId: seed.eventTypeId, resources: [{ resourceId: seed.resourceId }],
+      start: at("10:00"), end: at("10:00") + HOUR, timezone: "UTC", booker: BOOKER, location: LOCATION,
+    });
+    const foreignOrganization = await book(t, seed, at("11:00"), at("11:00") + HOUR);
+    const clean = await book(t, seed, at("12:00"), at("12:00") + HOUR); // control
+    await t.run(async (ctx) => {
+      for (const booking of [single, bundleOfOwn, bundleWithForeign]) {
+        await ctx.db.patch(booking._id, { organizationId: undefined });
+      }
+      // A 0.4.x bundle item of another organization's resource.
+      await ctx.db.insert("booking_items", { bookingId: bundleWithForeign._id, resourceId: "res-2", quantity: 1 });
+      // Stored for another organization, as 0.4.3 stored an explicit argument.
+      await ctx.db.patch(foreignOrganization._id, { organizationId: "org-2" });
+    });
+
+    expect((await auditAll(t, "booking_integrity", 2)).issues).toEqual([
+      { check: "booking_integrity", uid: single.uid, problems: ["organizationMissing"] },
+      { check: "booking_integrity", uid: bundleOfOwn.uid, problems: ["organizationMissing"] },
+      { check: "booking_integrity", uid: bundleWithForeign.uid, problems: ["organizationMismatch"] },
+      { check: "booking_integrity", uid: foreignOrganization.uid, problems: ["organizationMismatch"] },
+    ]);
+    expect(clean.organizationId).toBe(ORG);
+
+    // The backfill fills exactly the organizationMissing rows and lists the others.
+    const backfill = await t.mutation(api.maintenance.backfillBookingOrganizations, { limit: 100, dryRun: false });
+    expect(backfill).toMatchObject({
+      updated: 2,
+      mismatches: [
+        { uid: bundleWithForeign.uid, eventTypeOrganizationId: ORG },
+        { uid: foreignOrganization.uid, organizationId: "org-2", eventTypeOrganizationId: ORG },
+      ],
+    });
+    expect((await auditAll(t, "booking_integrity")).issues.map((issue) => ("problems" in issue ? issue.problems : null))).toEqual([
+      ["organizationMismatch"],
+      ["organizationMismatch"],
+    ]);
   });
 });
 

@@ -185,10 +185,9 @@ export const getDailyAvailability = query({
 
 /**
  * Largest `limit` of one audit call. A row costs at most one read of its own
- * (an override, its link pair, its first bundle item) or, for
- * booking_status_invalid, its history rows (one per status change), plus
- * lookups of the event types, resources and schedules it names, each once
- * per page.
+ * (an override, its link pair) or, for a booking, its items (one per bundle
+ * item) or history rows (one per status change), plus lookups of the event
+ * types, resources and schedules it names, each once per page.
  */
 const MAX_AUDIT_LIMIT = 500;
 
@@ -336,7 +335,7 @@ const auditIssue = v.union(
   v.object({
     check: v.literal("booking_integrity"),
     uid: v.string(),
-    problems: problems("organizationMissing", "poolWithoutItems"),
+    problems: problems("organizationMissing", "organizationMismatch", "poolWithoutItems"),
   }),
   v.object({
     check: v.literal("booking_status_invalid"),
@@ -464,6 +463,34 @@ function lookups(db: DatabaseReader) {
     schedule: perPage((id) => db.query("schedules").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
   };
 }
+
+/** A booking's items (bundles); none for a single-resource booking. */
+function bookingItems(db: DatabaseReader, bookingId: Id<"bookings">): Promise<Doc<"booking_items">[]> {
+  return db
+    .query("booking_items")
+    .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
+    .collect();
+}
+
+/** The resources a booking holds: its booking_items, else its resource. */
+function heldResourceIds(booking: Doc<"bookings">, items: Doc<"booking_items">[]): string[] {
+  return items.length > 0 ? items.map((item) => item.resourceId) : [booking.resourceId];
+}
+
+/**
+ * Whether every resource a booking holds exists and belongs to
+ * `organizationId`: only then may a missing booking organization become it.
+ */
+async function resourcesBelongTo(
+  resource: (id: string) => Promise<Doc<"resources"> | null>,
+  resourceIds: string[],
+  organizationId: string
+): Promise<boolean> {
+  for (const resourceId of resourceIds) {
+    if ((await resource(resourceId))?.organizationId !== organizationId) return false;
+  }
+  return true;
+}
 type Lookups = ReturnType<typeof lookups>;
 type ProblemsOf<C extends AuditIssue["check"]> = Extract<AuditIssue, { check: C; problems: unknown }>["problems"];
 
@@ -534,9 +561,14 @@ async function linkIssue(
 }
 
 /**
- * booking_integrity: no organizationId although the booking's event type has
- * one (backfillBookingOrganizations fills it; legacy rows are skipped), and
- * an active booking without items on a pool (isFungible), which moves reject.
+ * booking_integrity, for bookings of an event type with an organization
+ * (legacy rows are skipped): `organizationMissing`, no organizationId while
+ * every resource the booking holds belongs to the event type's organization
+ * (backfillBookingOrganizations fills it); `organizationMismatch`, another
+ * organizationId, or none while a resource is missing or belongs to another
+ * organization (the backfill lists these and leaves them). Also
+ * `poolWithoutItems`: an active booking without items on a pool
+ * (isFungible), which moves reject.
  */
 async function bookingIntegrityIssue(
   db: DatabaseReader,
@@ -544,16 +576,18 @@ async function bookingIntegrityIssue(
   find: Lookups
 ): Promise<AuditIssue | null> {
   const found: ProblemsOf<"booking_integrity"> = [];
-  if (booking.organizationId === undefined && booking.eventTypeId !== "legacy") {
-    const eventType = await find.eventType(booking.eventTypeId);
-    if (eventType?.organizationId !== undefined) found.push("organizationMissing");
+  let items: Doc<"booking_items">[] | undefined;
+  const loadItems = async () => (items ??= await bookingItems(db, booking._id));
+  const eventTypeOrganizationId =
+    booking.eventTypeId === "legacy" ? undefined : (await find.eventType(booking.eventTypeId))?.organizationId;
+  if (eventTypeOrganizationId !== undefined && booking.organizationId !== eventTypeOrganizationId) {
+    const fillable =
+      booking.organizationId === undefined &&
+      (await resourcesBelongTo(find.resource, heldResourceIds(booking, await loadItems()), eventTypeOrganizationId));
+    found.push(fillable ? "organizationMissing" : "organizationMismatch");
   }
   if (holdsActiveInventory(booking.status) && (await find.resource(booking.resourceId))?.isFungible === true) {
-    const item = await db
-      .query("booking_items")
-      .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
-      .first();
-    if (!item) found.push("poolWithoutItems");
+    if ((await loadItems()).length === 0) found.push("poolWithoutItems");
   }
   return found.length > 0 ? { check: "booking_integrity", uid: booking.uid, problems: found } : null;
 }
@@ -628,8 +662,9 @@ async function auditPage<T extends AuditTable>(
  * - "event_type_config" (event types), "schedule_config" (schedules),
  *   "resource_config" (resources), "date_override_config" (date overrides),
  *   "link_integrity" (resource ↔ event type links), "booking_integrity"
- *   and "booking_status_invalid" (bookings, the latter with their history
- *   rows): each issue lists its `problems`; see the functions above.
+ *   (bookings, with their items) and "booking_status_invalid" (bookings,
+ *   with their history rows): each issue lists its `problems`; see the
+ *   functions above.
  *
  * Start without a cursor and pass `continueCursor` back until `isDone`; the
  * cursor is the complete by_creation_time key, so rows with equal creation
@@ -695,14 +730,17 @@ export const audit = query({
 // ============================================
 
 /**
- * Largest `limit` of one backfill call. A booking costs at most one patch,
- * plus its event type once per page.
+ * Largest `limit` of one backfill call. A booking costs at most one patch
+ * and, without organization, its items, plus its event type and resources
+ * once per page.
  */
 const MAX_BACKFILL_LIMIT = 500;
 
 const organizationMismatch = v.object({
   uid: v.string(),
-  organizationId: v.string(),
+  // Absent for a booking without organization whose resources do not all
+  // belong to the event type's organization.
+  organizationId: v.optional(v.string()),
   eventTypeOrganizationId: v.string(),
 });
 
@@ -713,11 +751,16 @@ const organizationMismatch = v.object({
  * were missing from organization lists and organization hooks.
  *
  * - `updated` counts the rows given their event type's organization
- *   (with `dryRun`, the rows that would be; nothing is written).
+ *   (with `dryRun`, the rows that would be; nothing is written). A row is
+ *   given it only when every resource it holds (every item of a bundle)
+ *   exists and belongs to that organization.
  * - `skipped` counts rows that stay without one: legacy createReservation
  *   rows, and rows whose event type is deleted or has no organization.
  * - `mismatches` lists rows whose organization differs from their event
- *   type's. They are reported, never rewritten.
+ *   type's, and rows without one whose resources do not all belong to the
+ *   event type's organization (no `organizationId`). They are reported,
+ *   never rewritten: stamping the event type's organization on another
+ *   organization's booking would list it and send its hooks there.
  *
  * Idempotent: a second run updates nothing. Start without a cursor and pass
  * `continueCursor` back until `isDone`; call it from a host internal mutation.
@@ -749,6 +792,9 @@ export const backfillBookingOrganizations = mutation({
 
     // Event type id → its organization (undefined: deleted or none).
     const organizations = new Map<string, string | undefined>();
+    const resource = perPage((id) =>
+      ctx.db.query("resources").withIndex("by_external_id", (q) => q.eq("id", id)).first()
+    );
     let updated = 0;
     let skipped = 0;
     const mismatches: Array<typeof organizationMismatch.type> = [];
@@ -768,6 +814,11 @@ export const backfillBookingOrganizations = mutation({
       if (booking.organizationId === undefined) {
         if (eventTypeOrganizationId === undefined) {
           skipped++;
+          continue;
+        }
+        const resourceIds = heldResourceIds(booking, await bookingItems(ctx.db, booking._id));
+        if (!(await resourcesBelongTo(resource, resourceIds, eventTypeOrganizationId))) {
+          mismatches.push({ uid: booking.uid, eventTypeOrganizationId });
           continue;
         }
         updated++;
