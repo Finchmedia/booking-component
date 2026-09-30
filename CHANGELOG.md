@@ -36,6 +36,14 @@
 - Schedule, resource and event-type writes reject a time zone that `Intl`
   does not accept. Rows stored with one stay readable and can still be
   edited; a patch that sets a valid zone repairs them.
+- Bundles created by 0.4.2 or earlier without `organizationId` have no
+  organization (nor do single bookings from before 0.3.0). Run the new
+  `maintenance.backfillBookingOrganizations` once, like the sweep above
+  (`cursor`, `limit` 1–500, `dryRun`), to give them their event type's.
+  It skips legacy `createReservation` rows and rows whose event type is
+  deleted or has none, and lists rows whose organization differs from their
+  event type's without changing them. From then on those bundles appear in
+  organization lists and reach organization-scoped hooks.
 
 ### Security
 
@@ -208,6 +216,13 @@ The internal email mutations keep their names and arguments, so jobs queued by
   cancellation may carry it. Cancellations never set the field, a chain of
   moves is linked step by step, and hooks are unchanged. Moves made before
   0.4.3 do not have it.
+- `maintenance.backfillBookingOrganizations({ cursor?, limit, dryRun })`, a
+  component mutation, and the matching `makeInternalBookingAPI` wrapper: the
+  repair described under Upgrading. It returns `scanned`, `updated` (with
+  `dryRun`, the rows it would update), `skipped`, `mismatches`
+  (`{ uid, organizationId, eventTypeOrganizationId }`), `continueCursor` and
+  `isDone`, and is idempotent. Backfilled bundles have the existing "bundle
+  with organization" v1 hook payload shape.
 
 ### Maintenance and documentation
 

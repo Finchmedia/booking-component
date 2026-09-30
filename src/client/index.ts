@@ -809,5 +809,17 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         return await ctx.runQuery(component.maintenance.audit, args);
       },
     }),
+
+    // One-time repair after upgrading from 0.4.2 or earlier; see CHANGELOG.
+    backfillBookingOrganizations: internalMutationGeneric({
+      args: {
+        cursor: v.optional(v.union(v.string(), v.null())),
+        limit: v.number(),
+        dryRun: v.boolean(),
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runMutation(component.maintenance.backfillBookingOrganizations, args);
+      },
+    }),
   };
 }

@@ -111,6 +111,10 @@ endpoints to authorized host wrappers.
 - **Bundles and pools:** reserve several resources atomically through the
   [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).
   Pool quantities use this API; ordinary single-resource flows reject pools.
+  A bundle created without `organizationId` belongs to its event type's
+  organization. After upgrading from 0.4.2 or earlier, run
+  `maintenance.backfillBookingOrganizations` once to fill that organization on
+  older bundles; see the CHANGELOG.
 - **Lifecycle:** confirmation, decline, cancellation and atomic rescheduling.
   Your host controls the expiry of provisional bookings.
 - **Presence:** temporary selection indicators. The final booking mutation checks

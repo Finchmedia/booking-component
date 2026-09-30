@@ -141,6 +141,24 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         },
         Name
       >;
+      backfillBookingOrganizations: FunctionReference<
+        "mutation",
+        "internal",
+        { cursor?: string | null; dryRun: boolean; limit: number },
+        {
+          continueCursor: string | null;
+          isDone: boolean;
+          mismatches: Array<{
+            eventTypeOrganizationId: string;
+            organizationId: string;
+            uid: string;
+          }>;
+          scanned: number;
+          skipped: number;
+          updated: number;
+        },
+        Name
+      >;
       getDailyAvailability: FunctionReference<
         "query",
         "internal",

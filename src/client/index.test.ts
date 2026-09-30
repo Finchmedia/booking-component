@@ -20,6 +20,7 @@ export const {
   heartbeat,
   sweepOrphanedHolds,
   audit,
+  backfillBookingOrganizations,
 } = makeInternalBookingAPI(components.booking);
 
 const testApi = (
@@ -39,6 +40,7 @@ const testApi = (
       heartbeat: typeof heartbeat;
       sweepOrphanedHolds: typeof sweepOrphanedHolds;
       audit: typeof audit;
+      backfillBookingOrganizations: typeof backfillBookingOrganizations;
     };
   }>
 )["index.test"];
@@ -208,6 +210,22 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     await expect(t.query(testApi.audit, { check: "f10_weekday", limit: 0 })).rejects.toThrow(
       "limit must be an integer from 1 to 500"
     );
+  });
+
+  test("backfillBookingOrganizations via the maintenance wrapper", async () => {
+    await seedThroughWrappers(t);
+    await bookTenToEleven(t); // stores org-1 already
+    expect(await t.mutation(testApi.backfillBookingOrganizations, { limit: 10, dryRun: false })).toEqual({
+      scanned: 1,
+      updated: 0,
+      skipped: 0,
+      mismatches: [],
+      continueCursor: expect.any(String),
+      isDone: true,
+    });
+    await expect(
+      t.mutation(testApi.backfillBookingOrganizations, { limit: 0, dryRun: true })
+    ).rejects.toThrow("limit must be an integer from 1 to 500");
   });
 
   test("getDailyAvailability via the maintenance wrapper", async () => {

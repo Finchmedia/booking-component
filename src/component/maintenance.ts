@@ -193,10 +193,12 @@ function encodeAuditCursor(row: { _creationTime: number; _id: string }): string 
   return JSON.stringify([row._creationTime, row._id]);
 }
 
+/** `name` labels the error: "audit" or "backfill". */
 function parseAuditCursor<T extends AuditTable>(
   db: DatabaseReader,
   table: T,
-  cursor: string
+  cursor: string,
+  name = "audit"
 ): AuditCursor<T> {
   let key: unknown;
   try {
@@ -208,7 +210,7 @@ function parseAuditCursor<T extends AuditTable>(
     const id = db.normalizeId(table, key[1]);
     if (id) return { creationTime: key[0], id };
   }
-  throw new Error("Invalid audit cursor");
+  throw new Error(`Invalid ${name} cursor`);
 }
 
 /**
@@ -419,6 +421,114 @@ export const audit = query({
       scanned: rows.length,
       continueCursor: last ? encodeAuditCursor(last) : (args.cursor ?? null),
       isDone: rows.length < args.limit,
+    };
+  },
+});
+
+// ============================================
+// BACKFILL (one-time repair after upgrading)
+// ============================================
+
+/**
+ * Largest `limit` of one backfill call. A booking costs at most one patch,
+ * plus its event type once per page.
+ */
+const MAX_BACKFILL_LIMIT = 500;
+
+const organizationMismatch = v.object({
+  uid: v.string(),
+  organizationId: v.string(),
+  eventTypeOrganizationId: v.string(),
+});
+
+/**
+ * Fills a missing booking organizationId from the booking's event type, one
+ * page of bookings per call. Until 0.4.3 bundles created without
+ * `organizationId` stored none (and single bookings before 0.3.0), so they
+ * were missing from organization lists and organization hooks.
+ *
+ * - `updated` counts the rows given their event type's organization
+ *   (with `dryRun`, the rows that would be; nothing is written).
+ * - `skipped` counts rows that stay without one: legacy createReservation
+ *   rows, and rows whose event type is deleted or has no organization.
+ * - `mismatches` lists rows whose organization differs from their event
+ *   type's. They are reported, never rewritten.
+ *
+ * Idempotent: a second run updates nothing. Start without a cursor and pass
+ * `continueCursor` back until `isDone`; call it from a host internal mutation.
+ * Bookings created during a run sort after the cursor and are visited too.
+ */
+export const backfillBookingOrganizations = mutation({
+  args: {
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.number(),
+    dryRun: v.boolean(),
+  },
+  returns: v.object({
+    scanned: v.number(),
+    updated: v.number(),
+    skipped: v.number(),
+    mismatches: v.array(organizationMismatch),
+    continueCursor: v.union(v.string(), v.null()),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_BACKFILL_LIMIT) {
+      throw new Error(`limit must be an integer from 1 to ${MAX_BACKFILL_LIMIT}`);
+    }
+    const cursor =
+      typeof args.cursor === "string"
+        ? parseAuditCursor(ctx.db, "bookings", args.cursor, "backfill")
+        : null;
+    const bookings = await rowsAfter(ctx.db, "bookings", cursor, args.limit);
+
+    // Event type id → its organization (undefined: deleted or none).
+    const organizations = new Map<string, string | undefined>();
+    let updated = 0;
+    let skipped = 0;
+    const mismatches: Array<typeof organizationMismatch.type> = [];
+    for (const booking of bookings) {
+      let eventTypeOrganizationId: string | undefined;
+      if (booking.eventTypeId !== "legacy") {
+        if (!organizations.has(booking.eventTypeId)) {
+          const eventType = await ctx.db
+            .query("event_types")
+            .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
+            .first();
+          organizations.set(booking.eventTypeId, eventType?.organizationId);
+        }
+        eventTypeOrganizationId = organizations.get(booking.eventTypeId);
+      }
+
+      if (booking.organizationId === undefined) {
+        if (eventTypeOrganizationId === undefined) {
+          skipped++;
+          continue;
+        }
+        updated++;
+        if (!args.dryRun) {
+          await ctx.db.patch(booking._id, { organizationId: eventTypeOrganizationId });
+        }
+      } else if (
+        eventTypeOrganizationId !== undefined &&
+        booking.organizationId !== eventTypeOrganizationId
+      ) {
+        mismatches.push({
+          uid: booking.uid,
+          organizationId: booking.organizationId,
+          eventTypeOrganizationId,
+        });
+      }
+    }
+
+    const last = bookings[bookings.length - 1];
+    return {
+      scanned: bookings.length,
+      updated,
+      skipped,
+      mismatches,
+      continueCursor: last ? encodeAuditCursor(last) : (args.cursor ?? null),
+      isDone: bookings.length < args.limit,
     };
   },
 });

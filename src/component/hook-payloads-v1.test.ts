@@ -110,6 +110,14 @@ async function seedWorld(t: T) {
     });
   const pending = (time: string) => book(t, approval, at(time), at(time) + HOUR);
 
+  /** A bundle stored without organization by 0.4.2, repaired by the backfill. */
+  const backfilled = async (time: string) => {
+    const created = await bundle(time);
+    await t.run((ctx) => ctx.db.patch(created._id, { organizationId: undefined }));
+    await t.mutation(api.maintenance.backfillBookingOrganizations, { limit: 500, dryRun: false });
+    return (await t.query(api.public.getBooking, { bookingId: created._id }))!;
+  };
+
   /** One booking per stored shape, 09:00–17:00 on res-1 (bundles also hold pool-1). */
   const stored = async (): Promise<Record<StoredShape, Doc<"bookings">>> => {
     const moved = await single("14:00");
@@ -123,6 +131,7 @@ async function seedWorld(t: T) {
         bookingId: moved._id, newStart: at("15:00"), newEnd: at("16:00"),
       }),
       "bundle with derived organization": await bundle("16:00"),
+      "bundle backfilled by backfillBookingOrganizations": await backfilled("14:00"),
     };
   };
   return { single, bundle, legacy, provisional, pending, stored };
@@ -135,7 +144,8 @@ type StoredShape =
   | "legacy createReservation row"
   | "location without value"
   | "rescheduled booking"
-  | "bundle with derived organization";
+  | "bundle with derived organization"
+  | "bundle backfilled by backfillBookingOrganizations";
 
 /** Emits once per pinned stored shape and compares every capture with its pin. */
 async function expectPerStoredShape(
@@ -184,6 +194,7 @@ const STORED: Record<StoredShape, Record<string, Shape>> = {
   // Since 0.4.3 (F7) a bundle created without organizationId takes the event
   // type's, which is the existing "bundle with organization" shape.
   "bundle with derived organization": STORED_MODERN,
+  "bundle backfilled by backfillBookingOrganizations": STORED_MODERN,
 };
 /** Envelope keys per stored shape: organizationId travels only when the booking has one. */
 const ENVELOPE: Record<StoredShape, string[]> = {
@@ -194,6 +205,7 @@ const ENVELOPE: Record<StoredShape, string[]> = {
   "location without value": WITH_ORG,
   "rescheduled booking": WITH_ORG,
   "bundle with derived organization": WITH_ORG,
+  "bundle backfilled by backfillBookingOrganizations": WITH_ORG,
 };
 const ALL_STORED = Object.keys(STORED) as StoredShape[];
 
