@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { parseCivilDate, weekdayOf, type CivilDate } from "../shared/time.js";
 import { assertDateOrder, assertTimeZone } from "./input_validation";
@@ -456,29 +457,34 @@ function timeToSlot(time: string): number {
   return hours * 4 + Math.floor(minutes / 15);
 }
 
-/**
- * Plain async helper that computes effective available slots for a scheduleId + date.
- * Exported so other component files (e.g. public.ts) can call it directly with ctx.db
- * instead of going through ctx.runQuery.
- *
- * Weekly hours are those of the calendar day's own weekday, not the weekday
- * some instant of it has in the zone — reading `${date}T12:00Z` in the zone
- * used the NEXT day's hours in zones at UTC+12 and beyond (New Zealand, Fiji,
- * Tonga, Samoa, Kiribati; Norfolk Island in summer).
- */
-export async function computeAvailabilityForDate(
+/** The schedule with this external id, or null. */
+export async function getScheduleByExternalId(
   ctx: QueryCtx,
-  scheduleId: string,
-  date: CivilDate
-): Promise<{ availableSlots: number[] }> {
-  const schedule = await ctx.db
+  scheduleId: string
+): Promise<Doc<"schedules"> | null> {
+  return await ctx.db
     .query("schedules")
     .withIndex("by_external_id", (q) => q.eq("id", scheduleId))
     .unique();
+}
 
+/**
+ * Effective LOCAL slot indices (0–95, in the schedule's zone) of a schedule on
+ * a calendar day: the date override when one exists, otherwise the weekly
+ * hours of that day's own weekday. The weekday is the calendar day's, not the
+ * weekday some instant of it has in the zone — reading `${date}T12:00Z` in the
+ * zone used the NEXT day's hours in zones at UTC+12 and beyond (New Zealand,
+ * Fiji, Tonga, Samoa, Kiribati; Norfolk Island in summer).
+ * A missing schedule yields the default business hours 09:00–17:00.
+ */
+export async function getScheduleDaySlots(
+  ctx: QueryCtx,
+  schedule: Doc<"schedules"> | null,
+  date: CivilDate
+): Promise<number[]> {
   if (!schedule) {
     // No schedule = default business hours (9-17)
-    return { availableSlots: Array.from({ length: 32 }, (_, i) => i + 36) };
+    return Array.from({ length: 32 }, (_, i) => i + 36);
   }
 
   // Check for date override
@@ -491,7 +497,7 @@ export async function computeAvailabilityForDate(
 
   if (override) {
     if (override.type === "unavailable") {
-      return { availableSlots: [] };
+      return [];
     }
     if (override.customHours && override.customHours.length > 0) {
       const slots: number[] = [];
@@ -502,7 +508,7 @@ export async function computeAvailabilityForDate(
           slots.push(i);
         }
       }
-      return { availableSlots: slots };
+      return slots;
     }
   }
 
@@ -513,7 +519,7 @@ export async function computeAvailabilityForDate(
   );
 
   if (dayEntries.length === 0) {
-    return { availableSlots: [] };
+    return [];
   }
 
   const slots: number[] = [];
@@ -527,7 +533,7 @@ export async function computeAvailabilityForDate(
     }
   }
 
-  return { availableSlots: slots.sort((a, b) => a - b) };
+  return slots.sort((a, b) => a - b);
 }
 
 /**
@@ -540,6 +546,9 @@ export const getEffectiveAvailability = query({
     date: v.string(),
   },
   returns: v.object({ availableSlots: v.array(v.number()) }),
-  handler: async (ctx, args) =>
-    computeAvailabilityForDate(ctx, args.scheduleId, parseCivilDate(args.date)),
+  handler: async (ctx, args) => {
+    const date = parseCivilDate(args.date);
+    const schedule = await getScheduleByExternalId(ctx, args.scheduleId);
+    return { availableSlots: await getScheduleDaySlots(ctx, schedule, date) };
+  },
 });

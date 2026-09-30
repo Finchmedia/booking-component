@@ -156,6 +156,19 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     expect(after).toEqual(before.filter((time) => time !== "2027-03-09T09:00:00.000Z"));
   });
 
+  test("getDaySlots({ scheduleId }) through the wrapper equals the complete-argument flow", async () => {
+    await seedThroughWrappers(t);
+    const byId: Array<{ time: string }> = await t.query(testApi.getDaySlots, {
+      resourceId: RESOURCE,
+      date: DATE,
+      eventLength: 60,
+      slotInterval: 60,
+      scheduleId: SCHEDULE,
+    });
+    expect(byId.map((slot) => slot.time)).toEqual(await daySlots(t));
+    expect(byId).toHaveLength(8);
+  });
+
   test("getDailyAvailability via the maintenance wrapper", async () => {
     await seedThroughWrappers(t);
     expect(await t.query(testApi.getDailyAvailability, { resourceId: RESOURCE, date: DATE })).toBeNull();

@@ -161,6 +161,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         resourceTimezone: v.optional(v.string()),
         availableSlots: v.optional(v.array(v.number())),
         excludeBookingUid: v.optional(v.string()),
+        scheduleId: v.optional(v.string()),
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getDaySlots, args);

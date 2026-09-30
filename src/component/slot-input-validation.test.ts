@@ -239,6 +239,7 @@ describe("calendar dates", () => {
       );
       expect(slots.length).toBeGreaterThan(0);
       await same((date) => t.query(api.public.getDaySlots, { resourceId: seed.resourceId, date, eventLength: 60 }));
+      await same((date) => t.query(api.public.getDaySlots, { resourceId: seed.resourceId, date, eventLength: 60, scheduleId: seed.scheduleId }));
       const month = await same((date) =>
         t.query(api.public.getMonthAvailability, {
           resourceId: seed.resourceId,

@@ -103,6 +103,12 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - Booking writes and `getAvailability` reject instants beyond what a `Date`
   can hold with `Invalid time range: start and end must be representable
   dates` instead of failing later with a `RangeError`.
+- `getMonthAvailability` with `scheduleId` but no `resourceTimezone` reads the
+  schedule's hours in the schedule's own zone. It compared them with UTC
+  bookings, and an empty day fell back to 09:00–17:00 UTC, so closed and fully
+  booked days read as open. A `resourceTimezone` that differs from the
+  schedule's zone is still used and now logs a warning. Other argument shapes
+  are unchanged.
 - Schedule, resource and event-type writes reject a time zone that `Intl`
   does not accept, such as `Mars/Olympus_Mons`, `UTC+2` or `""`
   (`Invalid time zone "…"`); patches check the zone only when they set one.
@@ -140,6 +146,10 @@ The internal email mutations keep their names and arguments, so jobs queued by
   mutation, and the matching `makeInternalBookingAPI` wrapper: the one-time
   repair described under Upgrading. It returns the counts `scanned`, `deleted`
   and `rescheduled` plus `continueCursor` and `isDone`.
+- `getDaySlots` accepts an optional `scheduleId`. It supplies the day's
+  effective hours when `availableSlots` is omitted and the schedule's zone when
+  `resourceTimezone` is omitted, so `{ resourceId, date, eventLength,
+  scheduleId }` replaces the `getEffectiveAvailability` + `getDaySlots` pair.
 
 ### Maintenance and documentation
 
@@ -160,8 +170,9 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - Time-sensitive tests can run under a chosen process time zone
   (`src/testing/process-time-zone.ts`).
 - Regression suites for weekdays in 14 zones, DST days (including a sweep
-  against an `Intl`-only oracle), input validation and zone validation. The
-  time-dependent ones run under several process time zones.
+  against an `Intl`-only oracle), input validation, zone validation and the
+  new schedule arguments. The time-dependent ones run under several process
+  time zones.
 
 ## 0.4.2 — 23 September 2026
 

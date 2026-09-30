@@ -667,6 +667,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           excludeBookingUid?: string;
           resourceId: string;
           resourceTimezone?: string;
+          scheduleId?: string;
           slotInterval?: number;
         },
         Array<{ time: string }>,
