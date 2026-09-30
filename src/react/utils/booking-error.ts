@@ -1,4 +1,5 @@
 import { ConvexError } from "convex/values";
+import type { BookingErrorCode } from "../../shared/booking-errors.js";
 
 const GENERIC_MESSAGE = "Something went wrong. Please try again.";
 
@@ -11,10 +12,12 @@ const BOOKING_UNAVAILABLE = "This booking could not be found, or its link is no 
  * can fail with (`data.code` of its `ConvexError({ code, message })`; the
  * root entry lists all codes as `BOOKING_ERROR_CODES`). Used only when an
  * error carries a code but no message, for example from a host that forwards
- * the code alone. Codes are read as plain strings: a code this version does
- * not know, or a host's own code, gets the fallback.
+ * the code alone. The entries are typed against the shared
+ * `BookingErrorCode`, so renaming or removing a code breaks the build here
+ * instead of silently falling back; lookups still take plain strings: a code
+ * this version does not know, or a host's own code, gets the fallback.
  */
-const CODE_MESSAGES: ReadonlyMap<string, string> = new Map([
+const CODE_MESSAGE_ENTRIES: ReadonlyArray<readonly [BookingErrorCode, string]> = [
   ["SLOT_UNAVAILABLE", TIME_TAKEN],
   ["QUANTITY_UNAVAILABLE", TIME_TAKEN],
   ["EVENT_TYPE_NOT_FOUND", NOT_BOOKABLE],
@@ -31,7 +34,8 @@ const CODE_MESSAGES: ReadonlyMap<string, string> = new Map([
   ["INVALID_STATE", "This booking can no longer be changed."],
   ["INVALID_RANGE", "This time cannot be booked. Please choose another time."],
   ["INVALID_INPUT", "Please check your details and try again."],
-]);
+];
+const CODE_MESSAGES: ReadonlyMap<string, string> = new Map<string, string>(CODE_MESSAGE_ENTRIES);
 
 /**
  * Resolves the text shown for a failed booking or reschedule.

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { ConvexError } from "convex/values";
+import { BOOKING_ERROR_CODES, type BookingErrorCode } from "../../shared/booking-errors.js";
 import { resolveBookingErrorMessage } from "./booking-error";
 
 const GENERIC = "Something went wrong. Please try again.";
@@ -47,24 +48,33 @@ const TAKEN = "This time is no longer available. Please choose another time.";
 const NOT_BOOKABLE = "This booking option is no longer available.";
 const UNAVAILABLE = "This booking could not be found, or its link is no longer valid.";
 
+/** Typed against the shared codes, as the map is: a renamed or removed code fails typecheck here too. */
+const CODE_TEXTS: Array<[BookingErrorCode, string]> = [
+  ["SLOT_UNAVAILABLE", TAKEN],
+  ["QUANTITY_UNAVAILABLE", TAKEN],
+  ["EVENT_TYPE_NOT_FOUND", NOT_BOOKABLE],
+  ["EVENT_TYPE_INACTIVE", NOT_BOOKABLE],
+  ["RESOURCE_NOT_FOUND", NOT_BOOKABLE],
+  ["RESOURCE_INACTIVE", NOT_BOOKABLE],
+  ["RESOURCE_NOT_LINKED", NOT_BOOKABLE],
+  ["RESOURCE_NOT_STANDALONE", NOT_BOOKABLE],
+  ["POOL_REQUIRES_BUNDLE", NOT_BOOKABLE],
+  ["ORGANIZATION_MISMATCH", NOT_BOOKABLE],
+  ["BOOKING_NOT_FOUND", UNAVAILABLE],
+  ["INVALID_TOKEN", UNAVAILABLE],
+  ["INVALID_STATE", "This booking can no longer be changed."],
+  ["INVALID_RANGE", "This time cannot be booked. Please choose another time."],
+  ["INVALID_INPUT", "Please check your details and try again."],
+];
+
 describe("resolveBookingErrorMessage with error codes", () => {
-  it.each([
-    ["SLOT_UNAVAILABLE", TAKEN],
-    ["QUANTITY_UNAVAILABLE", TAKEN],
-    ["EVENT_TYPE_NOT_FOUND", NOT_BOOKABLE],
-    ["EVENT_TYPE_INACTIVE", NOT_BOOKABLE],
-    ["RESOURCE_NOT_FOUND", NOT_BOOKABLE],
-    ["RESOURCE_INACTIVE", NOT_BOOKABLE],
-    ["RESOURCE_NOT_LINKED", NOT_BOOKABLE],
-    ["RESOURCE_NOT_STANDALONE", NOT_BOOKABLE],
-    ["POOL_REQUIRES_BUNDLE", NOT_BOOKABLE],
-    ["ORGANIZATION_MISMATCH", NOT_BOOKABLE],
-    ["BOOKING_NOT_FOUND", UNAVAILABLE],
-    ["INVALID_TOKEN", UNAVAILABLE],
-    ["INVALID_STATE", "This booking can no longer be changed."],
-    ["INVALID_RANGE", "This time cannot be booked. Please choose another time."],
-    ["INVALID_INPUT", "Please check your details and try again."],
-  ])("maps code-only data %s to a generic message", (code, expected) => {
+  it("maps only codes the component has", () => {
+    expect(CODE_TEXTS.every(([code]) => (BOOKING_ERROR_CODES as readonly string[]).includes(code))).toBe(true);
+    // CONTROL: a host's own code is not one
+    expectTypeOf<"SLOT_TAKEN">().not.toExtend<BookingErrorCode>();
+  });
+
+  it.each(CODE_TEXTS)("maps code-only data %s to a generic message", (code, expected) => {
     const error = clientError({ code });
     expect(resolveBookingErrorMessage(error)).toBe(expected);
     expect(resolveBookingErrorMessage(error)).not.toContain("CONVEX");
