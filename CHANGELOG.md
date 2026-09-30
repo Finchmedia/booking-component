@@ -204,12 +204,13 @@
   zone; east of the display zone it was shifted by a day.
 - `@mrfinch/booking/react` uses fully specified relative imports
   (`./context.js`, `./components/calendar/index.js`). The entry now loads with
-  Node's ESM loader and Vitest's default dependency handling, builds with plain
-  webpack 5 or Rspack, and keeps its types under `moduleResolution: "nodenext"`.
-  Before, these failed with `ERR_MODULE_NOT_FOUND` or "Can't resolve
-  './context'", and nodenext typed every React export as `any`. Next.js and Vite
-  builds were not affected. A Vitest `server.deps.inline` workaround for the
-  package keeps working and is no longer needed.
+  Node's ESM loader and Vitest's default dependency handling, and keeps its
+  types under `moduleResolution: "nodenext"`. Before, these failed with
+  `ERR_MODULE_NOT_FOUND`, and nodenext typed every React export as `any`. The
+  same extensionless imports made plain webpack 5 and Rspack builds fail with
+  "Can't resolve './context'". Next.js and Vite builds were not affected. A
+  Vitest `server.deps.inline` workaround for the package keeps working and is
+  no longer needed.
 - `BookingProvider` resolves admin operations from `adminApi`. With the
   generated `adminApi={api.admin}`, every admin operation resolved to the public
   module (`public:createResource`), so calls failed as unknown functions or ran a

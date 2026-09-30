@@ -136,6 +136,57 @@ describe("Node ESM import of the compiled package", () => {
   });
 });
 
+describe("TypeScript consumer with moduleResolution nodenext", () => {
+  it("types the /react entry and the root helpers instead of collapsing them to any", () => {
+    // Inside the copy, so it resolves the package's own name through "exports"
+    const consumer = join(packageDir, "consumer.mts");
+    writeFileSync(
+      consumer,
+      [
+        'import { createElement } from "react";',
+        'import { Booker, type BookerProps } from "@mrfinch/booking/react";',
+        'import { effectiveSlotInterval } from "@mrfinch/booking";',
+        "",
+        'const props: BookerProps = { eventTypeId: "e", resourceId: "r" };',
+        "export const valid = createElement(Booker, props);",
+        "// @ts-expect-error unused (and failing) if Booker's props collapse to any",
+        'export const invalid = createElement(Booker, { eventTypeId: 1, resourceId: "r" });',
+        "",
+        "export const grid: number = effectiveSlotInterval({ lengthInMinutes: 30 });",
+        "// @ts-expect-error unused (and failing) if the root types collapse to any",
+        'export const wrongGrid = effectiveSlotInterval({ lengthInMinutes: "30" });',
+      ].join("\n")
+    );
+    const compile = () =>
+      execFileSync(
+        process.execPath,
+        [
+          join(ROOT, "node_modules/typescript/bin/tsc"),
+          "--noEmit",
+          "--strict",
+          "--skipLibCheck",
+          "--module",
+          "nodenext",
+          "--moduleResolution",
+          "nodenext",
+          "--target",
+          "es2022",
+          "--lib",
+          "es2022,dom",
+          consumer,
+        ],
+        { cwd: packageDir, encoding: "utf8", stdio: "pipe" }
+      );
+    let output = "";
+    try {
+      compile();
+    } catch (error) {
+      output = `${error.stdout}${error.stderr}`;
+    }
+    expect(output).toBe("");
+  });
+});
+
 describe("deprecation markers in the compiled /react types", () => {
   it("reach the .d.ts for BookingValidation* and the 'rescheduled' status", () => {
     const types = readFileSync(join(packageDir, "dist/react/types.d.ts"), "utf8");

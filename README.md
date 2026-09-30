@@ -105,9 +105,10 @@ connect your management pages to the returned booking UID and secret token.
   today and past days are judged in that zone. A time zone selector and the
   event type's `lockTimeZoneToggle` are not implemented yet.
 - **Module loading:** `@mrfinch/booking/react` is ESM with fully specified
-  imports. It loads in Node, in Vitest without `server.deps.inline`, and in
-  webpack 5, Rspack, Next.js and Vite builds, and keeps its types under
-  `moduleResolution: "bundler"` or `"nodenext"`.
+  imports. It loads in Node and in Vitest without `server.deps.inline`, and
+  keeps its types under `moduleResolution: "bundler"` or `"nodenext"`. The
+  extensionless relative imports that plain webpack 5 and Rspack builds could
+  not resolve ("Can't resolve './context'") are gone.
 
 The Booker and Calendar treat a `null` event type as deleted. Until 0.5.0 the
 component's `getEventType` throws `Event type not found: <id>` instead, so make
