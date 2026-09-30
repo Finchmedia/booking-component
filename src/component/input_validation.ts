@@ -8,8 +8,8 @@
 // with silent nonsense (candidates on fully booked days, another day's hours).
 // They now fail fast with an "Invalid …" error (code INVALID_INPUT); calendar
 // days are parsed with parseCivilDate (src/shared/time.ts). 0.5.0 adds
-// event-type settings. Host policy (allowed durations, notice, horizon)
-// stays in the host.
+// range caps and event-type settings. Host policy (allowed durations,
+// notice, horizon) stays in the host.
 
 import type { CivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
@@ -60,6 +60,36 @@ export function isValidTimeZone(timeZone: string): boolean {
 export function assertTimeZone(timeZone: string): void {
   if (!isValidTimeZone(timeZone)) {
     throwBookingError("INVALID_INPUT", `Invalid time zone "${timeZone}": expected an IANA time zone such as "Europe/Berlin"`);
+  }
+}
+
+// ============================================
+// RANGE CAPS (0.5.0)
+// ============================================
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Most calendar days one getMonthAvailability call answers, dateFrom and dateTo included. */
+export const MAX_MONTH_RANGE_DAYS = 93;
+
+/** Longest getAvailability range: 366 days. Booking writes have no such cap. */
+export const MAX_AVAILABILITY_RANGE_MS = 366 * DAY_MS;
+
+/** Rejects a range of calendar days longer than `maxDays` (both ends included). */
+export function assertDateRangeLength(dateFrom: CivilDate, dateTo: CivilDate, maxDays: number): void {
+  const days = (Date.parse(`${dateTo}T00:00:00.000Z`) - Date.parse(`${dateFrom}T00:00:00.000Z`)) / DAY_MS + 1;
+  if (days > maxDays) {
+    throwBookingError(
+      "INVALID_INPUT",
+      `Invalid date range: dateFrom ${dateFrom} to dateTo ${dateTo} covers ${days} days; at most ${maxDays} are allowed`
+    );
+  }
+}
+
+/** Rejects a getAvailability range longer than MAX_AVAILABILITY_RANGE_MS. */
+export function assertAvailabilityRangeLength(start: number, end: number): void {
+  if (end - start > MAX_AVAILABILITY_RANGE_MS) {
+    throwBookingError("INVALID_RANGE", "Invalid time range: at most 366 days are allowed");
   }
 }
 

@@ -4,7 +4,9 @@
  *
  * Inputs without a meaning are rejected with an "Invalid …" error at every
  * entry point, before any early return; unpadded dates are read as the same
- * day. getAvailability stops at the first busy UTC date.
+ * day. getAvailability stops at the first busy UTC date. Since 0.5.0
+ * getMonthAvailability answers at most 93 days and getAvailability at most
+ * 366 days per call.
  */
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
@@ -287,9 +289,11 @@ describe("getAvailability range", () => {
     await occupy(TUESDAY, range(36, 40)); // 09:00–10:00Z busy
     const start = utc(TUESDAY, "09:00");
     // Until 0.4.2 the whole range's slot list was built before the first
-    // read: about a second for 30 years, far beyond the test timeout for 1000.
-    expect(await t.query(api.public.getAvailability, { resourceId, start, end: start + 1000 * YEAR_MS })).toBe(false);
-    expect(await t.query(api.public.getAvailability, { resourceId, start, end: start + 30 * YEAR_MS })).toBe(false);
+    // read: about a second for 30 years. 0.5.0 caps the range at 366 days.
+    expect(await t.query(api.public.getAvailability, { resourceId, start, end: start + 366 * DAY_MS })).toBe(false);
+    await expect(
+      t.query(api.public.getAvailability, { resourceId, start, end: start + 1000 * YEAR_MS })
+    ).rejects.toThrow("Invalid time range: at most 366 days are allowed");
     // CONTROL: the hour after is free.
     expect(await t.query(api.public.getAvailability, { resourceId, start: start + 60 * 60 * 1000, end: start + 2 * 60 * 60 * 1000 })).toBe(true);
 
@@ -304,17 +308,22 @@ describe("getAvailability range", () => {
     ).toBe(true);
   });
 
-  test("a free range reads one day per UTC date: 4,095 dates fit Convex's index-range limit", async () => {
+  test("a free range of 366 days, the maximum, fits the transaction limits; one millisecond more is rejected", async () => {
     setup();
     const t: T = convexTest({ schema, modules, transactionLimits: true });
     const seed = await seedResource(t);
     const start = utc("2027-01-01", "00:00");
-    // One index range for the resource, one per UTC date.
-    expect(await t.query(api.public.getAvailability, { resourceId: seed.resourceId, start, end: start + YEAR_MS })).toBe(true);
-    expect(await t.query(api.public.getAvailability, { resourceId: seed.resourceId, start, end: start + 4095 * DAY_MS })).toBe(true);
-    await expect(
-      t.query(api.public.getAvailability, { resourceId: seed.resourceId, start, end: start + 4096 * DAY_MS })
-    ).rejects.toThrow("Too many index ranges");
+    // One index range for the resource, one per UTC date. 0.4.3 went on
+    // until Convex's index-range limit (4,095 dates).
+    expect(await t.query(api.public.getAvailability, { resourceId: seed.resourceId, start, end: start + 366 * DAY_MS })).toBe(true);
+    for (const end of [start + 366 * DAY_MS + 1, start + 4095 * DAY_MS]) {
+      await expect(t.query(api.public.getAvailability, { resourceId: seed.resourceId, start, end })).rejects.toThrow(
+        "Invalid time range: at most 366 days are allowed"
+      );
+    }
+    // CONTROL: the cap is the query's; a booking may be longer (multi-day bookings).
+    const long = await book(t, seed, start, start + 400 * DAY_MS);
+    expect(long.status).toBe("confirmed");
   }, 30_000);
 
   test("instants a Date cannot hold are an invalid range, and nothing is written", async () => {
@@ -332,5 +341,48 @@ describe("getAvailability range", () => {
     const last = await book(t, seed, MAX - 60 * 60 * 1000, MAX);
     expect(last.status).toBe("confirmed");
     expect(await getBusySlots(t, seed.resourceId, "+275760-09-12")).toEqual(range(92, 96));
+  });
+});
+
+describe("getMonthAvailability range", () => {
+  const monthArgs = (seed: Awaited<ReturnType<typeof seedResourceWithSchedule>>, dateFrom: string, dateTo: string) => ({
+    resourceId: seed.resourceId,
+    dateFrom,
+    dateTo,
+    eventLength: 60,
+    scheduleId: seed.scheduleId,
+  });
+
+  test("93 days, the maximum, are answered within the transaction limits; 94 are rejected", async () => {
+    setup();
+    const t: T = convexTest({ schema, modules, transactionLimits: true });
+    const seed = await seedResourceWithSchedule(t);
+    await book(t, seed, berlin(TUESDAY, "10:00"), berlin(TUESDAY, "11:00"));
+    // 2027-03-01 to 2027-06-01: 93 days, both ends included.
+    const month = await t.query(api.public.getMonthAvailability, monthArgs(seed, "2027-03-01", "2027-06-01"));
+    expect(Object.keys(month)).toHaveLength(93);
+    expect(month[TUESDAY]).toBe(true);
+    expect(month["2027-03-07"]).toBe(false); // a Sunday
+    await expect(
+      t.query(api.public.getMonthAvailability, monthArgs(seed, "2027-03-01", "2027-06-02"))
+    ).rejects.toThrow("Invalid date range: dateFrom 2027-03-01 to dateTo 2027-06-02 covers 94 days; at most 93 are allowed");
+  }, 30_000);
+
+  test("the cap applies to the legacy path and before the pooled-resource early return", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t);
+    const pool = await seedFungibleResource(t);
+    for (const resourceId of [seed.resourceId, pool.resourceId]) {
+      await expect(
+        t.query(api.public.getMonthAvailability, { resourceId, dateFrom: "2027-01-01", dateTo: "2027-12-31", eventLength: 60 })
+      ).rejects.toThrow("covers 365 days; at most 93 are allowed");
+    }
+    // CONTROL: one day, and unpadded dates counted as the padded days.
+    expect(
+      Object.keys(await t.query(api.public.getMonthAvailability, { resourceId: seed.resourceId, dateFrom: TUESDAY, dateTo: TUESDAY, eventLength: 60 }))
+    ).toEqual([TUESDAY]);
+    expect(
+      Object.keys(await t.query(api.public.getMonthAvailability, { resourceId: seed.resourceId, dateFrom: "2027-3-1", dateTo: "2027-6-1", eventLength: 60 }))
+    ).toHaveLength(93);
   });
 });

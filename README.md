@@ -273,7 +273,10 @@ endpoints to authorized host wrappers.
   above 0, and the length is one of its options when there are any; an
   update that changes only the length or only the options is checked
   against the stored other field. A date override is `unavailable`, or
-  `custom` with at least one window. Violations throw `INVALID_INPUT`.
+  `custom` with at least one window. `getMonthAvailability` answers at most
+  93 days and `getAvailability` at most 366 days per call; bookings
+  themselves have no length cap. Violations throw `INVALID_INPUT`
+  (`INVALID_RANGE` for the `getAvailability` cap).
 - **Links and deletes:** an event type with an `organizationId` links only
   resources of that organization (`ORGANIZATION_MISMATCH`); an event type
   without one links any resource. `deleteResource` and `deleteEventType`

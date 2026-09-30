@@ -29,7 +29,10 @@ import { generateManagementToken } from "./tokens";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
 import {
+    MAX_MONTH_RANGE_DAYS,
+    assertAvailabilityRangeLength,
     assertDateOrder,
+    assertDateRangeLength,
     assertEventLength,
     assertEventTypeNumbers,
     assertLengthInOptions,
@@ -288,6 +291,11 @@ export const getEventType = query({
     },
 });
 
+/**
+ * Whether [start, end) is free on a resource that is booked by time slot.
+ * Ranges longer than 366 days throw INVALID_RANGE (0.5.0); booking writes
+ * have no such cap.
+ */
 export const getAvailability = query({
     args: {
         resourceId: v.string(),
@@ -296,6 +304,8 @@ export const getAvailability = query({
     },
     returns: v.boolean(),
     handler: async (ctx, args) => {
+        assertValidRange(args.start, args.end);
+        assertAvailabilityRangeLength(args.start, args.end);
         return await isAvailable(ctx, args.resourceId, args.start, args.end);
     },
 });
@@ -323,7 +333,8 @@ export const getAvailability = query({
  * whose uid it knows. Passing both throws.
  *
  * Rejects an eventLength that is not a positive number, impossible dates,
- * dateFrom after dateTo, resourceTimezone without scheduleId, a
+ * dateFrom after dateTo, a range of more than 93 days (MAX_MONTH_RANGE_DAYS,
+ * both ends included), resourceTimezone without scheduleId, a
  * resourceTimezone that differs from the schedule's, an unknown
  * scheduleId (see resolveScheduleArgs) and both reschedule arguments at once.
  */
@@ -345,6 +356,7 @@ export const getMonthAvailability = query({
         const dateFrom = parseCivilDate(args.dateFrom);
         const dateTo = parseCivilDate(args.dateTo);
         assertDateOrder(dateFrom, dateTo);
+        assertDateRangeLength(dateFrom, dateTo, MAX_MONTH_RANGE_DAYS);
         assertEventLength(eventLength);
         assertOneRescheduleArgument(args);
         // The schedule and its overrides are read once for the whole range.

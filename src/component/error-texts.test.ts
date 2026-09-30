@@ -525,6 +525,10 @@ describe("configuration writes and arguments", () => {
       "updateEventType: zero horizon": () => t.mutation(api.public.updateEventType, { id: seed.eventTypeId, maxFutureMinutes: 0 }),
       "createDateOverride: custom without hours": () =>
         t.mutation(api.schedules.createDateOverride, { scheduleId: scheduleDocId, date: TUESDAY, type: "custom" }),
+      "getMonthAvailability: 94 days": () =>
+        t.query(api.public.getMonthAvailability, { resourceId: seed.resourceId, dateFrom: "2027-03-01", dateTo: "2027-06-02", eventLength: 60 }),
+      "getAvailability: longer than 366 days": () =>
+        t.query(api.public.getAvailability, { resourceId: seed.resourceId, start: at("09:00"), end: at("09:00") + 367 * 86_400_000 }),
       "audit: limit 0": () => t.query(api.maintenance.audit, { check: "f10_weekday", limit: 0 }),
       "sweepOrphanedHolds: foreign cursor": () =>
         t.mutation(api.presence.sweepOrphanedHolds, { cursor: "not-a-cursor", limit: 10, dryRun: true }),
@@ -583,6 +587,9 @@ describe("configuration writes and arguments", () => {
       "updateEventType: zero horizon": coded("INVALID_INPUT", "Invalid maxFutureMinutes 0: expected a number of minutes greater than 0"),
       "createDateOverride: custom without hours":
         coded("INVALID_INPUT", 'Invalid date override: type "custom" needs customHours with at least one window'),
+      "getMonthAvailability: 94 days":
+        coded("INVALID_INPUT", "Invalid date range: dateFrom 2027-03-01 to dateTo 2027-06-02 covers 94 days; at most 93 are allowed"),
+      "getAvailability: longer than 366 days": coded("INVALID_RANGE", "Invalid time range: at most 366 days are allowed"),
       "audit: limit 0": coded("INVALID_INPUT", "limit must be an integer from 1 to 500"),
       "sweepOrphanedHolds: foreign cursor": coded("INVALID_INPUT", "Invalid sweep cursor"),
     });

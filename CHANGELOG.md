@@ -130,6 +130,10 @@
   weekly hours; stored rows still read that way, and the
   `date_override_config` audit check lists them. Replace them with
   `unavailable` or with hours.
+- Range caps (F16, D4): `getMonthAvailability` answers at most 93 days
+  (`dateFrom` and `dateTo` included; `INVALID_INPUT`) and `getAvailability`
+  at most 366 days (`INVALID_RANGE`). Split longer ranges into several
+  calls. Bookings have no length cap; multi-day bookings stay possible.
 
 ### Added
 

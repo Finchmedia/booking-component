@@ -149,12 +149,12 @@ const CODE_DOCS: Record<BookingErrorCode, { meaning: string; thrownBy: string }>
     thrownBy: "`updateHook`, `unregisterHook`",
   },
   INVALID_RANGE: {
-    meaning: "The end is not after the start, or an instant is beyond what a `Date` can hold.",
+    meaning: "The end is not after the start, an instant is beyond what a `Date` can hold, or a `getAvailability` range is longer than 366 days.",
     thrownBy: "`createBooking`, `createProvisionalBooking`, `createReservation`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `getAvailability`, `checkMultiResourceAvailability`",
   },
   INVALID_INPUT: {
     meaning:
-      "An argument without a valid meaning: a date that does not exist, `dateFrom` after `dateTo`, an event length that is not a positive number, slot indices outside 0–95, incomplete schedule arguments or a `resourceTimezone` that differs from the schedule's, both `rescheduleContext` and `excludeBookingUid`, a time zone `Intl` rejects, event-type lengths, options or slot interval that are not whole minutes above 0, negative buffers or notice, a horizon that is not above 0, a length missing from its options, malformed or overlapping hours, a `custom` date override without hours, an empty or duplicate resource list, a quantity that is not a positive integer, a hook event type or function handle the component does not accept, or a `limit` or `cursor` out of range.",
+      "An argument without a valid meaning: a date that does not exist, `dateFrom` after `dateTo`, a `getMonthAvailability` range of more than 93 days, an event length that is not a positive number, slot indices outside 0–95, incomplete schedule arguments or a `resourceTimezone` that differs from the schedule's, both `rescheduleContext` and `excludeBookingUid`, a time zone `Intl` rejects, event-type lengths, options or slot interval that are not whole minutes above 0, negative buffers or notice, a horizon that is not above 0, a length missing from its options, malformed or overlapping hours, a `custom` date override without hours, an empty or duplicate resource list, a quantity that is not a positive integer, a hook event type or function handle the component does not accept, or a `limit` or `cursor` out of range.",
     thrownBy: "`getDaySlots`, `getMonthAvailability`, `getEffectiveAvailability`, the schedule, date-override, resource and event-type writes, `listDateOverrides`, `getDateOverride`, `createMultiResourceBooking`, `checkMultiResourceAvailability`, `registerHook`, `updateHook`, `maintenance.audit`, `maintenance.backfillBookingOrganizations`, `presence.sweepOrphanedHolds`",
   },
 };
