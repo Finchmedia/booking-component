@@ -124,10 +124,11 @@ function callHost(name: string, callback: () => void) {
  * pair ("a", "b|c" vs "a|b", "c").
  *
  * Completed submissions are held here, outside the keyed flow, so a submission
- * still pending when the flow is replaced is not lost: when it succeeds, the
- * flow mounted by then shows the success screen for the booking that was made,
- * with its own event type and time format, and onBookingComplete is called
- * once. A failure after the replacement is only logged and passed to
+ * still pending when the flow is replaced is not lost: when it succeeds and no
+ * newer submission was sent meanwhile, the flow mounted by then shows the
+ * success screen for the booking that was made, with its own event type and
+ * time format. onBookingComplete is called once for every booking made, shown
+ * or not. A failure after the replacement is only logged and passed to
  * onBookingError, because nothing was booked and the user has moved on.
  */
 export function Booker(props: BookerProps) {
@@ -137,17 +138,16 @@ export function Booker(props: BookerProps) {
     props.originalBooking?.uid ?? "",
   ]);
   const [completion, setCompletion] = useState<Completion | null>(null);
-  // Rule: every submission of any flow gets the next number when it is sent.
-  // The confirmation shown is the completed submission that started last: a
-  // submission that completes after a later one has completed is recorded
-  // (its onBookingComplete still runs, the booking was made) but not shown, so
-  // an older request resolving late never replaces a newer confirmation.
+  // Rule: every submission of any flow gets the next number when it is sent,
+  // and only the one sent last decides what is shown: its success screen, or
+  // its error in its own form. An older submission that completes after a
+  // newer one was sent is recorded (its onBookingComplete still runs, the
+  // booking was made) but not shown, so it never covers the newer request's
+  // confirmation or failure.
   const lastStarted = useRef(0);
-  const lastCompleted = useRef(0);
   const startSubmission = () => ++lastStarted.current;
   const completeSubmission = (submission: number, next: Completion) => {
-    if (submission < lastCompleted.current) return; // A later one is shown
-    lastCompleted.current = submission;
+    if (submission !== lastStarted.current) return; // A newer one was sent
     setCompletion(next);
   };
   return (
