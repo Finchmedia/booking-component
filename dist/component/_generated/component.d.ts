@@ -27,10 +27,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             _id: string;
             bookingId: string;
             changedBy?: string;
-            fromStatus: string;
+            fromStatus: "" | "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             reason?: string;
             timestamp: number;
-            toStatus: string;
+            toStatus: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         }>, Name>;
         getHook: FunctionReference<"query", "internal", {
             hookId: string;
@@ -42,6 +42,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             eventType: string;
             functionHandle: string;
             organizationId?: string;
+            payloadVersion?: 2;
         } | null, Name>;
         listHooks: FunctionReference<"query", "internal", {
             eventType?: string;
@@ -54,11 +55,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             eventType: string;
             functionHandle: string;
             organizationId?: string;
+            payloadVersion?: 2;
         }>, Name>;
         registerHook: FunctionReference<"mutation", "internal", {
             eventType: string;
             functionHandle: string;
             organizationId?: string;
+            payloadVersion?: 2;
         }, string, Name>;
         transitionBookingState: FunctionReference<"mutation", "internal", {
             bookingId: string;
@@ -70,7 +73,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 fromEmail?: string;
                 renderer?: string;
             };
-            toStatus: string;
+            toStatus: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         }, {
             success: boolean;
         }, Name>;
@@ -87,7 +90,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
     };
     maintenance: {
         audit: FunctionReference<"query", "internal", {
-            check: "f10_weekday" | "event_length_invalid";
+            check: "f10_weekday" | "event_length_invalid" | "event_type_config" | "schedule_config" | "resource_config" | "date_override_config" | "link_integrity" | "booking_integrity" | "booking_eligibility" | "booking_status_invalid";
             cursor?: string | null;
             limit: number;
         }, {
@@ -104,6 +107,46 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 eventTypeId: string;
                 lengthInMinutes: number;
                 lengthInMinutesOptions?: Array<number>;
+            } | {
+                check: "event_type_config";
+                eventTypeId: string;
+                problems: Array<"id" | "lengthInMinutes" | "lengthInMinutesOptions" | "lengthNotInOptions" | "slotInterval" | "bufferBefore" | "bufferAfter" | "minNoticeMinutes" | "maxFutureMinutes" | "timezone" | "scheduleId">;
+            } | {
+                check: "schedule_config";
+                problems: Array<"timezone">;
+                scheduleId: string;
+            } | {
+                check: "resource_config";
+                problems: Array<"timezone">;
+                resourceId: string;
+            } | {
+                check: "date_override_config";
+                date: string;
+                overrideId: string;
+                problems: Array<"type" | "customHours" | "date">;
+                type: string;
+            } | {
+                check: "link_integrity";
+                eventTypeId: string;
+                problems: Array<"resourceMissing" | "eventTypeMissing" | "crossOrganization" | "duplicate">;
+                resourceId: string;
+            } | {
+                check: "booking_integrity";
+                problems: Array<"organizationMissing" | "organizationMismatch" | "poolWithoutItems">;
+                uid: string;
+            } | {
+                check: "booking_eligibility";
+                eventTypeId: string;
+                problems: Array<"eventTypeMissing" | "eventTypeInactive" | "resourceMissing" | "resourceInactive" | "resourceNotLinked" | "crossOrganization" | "noStandalone">;
+                resourceIds: Array<string>;
+                start: number;
+                status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
+                uid: string;
+            } | {
+                check: "booking_status_invalid";
+                problems: Array<"status" | "historyStatus">;
+                status: string;
+                uid: string;
             }>;
             scanned: number;
         }, Name>;
@@ -238,7 +281,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -294,7 +337,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -428,7 +471,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -498,7 +541,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -559,7 +602,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -592,7 +635,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -624,7 +667,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -634,6 +677,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             date: string;
             eventLength: number;
             excludeBookingUid?: string;
+            rescheduleContext?: {
+                token: string;
+                uid: string;
+            };
             resourceId: string;
             resourceTimezone?: string;
             scheduleId?: string;
@@ -670,7 +717,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             timezone: string;
             title: string;
             updatedAt?: number;
-        }, Name>;
+        } | null, Name>;
         getEventTypeBySlug: FunctionReference<"query", "internal", {
             organizationId?: string;
             slug: string;
@@ -707,6 +754,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             dateTo: string;
             eventLength: number;
             excludeBookingUid?: string;
+            rescheduleContext?: {
+                token: string;
+                uid: string;
+            };
             resourceId: string;
             resourceTimezone?: string;
             scheduleId?: string;
@@ -719,7 +770,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             limit?: number;
             organizationId?: string;
             resourceId?: string;
-            status?: string;
+            status?: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         }, Array<{
             _creationTime: number;
             _id: string;
@@ -745,11 +796,63 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
         }>, Name>;
+        listBookingsPage: FunctionReference<"query", "internal", {
+            dateFrom?: number;
+            dateTo?: number;
+            eventTypeId?: string;
+            includeProvisional?: boolean;
+            organizationId?: string;
+            paginationOpts: {
+                cursor: string | null;
+                endCursor?: string | null;
+                id?: number;
+                maximumBytesRead?: number;
+                maximumRowsRead?: number;
+                numItems: number;
+            };
+            resourceId?: string;
+            status?: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
+        }, {
+            continueCursor: string;
+            isDone: boolean;
+            page: Array<{
+                _creationTime: number;
+                _id: string;
+                actorId: string;
+                bookerEmail: string;
+                bookerName: string;
+                bookerNotes?: string;
+                bookerPhone?: string;
+                cancellationReason?: string;
+                cancelledAt?: number;
+                createdAt: number;
+                end: number;
+                eventDescription?: string;
+                eventTitle: string;
+                eventTypeId: string;
+                location: {
+                    type: string;
+                    value?: string;
+                };
+                managementToken?: string;
+                organizationId?: string;
+                rescheduleUid?: string;
+                rescheduledToUid?: string;
+                resourceId: string;
+                start: number;
+                status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
+                timezone: string;
+                uid: string;
+                updatedAt: number;
+            }>;
+            pageStatus?: "SplitRecommended" | "SplitRequired" | null;
+            splitCursor?: string | null;
+        }, Name>;
         listEventTypes: FunctionReference<"query", "internal", {
             activeOnly?: boolean;
             organizationId?: string;
@@ -818,7 +921,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -859,7 +962,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             rescheduledToUid?: string;
             resourceId: string;
             start: number;
-            status: string;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
             timezone: string;
             uid: string;
             updatedAt: number;
@@ -872,9 +975,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             success: boolean;
         }, Name>;
         updateEventType: FunctionReference<"mutation", "internal", {
-            bufferAfter?: number;
-            bufferBefore?: number;
-            description?: string;
+            bufferAfter?: null | number;
+            bufferBefore?: null | number;
+            description?: null | string;
             id: string;
             isActive?: boolean;
             lengthInMinutes?: number;
@@ -885,10 +988,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 type: string;
             }>;
             lockTimeZoneToggle?: boolean;
-            maxFutureMinutes?: number;
-            minNoticeMinutes?: number;
+            maxFutureMinutes?: null | number;
+            minNoticeMinutes?: null | number;
             requiresConfirmation?: boolean;
-            scheduleId?: string;
+            scheduleId?: null | string;
             slotInterval?: number;
             slug?: string;
             timezone?: string;
@@ -1012,7 +1115,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             date: string;
             resourceId: string;
         }, {
-            bookedQuantities: any;
+            bookedQuantities: Record<string, number>;
             totalQuantity: number;
         }, Name>;
         getResource: FunctionReference<"query", "internal", {
@@ -1126,7 +1229,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             }>;
             date: string;
             scheduleId: string;
-            type: string;
+            type: "unavailable" | "custom";
         }, string, Name>;
         createSchedule: FunctionReference<"mutation", "internal", {
             id: string;
@@ -1263,7 +1366,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 startTime: string;
             }>;
             overrideId: string;
-            type?: string;
+            type?: "unavailable" | "custom";
         }, string, Name>;
         updateSchedule: FunctionReference<"mutation", "internal", {
             id: string;

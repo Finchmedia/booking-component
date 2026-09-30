@@ -1,92 +1,6 @@
 import type { ReactNode } from "react";
-import type { FunctionReference } from "convex/server";
-type QueryReference = FunctionReference<"query", "public", any, any>;
-type MutationReference = FunctionReference<"mutation", "public", any, any>;
-/**
- * References to your host's public booking functions.
- * Used by: Booker, Calendar, public booking pages
- *
- * Passing a reference does not grant or restrict access: any client can call
- * any exported Convex function. Your host functions enforce authorization.
- * Booking reads (getBooking, getBookingByUid, getBookingByToken) return the
- * booking's contact details and `managementToken`. Check the management token
- * or the caller's ownership in your host function, and never return
- * `managementToken` to anonymous callers.
- */
-export interface PublicBookingAPI {
-    getEventType: QueryReference;
-    getEventTypeBySlug: QueryReference;
-    listEventTypes: QueryReference;
-    getAvailability: QueryReference;
-    getMonthAvailability: QueryReference;
-    getDaySlots: QueryReference;
-    createBooking: MutationReference;
-    getBooking: QueryReference;
-    getBookingByUid: QueryReference;
-    getBookingByToken: QueryReference;
-    cancelBookingByToken: MutationReference;
-    rescheduleBookingByToken: MutationReference;
-    getResource: QueryReference;
-    listResources: QueryReference;
-    getEventTypesForResource: QueryReference;
-    hasResourceEventTypeLink: QueryReference;
-    getEffectiveAvailability: QueryReference;
-    heartbeat: MutationReference;
-    leave: MutationReference;
-    getPresence: QueryReference;
-    getDatePresence: QueryReference;
-}
-/**
- * References to your host's administration functions.
- * Used by: Admin dashboard, management pages
- *
- * Your host functions must check authentication and permissions: omitting
- * these references from a page does not stop a client from calling them.
- */
-export interface AdminBookingAPI {
-    createEventType: MutationReference;
-    updateEventType: MutationReference;
-    deleteEventType: MutationReference;
-    toggleEventTypeActive: MutationReference;
-    createReservation: MutationReference;
-    listBookings: QueryReference;
-    cancelReservation: MutationReference;
-    createResource: MutationReference;
-    updateResource: MutationReference;
-    deleteResource: MutationReference;
-    toggleResourceActive: MutationReference;
-    getResourcesForEventType: QueryReference;
-    getResourceIdsForEventType: QueryReference;
-    getEventTypeIdsForResource: QueryReference;
-    linkResourceToEventType: MutationReference;
-    unlinkResourceFromEventType: MutationReference;
-    setResourcesForEventType: MutationReference;
-    setEventTypesForResource: MutationReference;
-    getSchedule: QueryReference;
-    listSchedules: QueryReference;
-    getDefaultSchedule: QueryReference;
-    createSchedule: MutationReference;
-    updateSchedule: MutationReference;
-    deleteSchedule: MutationReference;
-    listDateOverrides: QueryReference;
-    createDateOverride: MutationReference;
-    deleteDateOverride: MutationReference;
-    checkMultiResourceAvailability: QueryReference;
-    createMultiResourceBooking: MutationReference;
-    getBookingWithItems: QueryReference;
-    cancelMultiResourceBooking: MutationReference;
-    registerHook: MutationReference;
-    unregisterHook: MutationReference;
-    transitionBookingState: MutationReference;
-    getBookingHistory: QueryReference;
-    getActivePresenceCount: QueryReference;
-}
-/**
- * Combined Booking API type.
- * Merges PublicBookingAPI with optional AdminBookingAPI functions.
- * Components access functions through this unified interface.
- */
-export type BookingAPI = PublicBookingAPI & Partial<AdminBookingAPI>;
+import type { AdminBookingAPI, BookingAPI, PublicBookingAPI, PublicBookingAPIWithAvailabilityContext } from "./contract.js";
+export type { AdminBookingAPI, BookingAPI, PublicBookingAPI, PublicBookingAPIWithAvailabilityContext, } from "./contract.js";
 /** @internal Every PublicBookingAPI operation, resolved from publicApi. */
 export declare const PUBLIC_OPERATIONS: readonly ["getEventType", "getEventTypeBySlug", "listEventTypes", "getAvailability", "getMonthAvailability", "getDaySlots", "createBooking", "getBooking", "getBookingByUid", "getBookingByToken", "cancelBookingByToken", "rescheduleBookingByToken", "getResource", "listResources", "getEventTypesForResource", "hasResourceEventTypeLink", "getEffectiveAvailability", "heartbeat", "leave", "getPresence", "getDatePresence"];
 /** @internal Every AdminBookingAPI operation, resolved from adminApi. */
@@ -99,6 +13,11 @@ export interface BookingProviderProps {
     /**
      * References to your host's public booking functions, usually the generated
      * `api.public`. Required for all booking flows.
+     *
+     * The 11 operations the components call are required and type-checked: each
+     * host function must accept exactly the arguments the components send and
+     * return at least the fields they read (see `BookingUIOperations`). The other
+     * public operations are optional.
      *
      * @example
      * // In your convex/public.ts (each function checks its own access rules):
@@ -113,12 +32,8 @@ export interface BookingProviderProps {
     /**
      * References to your host's administration functions, usually the generated
      * `api.admin`. Optional - only needed for admin components. Admin operations
-     * resolve from here; public operations resolve from publicApi unless a
-     * hand-built adminApi defines them itself.
-     *
-     * Without adminApi (or without a given operation in a hand-built adminApi),
-     * admin operations resolve from publicApi. This fallback is deprecated and
-     * may be removed in 0.5.0; pass adminApi wherever admin operations are used.
+     * resolve only from here: without adminApi they are `undefined`. adminApi
+     * never supplies public operations, even when it defines the same names.
      *
      * @example
      * // In your convex/admin.ts (each function checks the caller's role):
@@ -129,7 +44,48 @@ export interface BookingProviderProps {
      * <BookingProvider publicApi={api.public} adminApi={api.admin}>
      */
     adminApi?: Partial<AdminBookingAPI>;
+    /**
+     * Off (the default): getDaySlots and getMonthAvailability receive the same
+     * arguments as in 0.4.x. Set it to send the availability context; see
+     * {@link BookingProviderPropsWithAvailabilityContext}. Before you set it,
+     * your host slot wrappers must declare `eventTypeId` and `rescheduleContext`
+     * in their argument validators, deployed ahead of the page (see
+     * {@link https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md#slot-queries-while-rescheduling | docs/host-functions.md, "Slot queries while rescheduling"}).
+     */
+    availabilityContext?: false;
     children: ReactNode;
+}
+/**
+ * BookingProvider's props with `availabilityContext` on. The Calendar and
+ * `useConvexSlots` then add to getDaySlots and getMonthAvailability the
+ * selected `eventTypeId` and, when the Booker reschedules, `rescheduleContext`
+ * (`{ uid, token }` of the booking being moved), so your host functions can
+ * apply the event type's own schedule and policy and offer times that overlap
+ * the booking being moved. Presence functions never receive the token.
+ *
+ * Before you turn `availabilityContext` on, your host slot wrappers
+ * (getDaySlots and getMonthAvailability) must declare `eventTypeId` and
+ * `rescheduleContext` as optional in their argument validators, deployed
+ * before the page that turns it on: a validator without them rejects every
+ * slot query. `publicApi` is checked for both
+ * ({@link PublicBookingAPIWithAvailabilityContext}), `uid` and `token` inside
+ * `rescheduleContext` included, so a host that lacks them is a type error
+ * here instead of a validator error in the browser (functions with untyped
+ * arguments are not checked). The wrapper is in
+ * {@link https://github.com/Finchmedia/booking-component/blob/main/docs/host-functions.md#slot-queries-while-rescheduling | docs/host-functions.md, "Slot queries while rescheduling"}.
+ */
+export interface BookingProviderPropsWithAvailabilityContext extends Omit<BookingProviderProps, "publicApi" | "availabilityContext"> {
+    /**
+     * References to your host's public booking functions, with getDaySlots and
+     * getMonthAvailability declaring
+     * `eventTypeId: v.optional(v.string())` and
+     * `rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`.
+     * Pass `rescheduleContext` on to the component's query unchanged; it
+     * excludes the moved booking only when the token matches.
+     */
+    publicApi: PublicBookingAPIWithAvailabilityContext;
+    /** Send the availability context. A `boolean` also needs the declaring publicApi. */
+    availabilityContext: boolean;
 }
 /**
  * Provider component that makes the booking API available to all child components.
@@ -141,8 +97,9 @@ export interface BookingProviderProps {
  *
  * Components access both through a single `useBookingAPI()` hook. Each
  * operation resolves from the gateway that owns it: PublicBookingAPI names
- * from publicApi, AdminBookingAPI names from adminApi. A hand-built adminApi
- * that defines a public name itself still overrides it.
+ * from publicApi, AdminBookingAPI names from adminApi. Admin operations are
+ * `undefined` without adminApi, and names outside both interfaces are not
+ * passed through.
  *
  * The provider only chooses which function references the UI calls. It is not
  * access control: any client can call any exported Convex function directly.
@@ -181,14 +138,25 @@ export interface BookingProviderProps {
  *   );
  * }
  * ```
+ *
+ * @example
+ * ```tsx
+ * // Opt in to the availability context: getDaySlots and getMonthAvailability
+ * // must declare the optional eventTypeId and rescheduleContext
+ * <BookingProvider publicApi={api.public} availabilityContext>
+ *   <Booker eventTypeId="event-1" resourceId="studio-a" originalBooking={booking} />
+ * </BookingProvider>
+ * ```
  */
-export declare function BookingProvider({ publicApi, adminApi, children, }: BookingProviderProps): import("react").JSX.Element;
+export declare function BookingProvider({ publicApi, adminApi, availabilityContext, children, }: BookingProviderProps | BookingProviderPropsWithAvailabilityContext): import("react").JSX.Element;
 /**
  * Hook to access the booking API from within a BookingProvider.
  *
- * Returns the merged API object: public operations from publicApi, admin
- * operations from adminApi (see BookingProvider). Calling a reference does not
- * bypass authorization; your host functions decide who may run them.
+ * Returns the resolved API: public operations from publicApi, admin operations
+ * from adminApi (see BookingProvider). The operations the components call are
+ * typed with the contract's arguments and result views; the others are
+ * untyped. Calling a reference does not bypass authorization; your host
+ * functions decide who may run them.
  *
  * @throws Error if used outside of a BookingProvider
  *
@@ -201,7 +169,7 @@ export declare function BookingProvider({ publicApi, adminApi, children, }: Book
  * }
  *
  * // Admin UI: render it only inside a provider that has adminApi, and call
- * // hooks unconditionally (a generated reference is never undefined).
+ * // hooks unconditionally (admin operations are undefined without adminApi).
  * function CreateResourceButton() {
  *   const api = useBookingAPI();
  *   const createResource = useMutation(api.createResource!);
@@ -210,5 +178,9 @@ export declare function BookingProvider({ publicApi, adminApi, children, }: Book
  * ```
  */
 export declare function useBookingAPI(): BookingAPI;
-export {};
+/**
+ * @internal Whether the nearest BookingProvider sends the availability
+ * context (`availabilityContext`). False outside a provider.
+ */
+export declare function useAvailabilityContextEnabled(): boolean;
 //# sourceMappingURL=context.d.ts.map

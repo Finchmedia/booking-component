@@ -1,1 +1,1 @@
-{"version":3,"file":"booking-error.d.ts","sourceRoot":"","sources":["../../../src/react/utils/booking-error.ts"],"names":[],"mappings":"AAIA;;;;;;;;;;GAUG;AACH,wBAAgB,0BAA0B,CACxC,KAAK,EAAE,OAAO,EACd,QAAQ,GAAE,MAAwB,GACjC,MAAM,CAiBR"}
+{"version":3,"file":"booking-error.d.ts","sourceRoot":"","sources":["../../../src/react/utils/booking-error.ts"],"names":[],"mappings":"AAuCA;;;;;;;;;;;;GAYG;AACH,wBAAgB,0BAA0B,CACxC,KAAK,EAAE,OAAO,EACd,QAAQ,GAAE,MAAwB,GACjC,MAAM,CAiBR"}

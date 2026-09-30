@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { parseCivilDate, weekdayOf } from "../shared/time.js";
+import { throwBookingError } from "../shared/booking-errors.js";
 import { assertDateOrder, assertTimeZone } from "./input_validation";
 import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 // ============================================
@@ -17,14 +18,14 @@ function parseTimeStrict(time, field, isEnd = false) {
         return 24 * 60;
     const match = TIME_RE.exec(time);
     if (!match) {
-        throw new Error(`Invalid ${field} "${time}": expected "HH:MM" between 00:00 and 23:59${isEnd ? ' (or "24:00" for end of day)' : ""}`);
+        throwBookingError("INVALID_INPUT", `Invalid ${field} "${time}": expected "HH:MM" between 00:00 and 23:59${isEnd ? ' (or "24:00" for end of day)' : ""}`);
     }
     const hours = Number(match[1]);
     const minutes = Number(match[2]);
     // The component works on a 15-minute slot grid; finer times would silently
     // be rounded down to the containing slot.
     if (minutes % 15 !== 0) {
-        throw new Error(`Invalid ${field} "${time}": minutes must be on the 15-minute grid (00, 15, 30, 45)`);
+        throwBookingError("INVALID_INPUT", `Invalid ${field} "${time}": minutes must be on the 15-minute grid (00, 15, 30, 45)`);
     }
     return hours * 60 + minutes;
 }
@@ -42,7 +43,7 @@ function assertNonOverlappingWindows(windows, label) {
     for (const window of parsed) {
         if (window.start >= window.end) {
             const raw = windows[window.index];
-            throw new Error(`Invalid ${label} window: startTime "${raw.startTime}" must be before endTime "${raw.endTime}"`);
+            throwBookingError("INVALID_INPUT", `Invalid ${label} window: startTime "${raw.startTime}" must be before endTime "${raw.endTime}"`);
         }
     }
     const sorted = [...parsed].sort((a, b) => a.start - b.start);
@@ -50,7 +51,7 @@ function assertNonOverlappingWindows(windows, label) {
         if (sorted[i].start < sorted[i - 1].end) {
             const a = windows[sorted[i - 1].index];
             const b = windows[sorted[i].index];
-            throw new Error(`Overlapping ${label} windows: ${a.startTime}–${a.endTime} and ${b.startTime}–${b.endTime}`);
+            throwBookingError("INVALID_INPUT", `Overlapping ${label} windows: ${a.startTime}–${a.endTime} and ${b.startTime}–${b.endTime}`);
         }
     }
 }
@@ -59,7 +60,7 @@ function assertValidWeeklyHours(weeklyHours) {
     const byDay = new Map();
     for (const entry of weeklyHours) {
         if (!Number.isInteger(entry.dayOfWeek) || entry.dayOfWeek < 0 || entry.dayOfWeek > 6) {
-            throw new Error(`Invalid weeklyHours dayOfWeek ${entry.dayOfWeek}: expected an integer between 0 (Sunday) and 6 (Saturday)`);
+            throwBookingError("INVALID_INPUT", `Invalid weeklyHours dayOfWeek ${entry.dayOfWeek}: expected an integer between 0 (Sunday) and 6 (Saturday)`);
         }
         const windows = byDay.get(entry.dayOfWeek) ?? [];
         windows.push({ startTime: entry.startTime, endTime: entry.endTime });
@@ -72,6 +73,21 @@ function assertValidWeeklyHours(weeklyHours) {
 /** Validates a date override's customHours: valid non-overlapping windows. */
 function assertValidCustomHours(customHours) {
     assertNonOverlappingWindows(customHours, "customHours");
+}
+/**
+ * The override types a write accepts (0.5.0). Rows stored earlier with
+ * another type stay readable; they fall through to the weekly hours.
+ */
+const overrideTypeValidator = v.union(v.literal("unavailable"), v.literal("custom"));
+/**
+ * A "custom" override needs at least one window: without one it used to
+ * fall through to the weekly hours, reopening a day meant to be changed.
+ * Checked on the override a write leaves behind.
+ */
+function assertCustomHoursPresent(type, customHours) {
+    if (type === "custom" && !customHours?.length) {
+        throwBookingError("INVALID_INPUT", 'Invalid date override: type "custom" needs customHours with at least one window');
+    }
 }
 // ============================================
 // SCHEDULE QUERIES
@@ -99,7 +115,7 @@ export const listSchedules = query({
     handler: async (ctx, args) => {
         return await ctx.db
             .query("schedules")
-            .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+            .withIndex("by_organizationId", (q) => q.eq("organizationId", args.organizationId))
             .collect();
     },
 });
@@ -123,7 +139,7 @@ export async function getOrganizationDefaultSchedule(ctx, organizationId) {
     return (marked ??
         (await ctx.db
             .query("schedules")
-            .withIndex("by_org", (q) => q.eq("organizationId", organizationId))
+            .withIndex("by_organizationId", (q) => q.eq("organizationId", organizationId))
             .first()));
 }
 // ============================================
@@ -152,13 +168,13 @@ export const createSchedule = mutation({
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
             .unique();
         if (existing) {
-            throw new Error(`Schedule with ID "${args.id}" already exists`);
+            throwBookingError("SCHEDULE_ALREADY_EXISTS", `Schedule with ID "${args.id}" already exists`);
         }
         // If this is default, unset other defaults
         if (args.isDefault) {
             const schedules = await ctx.db
                 .query("schedules")
-                .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+                .withIndex("by_organizationId", (q) => q.eq("organizationId", args.organizationId))
                 .collect();
             for (const schedule of schedules) {
                 if (schedule.isDefault) {
@@ -204,13 +220,13 @@ export const updateSchedule = mutation({
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
             .unique();
         if (!schedule) {
-            throw new Error(`Schedule "${args.id}" not found`);
+            throwBookingError("SCHEDULE_NOT_FOUND", `Schedule "${args.id}" not found`);
         }
         // If setting as default, unset other defaults
         if (args.isDefault && !schedule.isDefault) {
             const schedules = await ctx.db
                 .query("schedules")
-                .withIndex("by_org", (q) => q.eq("organizationId", schedule.organizationId))
+                .withIndex("by_organizationId", (q) => q.eq("organizationId", schedule.organizationId))
                 .collect();
             for (const s of schedules) {
                 if (s.isDefault && s._id !== schedule._id) {
@@ -240,12 +256,21 @@ export const deleteSchedule = mutation({
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
             .unique();
         if (!schedule) {
-            throw new Error(`Schedule "${args.id}" not found`);
+            throwBookingError("SCHEDULE_NOT_FOUND", `Schedule "${args.id}" not found`);
+        }
+        // An event type that still names the schedule would lose its opening
+        // hours (availability reads reject an unknown scheduleId since 0.5.0).
+        const user = await ctx.db
+            .query("event_types")
+            .withIndex("by_scheduleId", (q) => q.eq("scheduleId", args.id))
+            .first();
+        if (user) {
+            throwBookingError("SCHEDULE_IN_USE", `Cannot delete schedule "${args.id}": event type "${user.id}" uses it. Give its event types another schedule first.`);
         }
         // Delete associated date overrides
         const overrides = await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id))
+            .withIndex("by_scheduleId_and_date", (q) => q.eq("scheduleId", schedule._id))
             .collect();
         for (const override of overrides) {
             await ctx.db.delete(override._id);
@@ -275,7 +300,7 @@ export const listDateOverrides = query({
         }
         return await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => {
+            .withIndex("by_scheduleId_and_date", (q) => {
             const bySchedule = q.eq("scheduleId", args.scheduleId);
             const from = dateFrom !== undefined ? bySchedule.gte("date", dateFrom) : bySchedule;
             return dateTo !== undefined ? from.lte("date", dateTo) : from;
@@ -295,18 +320,24 @@ export const getDateOverride = query({
         // duplicate (scheduleId, date) row exist; .unique() would throw on it.
         return await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", date))
+            .withIndex("by_scheduleId_and_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", date))
             .first();
     },
 });
 // ============================================
 // DATE OVERRIDE MUTATIONS
 // ============================================
+/**
+ * Creates the override of a schedule's date, or replaces the one stored for
+ * that date. Rejects an impossible date, windows that are malformed or
+ * overlap, and "custom" without customHours (INVALID_INPUT); `type` accepts
+ * "unavailable" and "custom" only.
+ */
 export const createDateOverride = mutation({
     args: {
         scheduleId: v.id("schedules"),
         date: v.string(),
-        type: v.string(), // "unavailable" | "custom"
+        type: overrideTypeValidator,
         customHours: v.optional(v.array(v.object({
             startTime: v.string(),
             endTime: v.string(),
@@ -319,10 +350,11 @@ export const createDateOverride = mutation({
         if (args.customHours !== undefined) {
             assertValidCustomHours(args.customHours);
         }
+        assertCustomHoursPresent(args.type, args.customHours);
         // Check for existing override on this date
         const existing = await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", date))
+            .withIndex("by_scheduleId_and_date", (q) => q.eq("scheduleId", args.scheduleId).eq("date", date))
             .first();
         if (existing) {
             // Update existing
@@ -340,10 +372,16 @@ export const createDateOverride = mutation({
         });
     },
 });
+/**
+ * Changes an override's type or hours, with the checks of
+ * createDateOverride. "custom" without hours is checked on the merged
+ * override: a change of either field must leave a "custom" override with at
+ * least one window.
+ */
 export const updateDateOverride = mutation({
     args: {
         overrideId: v.id("date_overrides"),
-        type: v.optional(v.string()),
+        type: v.optional(overrideTypeValidator),
         customHours: v.optional(v.array(v.object({
             startTime: v.string(),
             endTime: v.string(),
@@ -356,7 +394,10 @@ export const updateDateOverride = mutation({
         }
         const override = await ctx.db.get(args.overrideId);
         if (!override) {
-            throw new Error("Date override not found");
+            throwBookingError("DATE_OVERRIDE_NOT_FOUND", "Date override not found");
+        }
+        if (args.type !== undefined || args.customHours !== undefined) {
+            assertCustomHoursPresent(args.type ?? override.type, args.customHours ?? override.customHours);
         }
         const updates = {};
         if (args.type !== undefined)
@@ -373,7 +414,7 @@ export const deleteDateOverride = mutation({
     handler: async (ctx, args) => {
         const override = await ctx.db.get(args.overrideId);
         if (!override) {
-            throw new Error("Date override not found");
+            throwBookingError("DATE_OVERRIDE_NOT_FOUND", "Date override not found");
         }
         await ctx.db.delete(args.overrideId);
         return { success: true };
@@ -412,27 +453,33 @@ export async function getScheduleByExternalId(ctx, scheduleId) {
         .unique();
 }
 /**
+ * The schedule with this external id; SCHEDULE_NOT_FOUND otherwise. An
+ * unknown id used to mean 09:00–17:00 every day, which reopened weekends and
+ * closures after a schedule was deleted.
+ */
+export async function getExistingSchedule(ctx, scheduleId) {
+    const schedule = await getScheduleByExternalId(ctx, scheduleId);
+    if (!schedule)
+        throwBookingError("SCHEDULE_NOT_FOUND", `Schedule "${scheduleId}" not found`);
+    return schedule;
+}
+/**
  * Effective LOCAL slot indices (0–95, in the schedule's zone) of a schedule on
  * a calendar day: the date override when one exists, otherwise the weekly
  * hours of that day's own weekday. The weekday is the calendar day's, not the
  * weekday some instant of it has in the zone — reading `${date}T12:00Z` in the
  * zone used the NEXT day's hours in zones at UTC+12 and beyond (New Zealand,
  * Fiji, Tonga, Samoa, Kiribati; Norfolk Island in summer).
- * A missing schedule yields the default business hours 09:00–17:00.
  * `overridesByDate` (from getDateOverridesByDate) replaces the per-day
  * override read when a caller walks a range of days.
  */
 export async function getScheduleDaySlots(ctx, schedule, date, overridesByDate) {
-    if (!schedule) {
-        // No schedule = default business hours (9-17)
-        return Array.from({ length: 32 }, (_, i) => i + 36);
-    }
     // Check for date override
     const override = overridesByDate
         ? overridesByDate.get(date)
         : await ctx.db
             .query("date_overrides")
-            .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id).eq("date", date))
+            .withIndex("by_scheduleId_and_date", (q) => q.eq("scheduleId", schedule._id).eq("date", date))
             .first();
     if (override) {
         if (override.type === "unavailable") {
@@ -452,7 +499,7 @@ export async function getScheduleDaySlots(ctx, schedule, date, overridesByDate) 
 export async function getDateOverridesByDate(ctx, schedule, dateFrom, dateTo) {
     const overrides = await ctx.db
         .query("date_overrides")
-        .withIndex("by_schedule_date", (q) => q.eq("scheduleId", schedule._id).gte("date", dateFrom).lte("date", dateTo))
+        .withIndex("by_scheduleId_and_date", (q) => q.eq("scheduleId", schedule._id).gte("date", dateFrom).lte("date", dateTo))
         .collect();
     const byDate = new Map();
     for (const override of overrides) {
@@ -481,6 +528,8 @@ export function getWeeklySlots(schedule, date) {
 /**
  * Get the effective available slots for a resource on a specific date.
  * This considers the schedule's weekly hours and any date overrides.
+ * An unknown scheduleId throws SCHEDULE_NOT_FOUND (until 0.4.3 it returned
+ * 09:00–17:00).
  */
 export const getEffectiveAvailability = query({
     args: {
@@ -490,7 +539,7 @@ export const getEffectiveAvailability = query({
     returns: v.object({ availableSlots: v.array(v.number()) }),
     handler: async (ctx, args) => {
         const date = parseCivilDate(args.date);
-        const schedule = await getScheduleByExternalId(ctx, args.scheduleId);
+        const schedule = await getExistingSchedule(ctx, args.scheduleId);
         return { availableSlots: await getScheduleDaySlots(ctx, schedule, date) };
     },
 });

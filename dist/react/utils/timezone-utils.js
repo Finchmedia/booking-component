@@ -128,10 +128,9 @@ const sortTimezones = (timezones) => {
 // Get available timezones dynamically
 export const getAvailableTimezones = () => {
     try {
-        // Try modern API first (cast to any for older TypeScript versions)
+        // Try modern API first (ES2022; this package compiles against ES2021)
         const intl = Intl;
-        if ("supportedValuesOf" in intl &&
-            typeof intl.supportedValuesOf === "function") {
+        if (typeof intl.supportedValuesOf === "function") {
             const timezones = intl.supportedValuesOf("timeZone");
             const filteredTimezones = timezones
                 .filter((tz) => {

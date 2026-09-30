@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 — Unreleased
+## 0.5.0 — 30 September 2026
 
 The contract release: coded errors, one set of booking rules, closed booking
 statuses and checked configuration writes in the component, and a host

@@ -1,5 +1,8 @@
 import type { ComponentApi } from "../component/_generated/component.js";
 export { allowedDurations, effectiveSlotInterval, type EventTypeDurations, } from "../shared/durations.js";
+export { bookingHookEventV2, type BookingHookEventV2 } from "../shared/hook-events-v2.js";
+export { BOOKING_STATUSES, bookingStatusValidator, isBookingStatus, type BookingStatus, } from "../shared/booking-status.js";
+export { BOOKING_ERROR_CODES, isBookingError, isBookingErrorCode, type BookingErrorCode, type BookingErrorData, } from "../shared/booking-errors.js";
 /**
  * Creates server-only helpers for the booking component.
  *
@@ -41,7 +44,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         timezone: string;
         title: string;
         updatedAt?: number;
-    }>>;
+    } | null>>;
     getEventTypeBySlug: import("convex/server").RegisteredQuery<"internal", {
         organizationId?: string | undefined;
         slug: string;
@@ -106,16 +109,16 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     }[]>>;
     createEventType: import("convex/server").RegisteredMutation<"internal", {
         organizationId?: string | undefined;
-        bufferAfter?: number | undefined;
+        lengthInMinutesOptions?: number[] | undefined;
+        slotInterval?: number | undefined;
         bufferBefore?: number | undefined;
+        bufferAfter?: number | undefined;
+        minNoticeMinutes?: number | undefined;
+        maxFutureMinutes?: number | undefined;
+        scheduleId?: string | undefined;
         description?: string | undefined;
         isActive?: boolean | undefined;
-        lengthInMinutesOptions?: number[] | undefined;
-        maxFutureMinutes?: number | undefined;
-        minNoticeMinutes?: number | undefined;
         requiresConfirmation?: boolean | undefined;
-        scheduleId?: string | undefined;
-        slotInterval?: number | undefined;
         id: string;
         timezone: string;
         lengthInMinutes: number;
@@ -130,23 +133,23 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     }, Promise<string>>;
     updateEventType: import("convex/server").RegisteredMutation<"internal", {
         timezone?: string | undefined;
-        bufferAfter?: number | undefined;
-        bufferBefore?: number | undefined;
-        description?: string | undefined;
-        isActive?: boolean | undefined;
         lengthInMinutes?: number | undefined;
         lengthInMinutesOptions?: number[] | undefined;
+        slotInterval?: number | undefined;
+        bufferBefore?: number | null | undefined;
+        bufferAfter?: number | null | undefined;
+        minNoticeMinutes?: number | null | undefined;
+        maxFutureMinutes?: number | null | undefined;
+        scheduleId?: string | null | undefined;
+        description?: string | null | undefined;
+        isActive?: boolean | undefined;
         locations?: {
             public?: boolean | undefined;
             address?: string | undefined;
             type: string;
         }[] | undefined;
         lockTimeZoneToggle?: boolean | undefined;
-        maxFutureMinutes?: number | undefined;
-        minNoticeMinutes?: number | undefined;
         requiresConfirmation?: boolean | undefined;
-        scheduleId?: string | undefined;
-        slotInterval?: number | undefined;
         slug?: string | undefined;
         title?: string | undefined;
         id: string;
@@ -169,9 +172,13 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         end: number;
     }, Promise<boolean>>;
     getMonthAvailability: import("convex/server").RegisteredQuery<"internal", {
-        scheduleId?: string | undefined;
         slotInterval?: number | undefined;
+        scheduleId?: string | undefined;
         excludeBookingUid?: string | undefined;
+        rescheduleContext?: {
+            token: string;
+            uid: string;
+        } | undefined;
         resourceTimezone?: string | undefined;
         resourceId: string;
         eventLength: number;
@@ -179,10 +186,14 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         dateTo: string;
     }, Promise<Record<string, boolean>>>;
     getDaySlots: import("convex/server").RegisteredQuery<"internal", {
-        scheduleId?: string | undefined;
         slotInterval?: number | undefined;
+        scheduleId?: string | undefined;
         availableSlots?: number[] | undefined;
         excludeBookingUid?: string | undefined;
+        rescheduleContext?: {
+            token: string;
+            uid: string;
+        } | undefined;
         resourceTimezone?: string | undefined;
         resourceId: string;
         date: string;
@@ -249,7 +260,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         rescheduledToUid?: string;
         resourceId: string;
         start: number;
-        status: string;
+        status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         timezone: string;
         uid: string;
         updatedAt: number;
@@ -295,7 +306,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         rescheduledToUid?: string;
         resourceId: string;
         start: number;
-        status: string;
+        status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         timezone: string;
         uid: string;
         updatedAt: number;
@@ -327,7 +338,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         rescheduledToUid?: string;
         resourceId: string;
         start: number;
-        status: string;
+        status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         timezone: string;
         uid: string;
         updatedAt: number;
@@ -359,7 +370,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         rescheduledToUid?: string;
         resourceId: string;
         start: number;
-        status: string;
+        status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         timezone: string;
         uid: string;
         updatedAt: number;
@@ -368,10 +379,10 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         organizationId?: string | undefined;
         resourceId?: string | undefined;
         eventTypeId?: string | undefined;
+        status?: "confirmed" | "pending" | "declined" | "cancelled" | "provisional" | "completed" | undefined;
         limit?: number | undefined;
         dateFrom?: number | undefined;
         dateTo?: number | undefined;
-        status?: string | undefined;
     }, Promise<{
         _creationTime: number;
         _id: string;
@@ -397,11 +408,63 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         rescheduledToUid?: string;
         resourceId: string;
         start: number;
-        status: string;
+        status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         timezone: string;
         uid: string;
         updatedAt: number;
     }[]>>;
+    listBookingsPage: import("convex/server").RegisteredQuery<"internal", {
+        organizationId?: string | undefined;
+        resourceId?: string | undefined;
+        eventTypeId?: string | undefined;
+        status?: "confirmed" | "pending" | "declined" | "cancelled" | "provisional" | "completed" | undefined;
+        dateFrom?: number | undefined;
+        dateTo?: number | undefined;
+        includeProvisional?: boolean | undefined;
+        paginationOpts: {
+            id?: number;
+            endCursor?: string | null;
+            maximumRowsRead?: number;
+            maximumBytesRead?: number;
+            numItems: number;
+            cursor: string | null;
+        };
+    }, Promise<{
+        continueCursor: string;
+        isDone: boolean;
+        page: Array<{
+            _creationTime: number;
+            _id: string;
+            actorId: string;
+            bookerEmail: string;
+            bookerName: string;
+            bookerNotes?: string;
+            bookerPhone?: string;
+            cancellationReason?: string;
+            cancelledAt?: number;
+            createdAt: number;
+            end: number;
+            eventDescription?: string;
+            eventTitle: string;
+            eventTypeId: string;
+            location: {
+                type: string;
+                value?: string;
+            };
+            managementToken?: string;
+            organizationId?: string;
+            rescheduleUid?: string;
+            rescheduledToUid?: string;
+            resourceId: string;
+            start: number;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
+            timezone: string;
+            uid: string;
+            updatedAt: number;
+        }>;
+        pageStatus?: "SplitRecommended" | "SplitRequired" | null;
+        splitCursor?: string | null;
+    }>>;
     cancelReservation: import("convex/server").RegisteredMutation<"internal", {
         reason?: string | undefined;
         resendOptions?: {
@@ -665,8 +728,8 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         success: boolean;
     }>>;
     getEffectiveAvailability: import("convex/server").RegisteredQuery<"internal", {
-        date: string;
         scheduleId: string;
+        date: string;
     }, Promise<{
         availableSlots: Array<number>;
     }>>;
@@ -690,9 +753,9 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
             startTime: string;
             endTime: string;
         }[] | undefined;
-        type: string;
-        date: string;
+        type: "unavailable" | "custom";
         scheduleId: string;
+        date: string;
     }, Promise<string>>;
     deleteDateOverride: import("convex/server").RegisteredMutation<"internal", {
         overrideId: string;
@@ -767,7 +830,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         rescheduledToUid?: string;
         resourceId: string;
         start: number;
-        status: string;
+        status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         timezone: string;
         uid: string;
         updatedAt: number;
@@ -823,7 +886,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         rescheduledToUid?: string;
         resourceId: string;
         start: number;
-        status: string;
+        status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         timezone: string;
         uid: string;
         updatedAt: number;
@@ -843,6 +906,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     }>>;
     registerHook: import("convex/server").RegisteredMutation<"internal", {
         organizationId?: string | undefined;
+        payloadVersion?: 2 | undefined;
         eventType: string;
         functionHandle: string;
     }, Promise<string>>;
@@ -861,7 +925,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
             apiKey: string;
         } | undefined;
         bookingId: string;
-        toStatus: string;
+        toStatus: "confirmed" | "pending" | "declined" | "cancelled" | "provisional" | "completed";
     }, Promise<{
         success: boolean;
     }>>;
@@ -872,10 +936,10 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         _id: string;
         bookingId: string;
         changedBy?: string;
-        fromStatus: string;
+        fromStatus: "" | "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
         reason?: string;
         timestamp: number;
-        toStatus: string;
+        toStatus: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
     }[]>>;
     heartbeat: import("convex/server").RegisteredMutation<"internal", {
         eventTypeId?: string | undefined;
@@ -954,7 +1018,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
     }, Promise<number[] | null>>;
     audit: import("convex/server").RegisteredQuery<"internal", {
         cursor?: string | null | undefined;
-        check: "f10_weekday" | "event_length_invalid";
+        check: "f10_weekday" | "event_length_invalid" | "event_type_config" | "schedule_config" | "resource_config" | "date_override_config" | "link_integrity" | "booking_integrity" | "booking_eligibility" | "booking_status_invalid";
         limit: number;
     }, Promise<{
         continueCursor: string | null;
@@ -970,6 +1034,46 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
             eventTypeId: string;
             lengthInMinutes: number;
             lengthInMinutesOptions?: Array<number>;
+        } | {
+            check: "event_type_config";
+            eventTypeId: string;
+            problems: Array<"id" | "lengthInMinutes" | "lengthInMinutesOptions" | "lengthNotInOptions" | "slotInterval" | "bufferBefore" | "bufferAfter" | "minNoticeMinutes" | "maxFutureMinutes" | "timezone" | "scheduleId">;
+        } | {
+            check: "schedule_config";
+            problems: Array<"timezone">;
+            scheduleId: string;
+        } | {
+            check: "resource_config";
+            problems: Array<"timezone">;
+            resourceId: string;
+        } | {
+            check: "date_override_config";
+            date: string;
+            overrideId: string;
+            problems: Array<"type" | "customHours" | "date">;
+            type: string;
+        } | {
+            check: "link_integrity";
+            eventTypeId: string;
+            problems: Array<"resourceMissing" | "eventTypeMissing" | "crossOrganization" | "duplicate">;
+            resourceId: string;
+        } | {
+            check: "booking_integrity";
+            problems: Array<"organizationMissing" | "organizationMismatch" | "poolWithoutItems">;
+            uid: string;
+        } | {
+            check: "booking_eligibility";
+            eventTypeId: string;
+            problems: Array<"eventTypeMissing" | "eventTypeInactive" | "resourceMissing" | "resourceInactive" | "resourceNotLinked" | "crossOrganization" | "noStandalone">;
+            resourceIds: Array<string>;
+            start: number;
+            status: "provisional" | "pending" | "confirmed" | "cancelled" | "declined" | "completed";
+            uid: string;
+        } | {
+            check: "booking_status_invalid";
+            problems: Array<"status" | "historyStatus">;
+            status: string;
+            uid: string;
         }>;
         scanned: number;
     }>>;

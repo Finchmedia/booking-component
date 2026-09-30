@@ -1,4 +1,5 @@
 import type { TimeSlot, MonthSlots } from "../types.js";
+import type { AvailabilityContextArgs } from "../contract.js";
 export interface UseConvexSlotsResult {
     monthSlots: MonthSlots;
     availableSlots: TimeSlot[];
@@ -26,5 +27,15 @@ export interface UseConvexSlotsResult {
     /** Load slots and presence for a civil date "YYYY-MM-DD". */
     fetchSlotsForDate: (date: string) => void;
 }
-export declare const useConvexSlots: (resourceId: string, eventLength: number, slotInterval?: number, allDurationOptions?: number[], enabled?: boolean, timezone?: string) => UseConvexSlotsResult;
+/**
+ * Loads the month availability, the free slots of the selected date and the
+ * presence holds for one resource.
+ *
+ * @param context - The availability context for getMonthAvailability and
+ * getDaySlots: the selected `eventTypeId` and, when rescheduling, the
+ * `rescheduleContext` of the booking being moved. Sent only when the
+ * surrounding BookingProvider has `availabilityContext` on; otherwise the
+ * queries receive the 0.4.x arguments. Presence queries never receive it.
+ */
+export declare const useConvexSlots: (resourceId: string, eventLength: number, slotInterval?: number, allDurationOptions?: number[], enabled?: boolean, timezone?: string, context?: AvailabilityContextArgs) => UseConvexSlotsResult;
 //# sourceMappingURL=use-convex-slots.d.ts.map

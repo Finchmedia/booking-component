@@ -1,5 +1,7 @@
-export { BookingProvider, useBookingAPI, type BookingAPI, type PublicBookingAPI, type AdminBookingAPI, type BookingProviderProps, } from "./context.js";
+export { BookingProvider, useBookingAPI, type BookingAPI, type PublicBookingAPI, type PublicBookingAPIWithAvailabilityContext, type AdminBookingAPI, type BookingProviderProps, type BookingProviderPropsWithAvailabilityContext, } from "./context.js";
+export type { BookingUIOperations, OptionalPublicOperations, EventTypeView, ResourceView, BookingView, DaySlotView, PresenceView, SlotHolderView, AvailabilityContextArgs, AvailabilityContextOperations, MonthAvailabilityArgs, DaySlotsArgs, CreateBookingArgs, RescheduleBookingByTokenArgs, } from "./contract.js";
 export type { BookingStep, BookingSlot, BookingFormData, Booking, EventType, Resource, Schedule, TimeSlot, MonthSlots, PresenceRecord, BookingValidationError, BookingValidationResult, } from "./types.js";
+export type { BookingStatus } from "../shared/booking-status.js";
 export { useConvexSlots, type UseConvexSlotsResult, } from "./hooks/use-convex-slots.js";
 export { useSlotHold } from "./hooks/use-slot-hold.js";
 export { useBookingValidation, type ValidationError, type ValidationErrorType, type ValidationRecovery, type ValidationResult, } from "./hooks/use-booking-validation.js";

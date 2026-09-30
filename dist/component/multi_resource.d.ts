@@ -65,9 +65,9 @@ export declare const createMultiResourceBooking: import("convex/server").Registe
         value?: string | undefined;
         type: string;
     };
+    status: "confirmed" | "pending" | "declined" | "cancelled" | "provisional" | "completed";
     uid: string;
     actorId: string;
-    status: string;
     createdAt: number;
     updatedAt: number;
 }>>;
@@ -122,9 +122,9 @@ export declare const getBookingWithItems: import("convex/server").RegisteredQuer
         value?: string | undefined;
         type: string;
     };
+    status: "confirmed" | "pending" | "declined" | "cancelled" | "provisional" | "completed";
     uid: string;
     actorId: string;
-    status: string;
     createdAt: number;
     updatedAt: number;
 } | null>>;

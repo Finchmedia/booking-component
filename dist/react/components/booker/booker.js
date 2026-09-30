@@ -77,6 +77,11 @@ function BookerFlow({ eventTypeId, resourceId, title, description, showHeader = 
     const api = useBookingAPI();
     // Detect reschedule mode
     const isRescheduling = !!originalBooking;
+    // The booking being moved, for slot queries that exclude its own occupancy.
+    // Sent only with the provider's availabilityContext opt-in.
+    const rescheduleContext = originalBooking?.managementToken
+        ? { uid: originalBooking.uid, token: originalBooking.managementToken }
+        : undefined;
     // Step state
     const [bookingStep, setBookingStep] = useState("event-meta");
     const [selectedSlot, setSelectedSlot] = useState(null);
@@ -94,9 +99,10 @@ function BookerFlow({ eventTypeId, resourceId, title, description, showHeader = 
     const locale = Intl.DateTimeFormat().resolvedOptions().locale;
     // Mutations
     const createBooking = useMutation(api.createBooking);
-    // Reschedule mutation (for token-based public reschedule). useMutation needs a
-    // reference on every render, so a hand-built API without the reschedule
-    // reference stays bound to createBooking; reschedule paths check it instead.
+    // Reschedule mutation (for token-based public reschedule). The contract
+    // requires it, but an untyped hand-built API can lack it at runtime. useMutation
+    // needs a reference on every render, so it then stays bound to createBooking;
+    // reschedule paths check it instead.
     const rescheduleBookingByToken = useMutation(api.rescheduleBookingByToken ?? api.createBooking);
     const [isSubmitting, setIsSubmitting] = useState(false);
     // Synchronous guard: repeats in the same tick (double submit, a second slot
@@ -156,12 +162,13 @@ function BookerFlow({ eventTypeId, resourceId, title, description, showHeader = 
     // this flow being replaced meanwhile and keeps the event type it was made for
     // even if that later resolves to null. Host callbacks run after the mutation,
     // outside its error handling, for every booking made, shown or not.
-    const completeBooking = (submission, result) => {
-        const booking = result;
+    const completeBooking = (submission, booking) => {
         onCompletion(submission, {
             booking,
             eventType: {
-                title: eventType?.title ?? booking.eventTitle,
+                // A host may leave eventTitle out of its result (BookingView); a move
+                // keeps the original's title
+                title: eventType?.title ?? booking.eventTitle ?? originalBooking?.eventTitle ?? "",
                 description: eventType?.description,
                 lengthInMinutes: selectedDuration,
             },
@@ -342,7 +349,7 @@ function BookerFlow({ eventTypeId, resourceId, title, description, showHeader = 
                 bookingStep === "event-meta" &&
                 (title || description) && (_jsxs("div", { className: "text-center mb-8", children: [title && (_jsx("h1", { className: "text-4xl font-bold text-foreground mb-4", children: title })), description && (_jsx("p", { className: "text-muted-foreground", children: description }))] })), validationError && (_jsx(BookingErrorDialog, { error: validationError, ...recoveryHandlers })), showFlow && (_jsxs(_Fragment, { children: [bookingStep === "event-meta" && bookingError && (_jsxs("div", { role: "alert", className: "mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive", children: [_jsx("p", { className: "font-medium", children: bookingError.phase === "reschedule" ? "Reschedule failed" : "Booking failed" }), _jsx("p", { children: bookingError.message })] })), bookingStep === "event-meta" && isSubmitting && (_jsx("p", { role: "status", className: "mb-4 text-sm text-muted-foreground", children: "Rescheduling to the selected time..." })), bookingStep === "event-meta" && eventType && (_jsx(Calendar, { resourceId: resourceId, eventTypeId: eventType.id, onSlotSelect: handleSlotSelect, title: eventType.title, organizerName: organizerName, organizerAvatar: organizerAvatar, 
                         // Controlled state (persists across navigation)
-                        selectedDate: selectedDate, onDateChange: setSelectedDate, currentMonth: currentMonth, onMonthChange: setCurrentMonth, selectedDuration: selectedDuration, onDurationChange: setSelectedDuration, timezone: timezone, onTimezoneChange: setTimezone, timeFormat: timeFormat, onTimeFormatChange: setTimeFormat, disabled: isSubmitting })), bookingStep === "booking-form" && selectedSlot && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: _jsx(BookingForm, { eventType: displayedEventType, selectedSlot: selectedSlot, selectedDuration: selectedDuration, timezone: timezone, onSubmit: handleFormSubmit, onBack: handleBack, isSubmitting: isSubmitting, currentUser: currentUser, isRescheduling: isRescheduling, submitError: bookingError?.message, 
+                        selectedDate: selectedDate, onDateChange: setSelectedDate, currentMonth: currentMonth, onMonthChange: setCurrentMonth, selectedDuration: selectedDuration, onDurationChange: setSelectedDuration, timezone: timezone, onTimezoneChange: setTimezone, timeFormat: timeFormat, onTimeFormatChange: setTimeFormat, disabled: isSubmitting, rescheduleContext: rescheduleContext })), bookingStep === "booking-form" && selectedSlot && displayedEventType && (_jsx("div", { className: "bg-card rounded-xl border border-border overflow-hidden shadow-2xl", children: _jsx(BookingForm, { eventType: displayedEventType, selectedSlot: selectedSlot, selectedDuration: selectedDuration, timezone: timezone, onSubmit: handleFormSubmit, onBack: handleBack, isSubmitting: isSubmitting, currentUser: currentUser, isRescheduling: isRescheduling, submitError: bookingError?.message, 
                             // A reschedule keeps the original contact details: confirm, don't edit
                             readOnlyDetails: originalBooking
                                 ? {

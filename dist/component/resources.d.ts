@@ -123,6 +123,8 @@ export declare const getQuantityAvailability: import("convex/server").Registered
     date: string;
 }, Promise<{
     totalQuantity: number;
-    bookedQuantities: any;
+    bookedQuantities: {
+        [k: string]: number;
+    };
 }>>;
 //# sourceMappingURL=resources.d.ts.map
