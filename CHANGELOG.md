@@ -142,6 +142,17 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - A hold whose cleanup job had been cancelled or had failed never expired once
   the visitor left without `leave` (for example by closing the tab). The next
   heartbeat now schedules a replacement job.
+- A resource and an event type are linked by at most one row. A
+  `setResourcesForEventType` or `setEventTypesForResource` call that repeated
+  an id not yet linked wrote one row per repetition (every release since the
+  first), and from then on `createBooking`, `createProvisionalBooking`,
+  `hasResourceEventTypeLink`, `linkResourceToEventType` and
+  `unlinkResourceFromEventType` failed for that pair with a `unique()` error,
+  while the id lists returned the pair twice. Repeated ids now link once.
+  Duplicates already stored are harmless to reads: the checks answer, the
+  lists name each item once, and booking writes no link row. The next link,
+  unlink or replace call for the pair collapses them, and unlink removes every
+  row. Unknown ids in the replace mutations are still skipped silently.
 
 ### Added
 

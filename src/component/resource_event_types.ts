@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type DatabaseReader } from "./_generated/server";
 import { v } from "convex/values";
 import {
   deletedCount,
@@ -11,6 +11,34 @@ import {
 // RESOURCE ↔ EVENT TYPE MAPPING
 // Many-to-Many relationship with bidirectional indexes
 // ============================================
+
+/**
+ * The link rows of one (resource, event type) pair. Component writes keep at
+ * most one, but releases up to 0.4.2 wrote duplicates when a replace call
+ * repeated an id, so reads take `.first()` and only the link mutations
+ * `.collect()` the pair to collapse it.
+ */
+function linkRows(db: DatabaseReader, resourceId: string, eventTypeId: string) {
+  return db
+    .query("resource_event_types")
+    .withIndex("by_resource_event_type", (q) =>
+      q.eq("resourceId", resourceId).eq("eventTypeId", eventTypeId)
+    );
+}
+
+/** Whether the pair is linked; tolerates duplicate rows and writes nothing. */
+export async function isLinked(
+  db: DatabaseReader,
+  resourceId: string,
+  eventTypeId: string
+): Promise<boolean> {
+  return (await linkRows(db, resourceId, eventTypeId).first()) !== null;
+}
+
+/** Each id once, in first-seen order. */
+function unique(ids: string[]): string[] {
+  return [...new Set(ids)];
+}
 
 // ============================================
 // QUERIES
@@ -30,12 +58,12 @@ export const getEventTypesForResource = query({
       .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
-    // Fetch event types
+    // Fetch event types (each once, even over duplicate link rows)
     const eventTypes = await Promise.all(
-      mappings.map(async (mapping) => {
+      unique(mappings.map((m) => m.eventTypeId)).map(async (eventTypeId) => {
         return await ctx.db
           .query("event_types")
-          .withIndex("by_external_id", (q) => q.eq("id", mapping.eventTypeId))
+          .withIndex("by_external_id", (q) => q.eq("id", eventTypeId))
           .unique();
       })
     );
@@ -62,12 +90,12 @@ export const getResourcesForEventType = query({
       .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
-    // Fetch resources
+    // Fetch resources (each once, even over duplicate link rows)
     const resources = await Promise.all(
-      mappings.map(async (mapping) => {
+      unique(mappings.map((m) => m.resourceId)).map(async (resourceId) => {
         return await ctx.db
           .query("resources")
-          .withIndex("by_external_id", (q) => q.eq("id", mapping.resourceId))
+          .withIndex("by_external_id", (q) => q.eq("id", resourceId))
           .unique();
       })
     );
@@ -87,14 +115,7 @@ export const hasResourceEventTypeLink = query({
   },
   returns: v.boolean(),
   handler: async (ctx, args) => {
-    const mapping = await ctx.db
-      .query("resource_event_types")
-      .withIndex("by_resource_event_type", (q) =>
-        q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId)
-      )
-      .unique();
-
-    return mapping !== null;
+    return await isLinked(ctx.db, args.resourceId, args.eventTypeId);
   },
 });
 
@@ -111,7 +132,7 @@ export const getResourceIdsForEventType = query({
       .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
-    return mappings.map((m) => m.resourceId);
+    return unique(mappings.map((m) => m.resourceId));
   },
 });
 
@@ -127,7 +148,7 @@ export const getEventTypeIdsForResource = query({
       .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
-    return mappings.map((m) => m.eventTypeId);
+    return unique(mappings.map((m) => m.eventTypeId));
   },
 });
 
@@ -166,15 +187,17 @@ export const linkResourceToEventType = mutation({
     }
 
     // Check if link already exists
-    const existing = await ctx.db
-      .query("resource_event_types")
-      .withIndex("by_resource_event_type", (q) =>
-        q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId)
-      )
-      .unique();
+    const [existing, ...duplicates] = await linkRows(
+      ctx.db,
+      args.resourceId,
+      args.eventTypeId
+    ).collect();
 
     if (existing) {
-      // Link already exists, return existing ID
+      // Link already exists: keep the first row, drop duplicates, return its ID
+      for (const duplicate of duplicates) {
+        await ctx.db.delete(duplicate._id);
+      }
       return existing._id;
     }
 
@@ -196,19 +219,17 @@ export const unlinkResourceFromEventType = mutation({
   },
   returns: v.object({ success: v.boolean(), existed: v.boolean() }),
   handler: async (ctx, args) => {
-    const mapping = await ctx.db
-      .query("resource_event_types")
-      .withIndex("by_resource_event_type", (q) =>
-        q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId)
-      )
-      .unique();
+    const mappings = await linkRows(ctx.db, args.resourceId, args.eventTypeId).collect();
 
-    if (!mapping) {
+    if (mappings.length === 0) {
       // No link exists, nothing to do
       return { success: true, existed: false };
     }
 
-    await ctx.db.delete(mapping._id);
+    // Every row of the pair, duplicates included
+    for (const mapping of mappings) {
+      await ctx.db.delete(mapping._id);
+    }
     return { success: true, existed: true };
   },
 });
@@ -240,19 +261,21 @@ export const setResourcesForEventType = mutation({
       .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
-    const existingResourceIds = new Set(existingMappings.map((m) => m.resourceId));
     const newResourceIds = new Set(args.resourceIds);
+    const keptResourceIds = new Set<string>();
 
-    // Delete removed links
+    // Delete removed links, and duplicate rows of kept ones
     for (const mapping of existingMappings) {
-      if (!newResourceIds.has(mapping.resourceId)) {
+      if (!newResourceIds.has(mapping.resourceId) || keptResourceIds.has(mapping.resourceId)) {
         await ctx.db.delete(mapping._id);
+      } else {
+        keptResourceIds.add(mapping.resourceId);
       }
     }
 
-    // Add new links
-    for (const resourceId of args.resourceIds) {
-      if (!existingResourceIds.has(resourceId)) {
+    // Add new links (a repeated id only once)
+    for (const resourceId of newResourceIds) {
+      if (!keptResourceIds.has(resourceId)) {
         // Verify resource exists
         const resource = await ctx.db
           .query("resources")
@@ -299,19 +322,21 @@ export const setEventTypesForResource = mutation({
       .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
-    const existingEventTypeIds = new Set(existingMappings.map((m) => m.eventTypeId));
     const newEventTypeIds = new Set(args.eventTypeIds);
+    const keptEventTypeIds = new Set<string>();
 
-    // Delete removed links
+    // Delete removed links, and duplicate rows of kept ones
     for (const mapping of existingMappings) {
-      if (!newEventTypeIds.has(mapping.eventTypeId)) {
+      if (!newEventTypeIds.has(mapping.eventTypeId) || keptEventTypeIds.has(mapping.eventTypeId)) {
         await ctx.db.delete(mapping._id);
+      } else {
+        keptEventTypeIds.add(mapping.eventTypeId);
       }
     }
 
-    // Add new links
-    for (const eventTypeId of args.eventTypeIds) {
-      if (!existingEventTypeIds.has(eventTypeId)) {
+    // Add new links (a repeated id only once)
+    for (const eventTypeId of newEventTypeIds) {
+      if (!keptEventTypeIds.has(eventTypeId)) {
         // Verify event type exists
         const eventType = await ctx.db
           .query("event_types")

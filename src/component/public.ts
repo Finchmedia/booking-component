@@ -14,6 +14,7 @@ import {
 } from "./utils";
 import { isAvailable } from "./availability";
 import { getScheduleByExternalId, getScheduleDaySlots } from "./schedules";
+import { isLinked } from "./resource_event_types";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import {
     assertDateOrder,
@@ -612,14 +613,7 @@ export const createBooking = mutation({
     }
 
     // 3. Validate resource is linked to event type
-    const link = await ctx.db
-      .query("resource_event_types")
-      .withIndex("by_resource_event_type", (q) =>
-        q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId)
-      )
-      .unique();
-
-    if (!link) {
+    if (!(await isLinked(ctx.db, args.resourceId, args.eventTypeId))) {
       throw new Error("Resource is not available for this event type");
     }
 
@@ -794,14 +788,7 @@ export const createProvisionalBooking = mutation({
       );
     }
 
-    const link = await ctx.db
-      .query("resource_event_types")
-      .withIndex("by_resource_event_type", (q) =>
-        q.eq("resourceId", args.resourceId).eq("eventTypeId", args.eventTypeId)
-      )
-      .unique();
-
-    if (!link) {
+    if (!(await isLinked(ctx.db, args.resourceId, args.eventTypeId))) {
       throw new Error("Resource is not available for this event type");
     }
 
