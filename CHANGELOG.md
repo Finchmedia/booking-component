@@ -114,9 +114,9 @@
   `originalBooking.uid` starts a fresh flow, which shows the confirmation of a
   submission still pending then unless a newer one was sent: only the submission
   sent last is shown, older ones reach `onBookingComplete`. A late
-  `originalBooking` uses its own duration and zone. A completed reschedule offers no "Book Another"; `reuseBookerInfo={false}`
-  shows the original contact details read-only; confirmation and success follow the
-  12h/24h choice and the browser locale.
+  `originalBooking` uses its own duration and zone. A completed reschedule offers no
+  "Book Another"; `reuseBookerInfo={false}` shows the original contact details
+  read-only; confirmation and success follow the 12h/24h choice and the browser locale.
 - Accessibility: durations are a native radio group; form fields are labelled and expose
   required, invalid and error state; reserved slots keep their time in their name; day
   buttons expose the full date, `aria-pressed` and `aria-current="date"`; the 12h/24h
