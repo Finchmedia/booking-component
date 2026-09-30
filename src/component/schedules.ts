@@ -152,7 +152,9 @@ export async function getOrganizationDefaultSchedule(
 ): Promise<Doc<"schedules"> | null> {
   const marked = await ctx.db
     .query("schedules")
-    .withIndex("by_org_default", (q) => q.eq("organizationId", organizationId).eq("isDefault", true))
+    .withIndex("by_organizationId_and_isDefault", (q) =>
+      q.eq("organizationId", organizationId).eq("isDefault", true)
+    )
     .first();
   return (
     marked ??
