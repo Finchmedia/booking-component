@@ -62,6 +62,9 @@ import {
  * Only valid for NON-fungible resources (busySlots bitmap, one holder per
  * slot) — pooled resources track quantity_availability, which this exclusion
  * does not touch.
+ *
+ * The uid is not a credential: excludeBookingUid is for trusted host code.
+ * Client input goes through rescheduleContext (getRescheduleExclusion).
  */
 async function getExcludedSlotsForBooking(
   ctx: QueryCtx,
@@ -76,6 +79,65 @@ async function getExcludedSlotsForBooking(
   if (!booking) return null;
   if (booking.resourceId !== resourceId) return null;
   if (!["pending", "confirmed", "provisional"].includes(booking.status)) {
+    return null;
+  }
+  return getRequiredSlots(booking.start, booking.end);
+}
+
+/**
+ * A booker's reschedule credential for the slot queries: the booking's uid
+ * and management token, which a client may forward. Unlike
+ * excludeBookingUid, which any caller could fill with a uid it saw, it proves
+ * the right to move the booking.
+ */
+const rescheduleContextValidator = v.optional(
+  v.object({ uid: v.string(), token: v.string() })
+);
+
+type RescheduleArgs = {
+  excludeBookingUid?: string;
+  rescheduleContext?: { uid: string; token: string };
+};
+
+/** The slot queries take one reschedule argument at most. */
+function assertOneRescheduleArgument(args: RescheduleArgs): void {
+  if (args.rescheduleContext !== undefined && args.excludeBookingUid !== undefined) {
+    throwBookingError(
+      "INVALID_INPUT",
+      "Invalid reschedule arguments: pass rescheduleContext or excludeBookingUid, not both"
+    );
+  }
+}
+
+/**
+ * The slots of the booking a slot query treats as free:
+ * - `rescheduleContext`: a pending or confirmed booking on this resource
+ *   whose uid and management token both match. Anything else (unknown uid,
+ *   wrong token, a booking without a token, another status or resource)
+ *   excludes nothing and is no error, so no other booking is ever freed.
+ * - `excludeBookingUid`: for trusted host code (see getExcludedSlotsForBooking).
+ * Neither value is logged or returned.
+ */
+async function getRescheduleExclusion(
+  ctx: QueryCtx,
+  resourceId: string,
+  args: RescheduleArgs,
+): Promise<Map<string, number[]> | null> {
+  const context = args.rescheduleContext;
+  if (context === undefined) {
+    return await getExcludedSlotsForBooking(ctx, resourceId, args.excludeBookingUid);
+  }
+  const booking = await ctx.db
+    .query("bookings")
+    .withIndex("by_uid", (q) => q.eq("uid", context.uid))
+    .unique();
+  if (
+    !booking ||
+    booking.managementToken === undefined ||
+    booking.managementToken !== context.token ||
+    !["pending", "confirmed"].includes(booking.status) ||
+    booking.resourceId !== resourceId
+  ) {
     return null;
   }
   return getRequiredSlots(booking.start, booking.end);
@@ -246,10 +308,17 @@ export const getAvailability = query({
  * - Without scheduleId and resourceTimezone, the legacy 09:00–17:00 UTC
  *   window applies.
  *
+ * RESCHEDULING: `rescheduleContext` ({ uid, token } of the booking being
+ * moved) treats that booking's own slots as free when the token matches a
+ * pending or confirmed booking on this resource, and is ignored otherwise.
+ * `excludeBookingUid` does the same without a token and is for trusted host
+ * code only: never forward it from a client, which could free any booking
+ * whose uid it knows. Passing both throws.
+ *
  * Rejects an eventLength that is not a positive number, impossible dates,
  * dateFrom after dateTo, resourceTimezone without scheduleId, a
- * resourceTimezone that differs from the schedule's and an unknown
- * scheduleId (see resolveScheduleArgs).
+ * resourceTimezone that differs from the schedule's, an unknown
+ * scheduleId (see resolveScheduleArgs) and both reschedule arguments at once.
  */
 export const getMonthAvailability = query({
     args: {
@@ -260,7 +329,8 @@ export const getMonthAvailability = query({
         slotInterval: v.optional(v.number()), // Slot interval
         resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
         scheduleId: v.optional(v.string()), // Schedule ID for opening-hours-aware availability
-        excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
+        excludeBookingUid: v.optional(v.string()), // Trusted host code only: treat this booking's own slots as free
+        rescheduleContext: rescheduleContextValidator, // A booker's { uid, token }: treat that booking's own slots as free
     },
     returns: v.record(v.string(), v.boolean()),
     handler: async (ctx, args) => {
@@ -269,6 +339,7 @@ export const getMonthAvailability = query({
         const dateTo = parseCivilDate(args.dateTo);
         assertDateOrder(dateFrom, dateTo);
         assertEventLength(eventLength);
+        assertOneRescheduleArgument(args);
         // The schedule and its overrides are read once for the whole range.
         const { schedule, timezone } = await resolveScheduleArgs(ctx, "getMonthAvailability", args);
         const pooledResource = await isFungibleResource(ctx, resourceId);
@@ -282,11 +353,7 @@ export const getMonthAvailability = query({
         const endDate = new Date(dateTo + "T00:00:00.000Z");
 
         // Slots held by the excluded booking (resolved once for the range).
-        const excludedByDate = await getExcludedSlotsForBooking(
-            ctx,
-            resourceId,
-            args.excludeBookingUid
-        );
+        const excludedByDate = await getRescheduleExclusion(ctx, resourceId, args);
 
         // Result object: { "2025-06-17": true, "2025-06-18": false }
         const availabilityByDate: Record<string, boolean> = {};
@@ -396,10 +463,15 @@ export const getMonthAvailability = query({
  *   resourceTimezone (logged).
  * - Without any of the three, the legacy 09:00–17:00 UTC window applies.
  *
+ * RESCHEDULING: `rescheduleContext` and `excludeBookingUid` as in
+ * getMonthAvailability (the token-checked context for client input,
+ * `excludeBookingUid` for trusted host code only).
+ *
  * Rejects an eventLength that is not a positive number, impossible dates,
  * availableSlots outside 0–95, a partial shape (resourceTimezone or
  * availableSlots alone), a resourceTimezone that differs from the
- * schedule's and an unknown scheduleId (see resolveScheduleArgs).
+ * schedule's, an unknown scheduleId (see resolveScheduleArgs) and both
+ * reschedule arguments at once.
  */
 export const getDaySlots = query({
     args: {
@@ -409,8 +481,9 @@ export const getDaySlots = query({
         slotInterval: v.optional(v.number()), // Step between slots (default: 15)
         resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
         availableSlots: v.optional(v.array(v.number())), // Schedule-based available slot indices (in resource's local timezone)
-        excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
+        excludeBookingUid: v.optional(v.string()), // Trusted host code only: treat this booking's own slots as free
         scheduleId: v.optional(v.string()), // Resolves the day's hours and/or the timezone from this schedule
+        rescheduleContext: rescheduleContextValidator, // A booker's { uid, token }: treat that booking's own slots as free
     },
     returns: v.array(v.object({ time: v.string() })),
     handler: async (ctx, args) => {
@@ -418,6 +491,7 @@ export const getDaySlots = query({
         const date = parseCivilDate(args.date);
         assertEventLength(eventLength);
         if (args.availableSlots) assertSlotIndices(args.availableSlots);
+        assertOneRescheduleArgument(args);
 
         const { schedule, timezone: resourceTimezone } = await resolveScheduleArgs(ctx, "getDaySlots", args);
         if (await isFungibleResource(ctx, resourceId)) return [];
@@ -450,11 +524,7 @@ export const getDaySlots = query({
         }
 
         // The excluded booking's own slots do not count as busy.
-        const excludedByDate = await getExcludedSlotsForBooking(
-            ctx,
-            resourceId,
-            args.excludeBookingUid
-        );
+        const excludedByDate = await getRescheduleExclusion(ctx, resourceId, args);
 
         // Busy slots of every UTC date the candidates touch — not just the
         // row of the requested local `date`: for a resource whose business

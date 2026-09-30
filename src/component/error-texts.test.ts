@@ -496,6 +496,10 @@ describe("configuration writes and arguments", () => {
         t.query(api.public.getDaySlots, { resourceId: seed.resourceId, date: TUESDAY, eventLength: 0 }),
       "getMonthAvailability: dateFrom after dateTo": () =>
         t.query(api.public.getMonthAvailability, { resourceId: seed.resourceId, dateFrom: "2027-03-10", dateTo: TUESDAY, eventLength: 60 }),
+      "getDaySlots: both reschedule arguments": () =>
+        t.query(api.public.getDaySlots, {
+          resourceId: seed.resourceId, date: TUESDAY, eventLength: 60, excludeBookingUid: "bk_1", rescheduleContext: { uid: "bk_1", token: "t" },
+        }),
       "createResource: unknown time zone": () =>
         t.mutation(api.resources.createResource, { id: "res-mars", organizationId: ORG, name: "x", type: "room", timezone: "Mars/Olympus" }),
       "updateSchedule: inverted window": () =>
@@ -547,6 +551,10 @@ describe("configuration writes and arguments", () => {
       "getDaySlots: impossible date": coded("INVALID_INPUT", 'Invalid date "2027-02-30": expected a calendar date as YYYY-MM-DD'),
       "getDaySlots: zero eventLength": coded("INVALID_INPUT", "Invalid eventLength 0: expected a positive number of minutes"),
       "getMonthAvailability: dateFrom after dateTo": coded("INVALID_INPUT", "Invalid date range: dateFrom 2027-03-10 is after dateTo 2027-03-09"),
+      "getDaySlots: both reschedule arguments": coded(
+        "INVALID_INPUT",
+        "Invalid reschedule arguments: pass rescheduleContext or excludeBookingUid, not both",
+      ),
       "createResource: unknown time zone": coded("INVALID_INPUT", 'Invalid time zone "Mars/Olympus": expected an IANA time zone such as "Europe/Berlin"'),
       "updateSchedule: inverted window": coded("INVALID_INPUT", 'Invalid weeklyHours (dayOfWeek 2) window: startTime "10:00" must be before endTime "09:00"'),
       "registerHook: not a function handle": coded("INVALID_INPUT", 'Invalid hook functionHandle "hooks:onCreated": expected a function handle from createFunctionHandle'),

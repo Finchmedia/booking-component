@@ -722,6 +722,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           date: string;
           eventLength: number;
           excludeBookingUid?: string;
+          rescheduleContext?: { token: string; uid: string };
           resourceId: string;
           resourceTimezone?: string;
           scheduleId?: string;
@@ -806,6 +807,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           dateTo: string;
           eventLength: number;
           excludeBookingUid?: string;
+          rescheduleContext?: { token: string; uid: string };
           resourceId: string;
           resourceTimezone?: string;
           scheduleId?: string;

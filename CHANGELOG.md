@@ -104,6 +104,15 @@
   slot is `SLOT_UNAVAILABLE` on the single-resource, bundle and move paths,
   whose texts differ. [docs/errors.md](docs/errors.md) lists the codes and the
   functions that throw them.
+- `rescheduleContext: { uid, token }` on `getDaySlots` and
+  `getMonthAvailability` (F13): with the moved booking's UID and management
+  token, its own slots count as free, so overlapping moves are offered as the
+  move mutations accept them. A token that does not match a pending or
+  confirmed booking on the queried resource excludes nothing and is no error.
+  `excludeBookingUid` frees a booking from its UID alone and is for trusted
+  host code only; a host that forwards it from clients should forward
+  `rescheduleContext` instead. Both at once throw `INVALID_INPUT`.
+  `makeInternalBookingAPI` forwards the new argument.
 
 ## 0.4.3 — Unreleased
 

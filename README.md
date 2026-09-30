@@ -243,6 +243,15 @@ endpoints to authorized host wrappers.
   timezone `Intl` rejects has its hours read as UTC, or in a given
   `resourceTimezone`, and that is logged; set a valid zone with
   `updateSchedule`.
+- **Reschedule availability:** while a booker moves a booking, pass
+  `rescheduleContext: { uid, token }` (the booking's UID and management token)
+  to `getDaySlots` and `getMonthAvailability`. The booking's own slots then
+  count as free, so a move that overlaps its current time is offered. A token
+  that does not match a pending or confirmed booking with that UID on the
+  queried resource excludes nothing and is no error; no other booking is ever
+  freed, and neither value appears in results or logs. `excludeBookingUid`
+  does the same from a UID alone: pass it only from trusted host code, never
+  from client input. Passing both throws `INVALID_INPUT`.
 - **Schedule references:** an event type's `scheduleId` names an existing
   schedule (or is `""`); `createEventType` and `updateEventType` reject
   others, and `deleteSchedule` refuses while an event type uses the schedule

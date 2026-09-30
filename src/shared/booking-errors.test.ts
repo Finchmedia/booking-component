@@ -154,7 +154,7 @@ const CODE_DOCS: Record<BookingErrorCode, { meaning: string; thrownBy: string }>
   },
   INVALID_INPUT: {
     meaning:
-      "An argument without a valid meaning: a date that does not exist, `dateFrom` after `dateTo`, an event length that is not a positive number, slot indices outside 0–95, incomplete schedule arguments or a `resourceTimezone` that differs from the schedule's, a time zone `Intl` rejects, malformed or overlapping hours, an empty or duplicate resource list, a quantity that is not a positive integer, a hook event type or function handle the component does not accept, or a `limit` or `cursor` out of range.",
+      "An argument without a valid meaning: a date that does not exist, `dateFrom` after `dateTo`, an event length that is not a positive number, slot indices outside 0–95, incomplete schedule arguments or a `resourceTimezone` that differs from the schedule's, both `rescheduleContext` and `excludeBookingUid`, a time zone `Intl` rejects, malformed or overlapping hours, an empty or duplicate resource list, a quantity that is not a positive integer, a hook event type or function handle the component does not accept, or a `limit` or `cursor` out of range.",
     thrownBy: "`getDaySlots`, `getMonthAvailability`, `getEffectiveAvailability`, the schedule, date-override, resource and event-type writes, `listDateOverrides`, `getDateOverride`, `createMultiResourceBooking`, `checkMultiResourceAvailability`, `registerHook`, `updateHook`, `maintenance.audit`, `maintenance.backfillBookingOrganizations`, `presence.sweepOrphanedHolds`",
   },
 };

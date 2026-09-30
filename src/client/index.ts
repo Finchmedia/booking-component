@@ -162,6 +162,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         resourceTimezone: v.optional(v.string()),
         scheduleId: v.optional(v.string()),
         excludeBookingUid: v.optional(v.string()),
+        rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() })),
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getMonthAvailability, args);
@@ -178,6 +179,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         availableSlots: v.optional(v.array(v.number())),
         excludeBookingUid: v.optional(v.string()),
         scheduleId: v.optional(v.string()),
+        rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() })),
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getDaySlots, args);
