@@ -27,7 +27,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
     }),
 
     getEventTypeBySlug: internalQueryGeneric({
-      args: { slug: v.string() },
+      args: { slug: v.string(), organizationId: v.optional(v.string()) },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getEventTypeBySlug, args);
       },

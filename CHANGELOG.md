@@ -207,6 +207,11 @@ The internal email mutations keep their names and arguments, so jobs queued by
   tokens keep working (they are compared exactly, never parsed) and a move
   still keeps its token, so hosts that check tokens before forwarding them
   must accept both formats.
+- The `makeInternalBookingAPI` wrapper `getEventTypeBySlug` accepts the
+  component's optional `organizationId`. It took only `slug` and rejected the
+  argument, so a multi-tenant host could not scope slug lookups through the
+  factory and got the oldest event type with that slug in any organization.
+  Unscoped lookups still return that one.
 
 ### Added
 
@@ -287,6 +292,10 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - Link-integrity and lifecycle suites: duplicate link rows, cancellation
   metadata per row kind, and a parity table across the cancel-like paths
   (single and bundle rows, pool units included).
+- A drift test compares the argument validator of every
+  `makeInternalBookingAPI` wrapper with its component function's
+  (`exportArgs()`, nested fields and optional flags included). The only
+  allowed difference is a component `v.id(…)` taken as a string.
 
 ## 0.4.2 — 23 September 2026
 
