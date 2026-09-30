@@ -130,10 +130,15 @@ async function listBookingsBefore(ctx: any, args: Args): Promise<Booking[]> {
       .order("desc")
       .collect();
   } else if (args.eventTypeId) {
-    // `by_event_type` (["eventTypeId"], removed in 0.4.3) yields creation order.
-    bookings = ((await ctx.db.query("bookings").collect()) as Booking[]).filter(
-      (b) => b.eventTypeId === args.eventTypeId
-    );
+    // 0.4.2 read the whole range of `by_event_type` (["eventTypeId"], removed
+    // in 0.4.3), which yields creation order: the same rows, from
+    // by_event_type_start without a date bound, put back into that order.
+    const eventTypeId = args.eventTypeId;
+    const rows: Booking[] = await ctx.db
+      .query("bookings")
+      .withIndex("by_event_type_start", (q: any) => q.eq("eventTypeId", eventTypeId))
+      .collect();
+    bookings = rows.sort((a, b) => a._creationTime - b._creationTime);
   } else {
     bookings = await ctx.db.query("bookings").order("desc").take(1000);
   }

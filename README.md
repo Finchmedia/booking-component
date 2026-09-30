@@ -363,7 +363,8 @@ shows how and lists every check with its repair.
   is used, and it must be the organization of the booked resources, which
   all belong to one. After upgrading from 0.4.2 or earlier, run
   `maintenance.backfillBookingOrganizations` once to fill that organization on
-  older bundles; see the CHANGELOG.
+  older bundles whose resources all belong to it; it lists the others in
+  `needsReview` and leaves them without one. See the CHANGELOG.
 - **Lifecycle:** confirmation, decline, cancellation and atomic rescheduling.
   Your host controls the expiry of provisional bookings.
 - **Presence:** temporary selection indicators. The final booking mutation checks

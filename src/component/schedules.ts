@@ -166,14 +166,31 @@ export const getDefaultSchedule = query({
   args: { organizationId: v.string() },
   returns: v.union(scheduleDoc, v.null()),
   handler: async (ctx, args) => {
-    const schedules = await ctx.db
-      .query("schedules")
-      .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
-      .collect();
-
-    return schedules.find((s) => s.isDefault) ?? schedules[0] ?? null;
+    return await getOrganizationDefaultSchedule(ctx, args.organizationId);
   },
 });
+
+/**
+ * An organization's default schedule: the first one created that is marked
+ * default, else its first schedule, else null. At most two indexed reads of
+ * one document each, however many schedules the organization has.
+ */
+export async function getOrganizationDefaultSchedule(
+  ctx: QueryCtx,
+  organizationId: string
+): Promise<Doc<"schedules"> | null> {
+  const marked = await ctx.db
+    .query("schedules")
+    .withIndex("by_org_default", (q) => q.eq("organizationId", organizationId).eq("isDefault", true))
+    .first();
+  return (
+    marked ??
+    (await ctx.db
+      .query("schedules")
+      .withIndex("by_org", (q) => q.eq("organizationId", organizationId))
+      .first())
+  );
+}
 
 // ============================================
 // SCHEDULE MUTATIONS

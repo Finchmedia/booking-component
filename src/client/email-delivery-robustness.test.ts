@@ -191,13 +191,23 @@ afterEach(() => {
 });
 
 describe("isSendableAddress (exported from @mrfinch/booking/emails)", () => {
+  /** 64 + 1 + 189 = 254 characters with `last` = 57, every label at most 63. */
+  const longAddress = (last: number) =>
+    `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(last)}.com`;
+
   test.each([
     "ada@example.com",
     "a+b@sub.example.co.uk",
     "first.last@example.io",
+    "o'brien@example.com",
+    "guest@my-host.example",
+    "guest@123.example",
+    `guest@${"a".repeat(63)}.com`, // longest label
+    "jürgen@xn--bcher-kva.example", // bücher.example in punycode
+    "guest@उदाहरण.परीक्षा", // Devanagari vowel signs are combining marks
     "jürgen@bücher.example",
     "δοκιμή@παράδειγμα.δοκιμή",
-    `${"a".repeat(64)}@${"b".repeat(185)}.com`, // 254 characters
+    longAddress(57), // 254 characters
   ])("accepts %j", (address) => {
     expect(isSendableAddress(address)).toBe(true);
   });
@@ -206,7 +216,11 @@ describe("isSendableAddress (exported from @mrfinch/booking/emails)", () => {
     "x@", "@x.y", "a b@c.d", "a@b", "", "ada", "a@@example.com", "a@b@example.com",
     "a@.example.com", "a@example..com", "a@example.com.", " ada@example.com", "ada@example.com\n",
     "ada\u0000@example.com", "ada x@example.com", "Ada <ada@example.com>",
-    `${"a".repeat(64)}@${"b".repeat(186)}.com`, // 255 characters
+    // Domain labels hold letters, digits and inner hyphens only, 1–63 of them.
+    "guest@-example.com", "guest@example-.com", "guest@example.-com", "guest@example.com-",
+    "guest@example!.com", "guest@exa_mple.com", "guest@exa'mple.com", "guest@example.c%m",
+    "guest@[127.0.0.1]", "guest@example.com>", `guest@${"a".repeat(64)}.com`,
+    longAddress(58), // 255 characters
   ])("rejects %j", (address) => {
     expect(isSendableAddress(address)).toBe(false);
   });

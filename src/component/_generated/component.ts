@@ -269,7 +269,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           isDone: boolean;
           mismatches: Array<{
             eventTypeOrganizationId: string;
-            organizationId?: string;
+            organizationId: string;
+            uid: string;
+          }>;
+          needsReview: Array<{
+            eventTypeId: string;
+            eventTypeOrganizationId?: string;
+            reason:
+              | "event_type_missing"
+              | "event_type_without_organization"
+              | "resource_missing"
+              | "resource_organization_differs";
+            resourceId?: string;
+            resourceOrganizationId?: string;
             uid: string;
           }>;
           scanned: number;

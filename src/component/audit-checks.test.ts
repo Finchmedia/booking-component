@@ -321,13 +321,17 @@ describe("booking_integrity: organizations follow the booking's resources", () =
     ]);
     expect(clean.organizationId).toBe(ORG);
 
-    // The backfill fills exactly the organizationMissing rows and lists the others.
+    // The backfill fills exactly the organizationMissing rows and lists the
+    // others: without organization in needsReview, with another in mismatches.
     const backfill = await t.mutation(api.maintenance.backfillBookingOrganizations, { limit: 100, dryRun: false });
     expect(backfill).toMatchObject({
       updated: 2,
-      mismatches: [
-        { uid: bundleWithForeign.uid, eventTypeOrganizationId: ORG },
-        { uid: foreignOrganization.uid, organizationId: "org-2", eventTypeOrganizationId: ORG },
+      mismatches: [{ uid: foreignOrganization.uid, organizationId: "org-2", eventTypeOrganizationId: ORG }],
+      needsReview: [
+        {
+          uid: bundleWithForeign.uid, eventTypeId: seed.eventTypeId, reason: "resource_organization_differs",
+          eventTypeOrganizationId: ORG, resourceId: "res-2", resourceOrganizationId: "org-2",
+        },
       ],
     });
     expect((await auditAll(t, "booking_integrity")).issues.map((issue) => ("problems" in issue ? issue.problems : null))).toEqual([
