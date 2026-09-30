@@ -384,9 +384,10 @@ shows how and lists every check with its repair.
 
 - **Booking rules:** `createBooking`, `createProvisionalBooking`,
   `createMultiResourceBooking` (for every item), `rescheduleBooking`,
-  `rescheduleBookingByToken` and confirmations through
-  `transitionBookingState` (a provisional hold or a pending request to
-  `confirmed`) check the current configuration: the event type and every
+  `rescheduleBookingByToken` and the transitions that complete a hold or a
+  request through `transitionBookingState` (a provisional hold or a pending
+  request to `confirmed`, a provisional hold to `pending`) check the current
+  configuration: the event type and every
   resource exist and are active, each resource is linked to the event type
   and belongs to its organization when it has one, and one resource is not
   an add-on (`isStandalone: false`). A booking belongs to its event type's
@@ -394,8 +395,8 @@ shows how and lists every check with its repair.
   belong to one organization, and a bundle's `organizationId`, when given, is
   theirs. A move gives the new booking its event type's organization. A
   bundle's primary resource is its first item and may be an
-  add-on. There is no administrator override: to move or
-  confirm after deactivating or unlinking, reactivate or relink first.
+  add-on. There is no administrator override: to move, confirm or submit a
+  hold after deactivating or unlinking, reactivate or relink first.
   Cancelling, declining and expiring are always allowed, and deactivating
   never ends an existing booking. The legacy `createReservation` path checks
   none of this, and its bookings keep that exemption when moved.

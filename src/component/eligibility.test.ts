@@ -5,12 +5,13 @@
  * One rule set for createBooking, createProvisionalBooking,
  * createMultiResourceBooking (per item), rescheduleBooking and
  * rescheduleBookingByToken (destination over all items, before anything is
- * released; no admin override) and confirmations (pending or provisional ->
- * confirmed): the event type exists and is active; every resource exists,
- * is active, is linked and shares an organization-scoped event type's
- * organization; one of them is standalone. Cancelling, declining and expiry
- * never check, and deactivation never ends a booking. Legacy
- * createReservation rows keep the legacy rules.
+ * released; no admin override), confirmations (pending or provisional ->
+ * confirmed) and submitting a hold as a request (provisional -> pending):
+ * the event type exists and is active; every resource exists, is active, is
+ * linked and shares an organization-scoped event type's organization, and
+ * all of them share one organization; one of them is standalone.
+ * Cancelling, declining and expiry never check, and deactivation never ends
+ * a booking. Legacy createReservation rows keep the legacy rules.
  *
  * Converted from the verification probes lc/zz-cv-lc-f6 and
  * lc-skeptic/zz-cv-lcs-counter, which pinned the 0.4.x divergence. A
@@ -244,7 +245,7 @@ describe("moves re-check the destination by token and by id (F6 c: no admin over
   });
 });
 
-describe("confirmations re-check the rules; endings never do (F6 e)", () => {
+describe("confirmations and requests re-check the rules; endings never do (F6 e)", () => {
   function provisional(t: T, s: SeededResource, h: number) {
     return t.mutation(api.public.createProvisionalBooking, {
       eventTypeId: s.eventTypeId, resourceId: s.resourceId, start: hour(h), end: hour(h + 1),
@@ -265,17 +266,43 @@ describe("confirmations re-check the rules; endings never do (F6 e)", () => {
     const before = await snapshot(t);
 
     expect(await transition(t, hold, "confirmed")).toEqual({ code: "EVENT_TYPE_INACTIVE", message: "Event type is no longer active" });
+    // Submitting the hold as a request completes it too: rejected (0.5.0 review).
+    expect(await transition(t, toPending, "pending")).toEqual({ code: "EVENT_TYPE_INACTIVE", message: "Event type is no longer active" });
     expect(await snapshot(t)).toEqual(before);
     expect({
       cancel: await transition(t, toCancel, "cancelled"),
       expire: await outcome(t.mutation(api.public.expireProvisionalBooking, { bookingId: toExpire._id })),
-      // Not a confirmation: submitting the hold as a request is not re-checked.
-      pending: await transition(t, toPending, "pending"),
-    }).toEqual({ cancel: "ok", expire: "ok", pending: "ok" });
+    }).toEqual({ cancel: "ok", expire: "ok" });
 
-    // CONTROL: reactivated, the hold can be confirmed.
+    // CONTROL: reactivated, the hold can be confirmed and the other submitted.
     await t.mutation(api.public.toggleEventTypeActive, { id: s.eventTypeId, isActive: true });
     expect(await transition(t, hold, "confirmed")).toBe("ok");
+    expect(await transition(t, toPending, "pending")).toBe("ok");
+  });
+
+  test("provisional -> pending is re-checked: no booking.pending hook or awaiting-confirmation mail for a request that cannot be approved", async () => {
+    const { t } = setup();
+    const s = await seedResource(t, { requiresConfirmation: true });
+    const hold = await provisional(t, s, 9);
+    await t.mutation(api.resource_event_types.unlinkResourceFromEventType, { resourceId: s.resourceId, eventTypeId: s.eventTypeId });
+    const before = await snapshot(t);
+
+    expect(await transition(t, hold, "pending")).toEqual({
+      code: "RESOURCE_NOT_LINKED",
+      message: "Resource is not available for this event type",
+    });
+    // Status, history and scheduled jobs (the triggerHooks job that sends the mail) unchanged.
+    expect(await snapshot(t)).toEqual(before);
+    expect((await t.query(api.public.getBooking, { bookingId: hold._id }))?.status).toBe("provisional");
+
+    // CONTROL: relinked, the request is submitted and its triggerHooks job queued.
+    await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: s.resourceId, eventTypeId: s.eventTypeId });
+    expect(await transition(t, hold, "pending")).toBe("ok");
+    const jobs = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())) as unknown as Array<{
+      name?: string;
+      args: Array<{ eventType?: string }>;
+    }>;
+    expect(jobs.filter((job) => job.name?.includes("triggerHooks")).map((job) => job.args[0].eventType)).toEqual(["booking.pending"]);
   });
 
   test("approving a pending request after the resource was deactivated is rejected; declining works", async () => {

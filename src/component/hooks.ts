@@ -441,10 +441,13 @@ export const transitionBookingState = mutation({
       );
     }
 
-    // Confirming (a provisional hold, or approving a pending request) follows
-    // the current booking rules: after deactivation, unlinking or a change of
-    // organization it is rejected. Cancelling and declining never are.
-    if (args.toStatus === "confirmed") {
+    // Completing a hold or a request follows the current booking rules:
+    // confirming a provisional hold or approving a pending request, and
+    // submitting a provisional hold as a request (provisional -> pending,
+    // which tells the booker it awaits approval). After deactivation,
+    // unlinking or a change of organization they are rejected. Cancelling,
+    // declining and completing never are.
+    if (args.toStatus === "confirmed" || args.toStatus === "pending") {
       const items = await ctx.db
         .query("booking_items")
         .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))

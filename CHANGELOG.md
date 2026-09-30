@@ -96,8 +96,8 @@ bumping.
   cancel them, or set `isFungible: false` again.
 - One set of booking rules for every path (F6). `createBooking`,
   `createProvisionalBooking`, `createMultiResourceBooking` (per item), both
-  reschedule mutations and `transitionBookingState` to `confirmed` require an
-  existing, active event type and existing, active resources that are linked
+  reschedule mutations and `transitionBookingState` to `confirmed`, or from a
+  provisional hold to `pending`, require an existing, active event type and existing, active resources that are linked
   to it and belong to its organization when it has one, one of them not an
   add-on. For bundles the whole rule set is new, since 0.4.x checked only
   that the event type existed: the event type must be active, and every item
@@ -107,8 +107,10 @@ bumping.
   satisfy the add-on rule, and the rules come before capacity (an add-on
   alone on a taken slot reports `RESOURCE_NOT_STANDALONE`). New for moves,
   by token and by ID alike (no administrator override), and for confirming a
-  provisional hold or approving a pending request: the same check over every
-  item, before anything is released. Cancelling, declining and expiring are
+  provisional hold, submitting it as a request (`provisional` to `pending`,
+  which sends the booker the "awaiting confirmation" mail) or approving a
+  pending request: the same check over every item, before anything is
+  released or notified. Cancelling, declining and expiring are
   never checked, and deactivating never ends a booking. Legacy
   `createReservation` and its bookings stay exempt. The new
   `booking_eligibility` check lists the active bookings these rules reject,
@@ -278,9 +280,11 @@ bumping.
 
 Each of these changes behaviour; its _Upgrading_ entry says what to do.
 
-- Bundles, moves and confirmations follow the booking rules of
-  `createBooking`: deactivated, unlinked or unknown configuration and other
-  organizations' resources are rejected (F6, F7, N13).
+- Bundles, moves, confirmations and requests made from provisional holds
+  follow the booking rules of `createBooking`: deactivated, unlinked or
+  unknown configuration and other organizations' resources are rejected (F6,
+  F7, N13). A hold submitted as a request no longer tells the booker it
+  awaits approval when the approval can only fail.
 - Slot queries no longer open days a schedule keeps closed when given
   partial schedule arguments or an unknown schedule (F12, N15).
 - Re-running `createEventType` no longer reactivates an event type or moves

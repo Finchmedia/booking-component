@@ -427,7 +427,7 @@ describe("booking_eligibility", () => {
     // Each listed booking is rejected as the audit says; the clean one is not (control).
     await expect(t.mutation(api.hooks.transitionBookingState, { bookingId: unlinkedPool._id, toStatus: "confirmed" }))
       .rejects.toMatchObject({ data: { code: "RESOURCE_NOT_LINKED" } });
-    await expect(t.mutation(api.hooks.transitionBookingState, { bookingId: hold._id, toStatus: "confirmed" }))
+    await expect(t.mutation(api.hooks.transitionBookingState, { bookingId: hold._id, toStatus: "pending" }))
       .rejects.toMatchObject({ data: { code: "EVENT_TYPE_INACTIVE" } });
     await expect(t.mutation(api.public.rescheduleBooking, { bookingId: ghostItem._id, newStart: at("17:00"), newEnd: at("17:00") + HOUR }))
       .rejects.toMatchObject({ data: { code: "RESOURCE_NOT_FOUND" } });

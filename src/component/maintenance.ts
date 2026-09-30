@@ -618,7 +618,8 @@ async function bookingIntegrityIssue(
 /**
  * booking_eligibility: an active booking (pending, confirmed or
  * provisional; legacy rows are exempt) that fails the booking rules today,
- * so moving or confirming it is rejected (see bookingRuleProblems). The issue names the event type and the
+ * so moving it, confirming it or submitting a hold as a request is rejected
+ * (see bookingRuleProblems). The issue names the event type and the
  * resources the booking holds.
  */
 async function bookingEligibilityIssue(

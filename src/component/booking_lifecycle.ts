@@ -21,8 +21,9 @@ import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 // What a booking needs from the current configuration, checked by every
 // creation (createBooking, createProvisionalBooking,
 // createMultiResourceBooking per item), by both moves (for the destination,
-// over all items, before anything is released) and by confirmations
-// (pending or provisional -> confirmed):
+// over all items, before anything is released) and by the transitions that
+// complete a hold or a request (provisional -> pending, pending or
+// provisional -> confirmed):
 // - the event type exists and is active;
 // - every resource exists, is active, is linked to the event type and
 //   belongs to the event type's organization when it has one; for an event
@@ -180,8 +181,9 @@ export function assertOrganizationOfResources(
  * The booking rules for an existing booking against the current
  * configuration: its event type and every resource it holds (all
  * booking_items of a bundle, else its resource). Moves call it for the
- * destination before releasing anything; confirmations before confirming.
- * Returns the event type, or null for a legacy row.
+ * destination before releasing anything; transitionBookingState before
+ * confirming a booking or submitting a hold as a request. Returns the event
+ * type, or null for a legacy row.
  */
 export async function assertStillBookable(
   ctx: QueryCtx,
