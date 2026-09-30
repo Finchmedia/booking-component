@@ -2,6 +2,28 @@
 
 ## 0.4.3 — Unreleased
 
+### Security
+
+- The six built-in email templates render booking text as text. Guest names,
+  event titles and cancellation or decline reasons were inserted as raw HTML,
+  so markup in them became live links, images or hidden content in mail sent
+  from the host's sender. Text with `&`, `<`, `>`, `"` or `'` now reads the same
+  in every mail client; host snapshot tests of the default HTML may change.
+  Custom renderers still receive the unescaped values, and stored data is
+  unchanged.
+- The management buttons of the built-in templates use the same validated
+  links as `email.links` for renderers. A trailing slash in `baseUrl` is
+  normalized and its query and hash are dropped. A `baseUrl` that is not an
+  absolute `http(s)` URL (for example `javascript:` or a value without a
+  scheme) or that contains credentials yields no buttons: the mail shows the
+  contact text instead and the job logs a warning. The uid is now URL-encoded
+  in the path.
+- Built-in subjects follow the renderer rules: runs of CR, LF and NUL become a
+  space, and subjects are capped at 200 characters.
+
+The internal email mutations keep their names and arguments, so jobs queued by
+0.4.2 still run and render with the escaped templates.
+
 ### Maintenance and documentation
 
 - The npm package excludes every test file (`*.test.*`, `*.test-d.*`) and the

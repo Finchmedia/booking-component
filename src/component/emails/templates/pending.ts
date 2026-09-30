@@ -2,6 +2,9 @@
 // BOOKING PENDING EMAIL TEMPLATE
 // ============================================
 
+import type { BookingEmailContext } from "../../../emails.js";
+import { formatDateTimeFull, formatTimeShort } from "../helpers.js";
+import { html, raw } from "../html.js";
 import { EMAIL_BASE_STYLES, EMAIL_LIGHT_MODE_STYLES, ICON_STYLES, SECONDARY_BUTTON_STYLES } from "../styles.js";
 
 export interface BookingPendingDetails {
@@ -10,45 +13,18 @@ export interface BookingPendingDetails {
     start: number;
     end: number;
     timezone: string;
-    bookingUid?: string;
-    managementToken?: string;
-    baseUrl?: string;
+    /** From bookingEmailLinks; without links the mail asks the guest to get in touch instead. */
+    links?: BookingEmailContext["links"];
 }
 
 export function generateBookingPendingHTML(details: BookingPendingDetails): string {
-    const startDate = new Date(details.start);
-    const endDate = new Date(details.end);
-
-    const formatOptions: Intl.DateTimeFormatOptions = {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: details.timezone,
-        timeZoneName: "short",
-    };
-
-    const formattedStart = startDate.toLocaleString("en-US", formatOptions);
-    const formattedEnd = endDate.toLocaleString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: details.timezone,
-        timeZoneName: "short",
-    });
-
-    // Generate management URL if available
-    const managementUrl = details.bookingUid && details.managementToken && details.baseUrl
-        ? `${details.baseUrl}/book/booking/${details.bookingUid}?token=${encodeURIComponent(details.managementToken)}`
-        : null;
-    const cancelUrl = managementUrl
-        ? `${details.baseUrl}/book/booking/${details.bookingUid}/cancel?token=${encodeURIComponent(details.managementToken!)}`
-        : null;
+    const formattedStart = formatDateTimeFull(details.start, details.timezone);
+    const formattedEnd = formatTimeShort(details.end, details.timezone);
+    const links = details.links;
 
     const iconStyles = ICON_STYLES.warning;
 
-    return `
+    return html`
 <!DOCTYPE html>
 <html>
 <head>
@@ -57,24 +33,24 @@ export function generateBookingPendingHTML(details: BookingPendingDetails): stri
     <meta name="color-scheme" content="dark light">
     <title>Booking Request Received</title>
     <style>
-        ${EMAIL_BASE_STYLES}
+        ${raw(EMAIL_BASE_STYLES)}
         .icon-circle {
-            background-color: ${iconStyles.dark.circleBackground};
+            background-color: ${raw(iconStyles.dark.circleBackground)};
         }
         .icon {
-            color: ${iconStyles.dark.iconColor};
+            color: ${raw(iconStyles.dark.iconColor)};
         }
         .status-badge {
             background-color: rgba(245, 158, 11, 0.15);
             color: #f59e0b;
         }
-        ${EMAIL_LIGHT_MODE_STYLES}
+        ${raw(EMAIL_LIGHT_MODE_STYLES)}
         @media (prefers-color-scheme: light) {
             .icon-circle {
-                background-color: ${iconStyles.light.circleBackground};
+                background-color: ${raw(iconStyles.light.circleBackground)};
             }
             .icon {
-                color: ${iconStyles.light.iconColor};
+                color: ${raw(iconStyles.light.iconColor)};
             }
             .status-badge {
                 background-color: rgba(217, 119, 6, 0.15);
@@ -103,17 +79,17 @@ export function generateBookingPendingHTML(details: BookingPendingDetails): stri
                 <span class="status-badge">Awaiting Confirmation</span>
             </div>
 
-            ${managementUrl ? `
+            ${links ? html`
             <div style="text-align: center; margin: 24px 0;">
-                <a href="${managementUrl}" style="display: inline-block; padding: 12px 24px; background-color: #f59e0b; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">
+                <a href="${links.view}" style="display: inline-block; padding: 12px 24px; background-color: #f59e0b; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">
                     View Booking Status
                 </a>
             </div>
             <div style="text-align: center; margin: 16px 0;">
-                <a href="${cancelUrl}" style="${SECONDARY_BUTTON_STYLES.outlined}">Cancel Request</a>
+                <a href="${links.cancel}" style="${SECONDARY_BUTTON_STYLES.outlined}">Cancel Request</a>
             </div>
             <p class="help-text">You'll receive another email once your booking is confirmed or if there are any updates.</p>
-            ` : `<p class="help-text">You'll receive another email once your booking is confirmed or if there are any updates.</p>`}
+            ` : html`<p class="help-text">You'll receive another email once your booking is confirmed or if there are any updates.</p>`}
         </div>
 
         <div class="footer">
@@ -122,5 +98,5 @@ export function generateBookingPendingHTML(details: BookingPendingDetails): stri
     </div>
 </body>
 </html>
-    `.trim();
+    `.toString().trim();
 }

@@ -8,6 +8,7 @@ import { Resend } from "@convex-dev/resend";
 import { components } from "../_generated/api";
 import { bookingEmailContextValidator } from "../../emails.js";
 import { bookingEmailLinks } from "./context.js";
+import { defaultSubject } from "./helpers.js";
 import { resolveBookingEmail } from "./renderer.js";
 
 import { generateBookingConfirmationHTML } from "./templates/confirmation.js";
@@ -16,6 +17,15 @@ import { generateBookingApprovedHTML } from "./templates/approved.js";
 import { generateBookingDeclinedHTML } from "./templates/declined.js";
 import { generateBookingCancellationHTML } from "./templates/cancelled.js";
 import { generateBookingRescheduledHTML } from "./templates/rescheduled.js";
+
+/** One validated link set for both the built-in template and the renderer fallback context. */
+function managementLinks(args: { bookingUid?: string; managementToken?: string; baseUrl?: string }) {
+    const links = bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl);
+    if (!links && args.bookingUid && args.managementToken && args.baseUrl) {
+        console.warn("[emails] baseUrl is not an absolute http(s) URL without credentials; management links omitted");
+    }
+    return links;
+}
 
 // ============================================
 // BOOKING CONFIRMATION
@@ -59,6 +69,7 @@ export const sendBookingConfirmation = internalMutation({
         });
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
+        const links = managementLinks(args);
 
         const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
             version: 1,
@@ -70,10 +81,10 @@ export const sendBookingConfirmation = internalMutation({
             end: args.end,
             timezone: args.timezone,
             bookingUid: args.bookingUid,
-            links: bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl),
+            links,
             resourceId: args.resourceId,
         }, () => ({
-            subject: `Booking Confirmed: ${args.eventTitle}`,
+            subject: defaultSubject(`Booking Confirmed: ${args.eventTitle}`),
             html: generateBookingConfirmationHTML({
                 bookerName: args.bookerName,
                 eventTitle: args.eventTitle,
@@ -81,9 +92,7 @@ export const sendBookingConfirmation = internalMutation({
                 end: args.end,
                 timezone: args.timezone,
                 resourceId: args.resourceId,
-                bookingUid: args.bookingUid,
-                managementToken: args.managementToken,
-                baseUrl: args.baseUrl,
+                links,
             }),
         }));
 
@@ -147,6 +156,7 @@ export const sendBookingPending = internalMutation({
         });
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
+        const links = managementLinks(args);
 
         const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
             version: 1,
@@ -158,18 +168,16 @@ export const sendBookingPending = internalMutation({
             end: args.end,
             timezone: args.timezone,
             bookingUid: args.bookingUid,
-            links: bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl),
+            links,
         }, () => ({
-            subject: `Booking Request Received: ${args.eventTitle}`,
+            subject: defaultSubject(`Booking Request Received: ${args.eventTitle}`),
             html: generateBookingPendingHTML({
                 bookerName: args.bookerName,
                 eventTitle: args.eventTitle,
                 start: args.start,
                 end: args.end,
                 timezone: args.timezone,
-                bookingUid: args.bookingUid,
-                managementToken: args.managementToken,
-                baseUrl: args.baseUrl,
+                links,
             }),
         }));
 
@@ -233,6 +241,7 @@ export const sendBookingApproved = internalMutation({
         });
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
+        const links = managementLinks(args);
 
         const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
             version: 1,
@@ -244,18 +253,16 @@ export const sendBookingApproved = internalMutation({
             end: args.end,
             timezone: args.timezone,
             bookingUid: args.bookingUid,
-            links: bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl),
+            links,
         }, () => ({
-            subject: `Booking Approved: ${args.eventTitle}`,
+            subject: defaultSubject(`Booking Approved: ${args.eventTitle}`),
             html: generateBookingApprovedHTML({
                 bookerName: args.bookerName,
                 eventTitle: args.eventTitle,
                 start: args.start,
                 end: args.end,
                 timezone: args.timezone,
-                bookingUid: args.bookingUid,
-                managementToken: args.managementToken,
-                baseUrl: args.baseUrl,
+                links,
             }),
         }));
 
@@ -329,7 +336,7 @@ export const sendBookingDeclined = internalMutation({
             timezone: args.timezone,
             reason: args.reason,
         }, () => ({
-            subject: `Booking Request Declined: ${args.eventTitle}`,
+            subject: defaultSubject(`Booking Request Declined: ${args.eventTitle}`),
             html: generateBookingDeclinedHTML({
                 bookerName: args.bookerName,
                 eventTitle: args.eventTitle,
@@ -410,7 +417,7 @@ export const sendBookingCancellation = internalMutation({
             timezone: args.timezone,
             reason: args.reason,
         }, () => ({
-            subject: `Booking Cancelled: ${args.eventTitle}`,
+            subject: defaultSubject(`Booking Cancelled: ${args.eventTitle}`),
             html: generateBookingCancellationHTML({
                 bookerName: args.bookerName,
                 eventTitle: args.eventTitle,
@@ -483,6 +490,7 @@ export const sendBookingRescheduled = internalMutation({
         });
 
         const fromAddress = args.from ?? args.resendFromEmail ?? "bookings@example.com";
+        const links = managementLinks(args);
 
         const content = await resolveBookingEmail(ctx, args.renderer, args.emailContext ?? {
             version: 1,
@@ -496,9 +504,9 @@ export const sendBookingRescheduled = internalMutation({
             previousEnd: args.oldEnd,
             timezone: args.timezone,
             bookingUid: args.bookingUid,
-            links: bookingEmailLinks(args.bookingUid, args.managementToken, args.baseUrl),
+            links,
         }, () => ({
-            subject: `Booking Rescheduled: ${args.eventTitle}`,
+            subject: defaultSubject(`Booking Rescheduled: ${args.eventTitle}`),
             html: generateBookingRescheduledHTML({
                 bookerName: args.bookerName,
                 eventTitle: args.eventTitle,
@@ -507,9 +515,7 @@ export const sendBookingRescheduled = internalMutation({
                 newStart: args.newStart,
                 newEnd: args.newEnd,
                 timezone: args.timezone,
-                bookingUid: args.bookingUid,
-                managementToken: args.managementToken,
-                baseUrl: args.baseUrl,
+                links,
             }),
         }));
 

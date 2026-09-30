@@ -2,8 +2,10 @@
 // BOOKING RESCHEDULED EMAIL TEMPLATE
 // ============================================
 
-import { EMAIL_BASE_STYLES, EMAIL_LIGHT_MODE_STYLES, ICON_STYLES, BUTTON_STYLES, SECONDARY_BUTTON_STYLES } from "../styles.js";
+import type { BookingEmailContext } from "../../../emails.js";
 import { formatDate, formatTime, formatDuration } from "../helpers.js";
+import { html, raw } from "../html.js";
+import { EMAIL_BASE_STYLES, EMAIL_LIGHT_MODE_STYLES, ICON_STYLES, BUTTON_STYLES, SECONDARY_BUTTON_STYLES } from "../styles.js";
 
 export interface BookingRescheduledDetails {
     bookerName: string;
@@ -13,9 +15,8 @@ export interface BookingRescheduledDetails {
     newStart: number;
     newEnd: number;
     timezone: string;
-    bookingUid?: string;
-    managementToken?: string;
-    baseUrl?: string;
+    /** From bookingEmailLinks; without links the mail asks the guest to get in touch instead. */
+    links?: BookingEmailContext["links"];
 }
 
 export function generateBookingRescheduledHTML(details: BookingRescheduledDetails): string {
@@ -26,21 +27,11 @@ export function generateBookingRescheduledHTML(details: BookingRescheduledDetail
     const newTime = formatTime(details.newStart, details.timezone);
     const newEndTime = formatTime(details.newEnd, details.timezone);
     const duration = formatDuration(details.newEnd - details.newStart);
-
-    // Generate management URLs if available
-    const managementUrl = details.bookingUid && details.managementToken && details.baseUrl
-        ? `${details.baseUrl}/book/booking/${details.bookingUid}?token=${encodeURIComponent(details.managementToken)}`
-        : null;
-    const rescheduleUrl = managementUrl
-        ? `${details.baseUrl}/book/booking/${details.bookingUid}/reschedule?token=${encodeURIComponent(details.managementToken!)}`
-        : null;
-    const cancelUrl = managementUrl
-        ? `${details.baseUrl}/book/booking/${details.bookingUid}/cancel?token=${encodeURIComponent(details.managementToken!)}`
-        : null;
+    const links = details.links;
 
     const iconStyles = ICON_STYLES.info;
 
-    return `
+    return html`
 <!DOCTYPE html>
 <html>
 <head>
@@ -49,12 +40,12 @@ export function generateBookingRescheduledHTML(details: BookingRescheduledDetail
     <meta name="color-scheme" content="dark light">
     <title>Booking Rescheduled</title>
     <style>
-        ${EMAIL_BASE_STYLES}
+        ${raw(EMAIL_BASE_STYLES)}
         .icon-circle {
-            background-color: ${iconStyles.dark.circleBackground};
+            background-color: ${raw(iconStyles.dark.circleBackground)};
         }
         .icon {
-            color: ${iconStyles.dark.iconColor};
+            color: ${raw(iconStyles.dark.iconColor)};
         }
         .details-card {
             margin-bottom: 12px;
@@ -68,13 +59,13 @@ export function generateBookingRescheduledHTML(details: BookingRescheduledDetail
             color: #3b82f6;
             font-size: 18px;
         }
-        ${EMAIL_LIGHT_MODE_STYLES}
+        ${raw(EMAIL_LIGHT_MODE_STYLES)}
         @media (prefers-color-scheme: light) {
             .icon-circle {
-                background-color: ${iconStyles.light.circleBackground};
+                background-color: ${raw(iconStyles.light.circleBackground)};
             }
             .icon {
-                color: ${iconStyles.light.iconColor};
+                color: ${raw(iconStyles.light.iconColor)};
             }
             .arrow {
                 color: #2563eb;
@@ -112,19 +103,19 @@ export function generateBookingRescheduledHTML(details: BookingRescheduledDetail
                 </div>
             </div>
 
-            ${managementUrl ? `
+            ${links ? html`
             <div style="text-align: center; margin: 24px 0;">
-                <a href="${managementUrl}" style="${BUTTON_STYLES.viewBooking}">
+                <a href="${links.view}" style="${BUTTON_STYLES.viewBooking}">
                     View Booking
                 </a>
             </div>
             <div style="text-align: center; margin: 16px 0;">
-                <a href="${rescheduleUrl}" style="${SECONDARY_BUTTON_STYLES.primary}">Reschedule Again</a>
+                <a href="${links.reschedule}" style="${SECONDARY_BUTTON_STYLES.primary}">Reschedule Again</a>
                 <span style="display: inline-block; width: 12px;"></span>
-                <a href="${cancelUrl}" style="${SECONDARY_BUTTON_STYLES.outlined}">Cancel Booking</a>
+                <a href="${links.cancel}" style="${SECONDARY_BUTTON_STYLES.outlined}">Cancel Booking</a>
             </div>
             <p class="help-text">Duration: ${duration}</p>
-            ` : `<p class="help-text">Duration: ${duration}. If you need to make further changes, please contact us.</p>`}
+            ` : html`<p class="help-text">Duration: ${duration}. If you need to make further changes, please contact us.</p>`}
         </div>
 
         <div class="footer">
@@ -133,5 +124,5 @@ export function generateBookingRescheduledHTML(details: BookingRescheduledDetail
     </div>
 </body>
 </html>
-    `.trim();
+    `.toString().trim();
 }

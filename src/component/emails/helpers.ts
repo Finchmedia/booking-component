@@ -2,6 +2,8 @@
 // EMAIL HELPER FUNCTIONS
 // ============================================
 
+import { MAX_BOOKING_EMAIL_SUBJECT_LENGTH } from "../../emails.js";
+
 export function formatDate(timestamp: number, timezone: string): string {
     const date = new Date(timestamp);
     return date.toLocaleString("en-US", {
@@ -59,4 +61,13 @@ export function formatTimeShort(timestamp: number, timezone: string): string {
         timeZone: timezone,
         timeZoneName: "short",
     });
+}
+
+/** Built-in subjects follow the renderer rules: one line, at most 200 UTF-16 code units. */
+export function defaultSubject(subject: string): string {
+    const line = subject.replace(/[\r\n\0]+/g, " ").trim();
+    if (line.length <= MAX_BOOKING_EMAIL_SUBJECT_LENGTH) return line;
+    const cut = line.slice(0, MAX_BOOKING_EMAIL_SUBJECT_LENGTH);
+    // Do not end on half of a surrogate pair.
+    return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
 }
