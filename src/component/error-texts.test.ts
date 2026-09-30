@@ -315,9 +315,20 @@ describe("check order: a request with several problems reports the first check",
   test("createBooking and createProvisionalBooking share one order", async () => {
     const { t } = setup();
     const { seed } = await seedWorld(t);
-    // range → pool → event exists → event active → resource exists → resource
-    // active → standalone → linked → organization → slot free
-    const requests: Record<string, { eventTypeId: string; resourceId: string; start: number; end: number }> = {
+    // zone → booker email (0.5.0) → range → pool → event exists → event
+    // active → resource exists → resource active → standalone → linked →
+    // organization → slot free
+    const requests: Record<
+      string,
+      { eventTypeId: string; resourceId: string; start: number; end: number; timezone?: string; booker?: typeof BOOKER }
+    > = {
+      "invalid zone, malformed email and empty range": {
+        eventTypeId: "ghost", resourceId: "pool-1", start: at("15:00"), end: at("15:00"),
+        timezone: "Mars/Olympus", booker: { ...BOOKER, email: "ada" },
+      },
+      "malformed email and empty range": {
+        eventTypeId: "ghost", resourceId: "pool-1", start: at("15:00"), end: at("15:00"), booker: { ...BOOKER, email: "ada" },
+      },
       "empty range, pool and missing event": { eventTypeId: "ghost", resourceId: "pool-1", start: at("15:00"), end: at("15:00") },
       "pool and missing event": { eventTypeId: "ghost", resourceId: "pool-1", ...hour("15:00") },
       "missing event and missing resource": { eventTypeId: "ghost", resourceId: "ghost-res", ...hour("15:00") },
@@ -329,6 +340,9 @@ describe("check order: a request with several problems reports the first check",
       "other organization and slot taken": { eventTypeId: seed.eventTypeId, resourceId: "res-org2", ...hour("09:00") },
     };
     const expected = {
+      "invalid zone, malformed email and empty range":
+        coded("INVALID_INPUT", 'Invalid time zone "Mars/Olympus": expected an IANA time zone such as "Europe/Berlin"'),
+      "malformed email and empty range": coded("INVALID_INPUT", "Invalid booker email: expected an address such as name@example.com"),
       "empty range, pool and missing event": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
       "pool and missing event": coded("POOL_REQUIRES_BUNDLE", "Fungible resources require createMultiResourceBooking with an explicit quantity"),
       "missing event and missing resource": coded("EVENT_TYPE_NOT_FOUND", "Event type not found"),
@@ -343,7 +357,7 @@ describe("check order: a request with several problems reports the first check",
       const cases = Object.fromEntries(
         Object.entries(requests).map(([name, request]) => [
           name,
-          () => t.mutation(mutation, { ...request, timezone: "UTC", booker: BOOKER, location: LOCATION }),
+          () => t.mutation(mutation, { timezone: "UTC", booker: BOOKER, location: LOCATION, ...request }),
         ]),
       );
       expect(await failuresOf(cases)).toEqual(expected);
@@ -353,7 +367,7 @@ describe("check order: a request with several problems reports the first check",
   // 0.5.0: the booking rules (every item, then the add-on rule) come before
   // capacity, as on the single paths; 0.4.x checked capacity first, so an
   // add-on alone on a taken slot reported the conflict.
-  test("createMultiResourceBooking: range → request list → event → organization → each item → standalone → capacity", async () => {
+  test("createMultiResourceBooking: zone → booker email → range → request list → event → organization → each item → standalone → capacity", async () => {
     const { t } = setup();
     const { seed, bundle } = await seedWorld(t);
     const bundleOf = (
@@ -366,7 +380,13 @@ describe("check order: a request with several problems reports the first check",
       t.mutation(api.multi_resource.createMultiResourceBooking, {
         eventTypeId, organizationId, resources, start, end, timezone: "UTC", booker: BOOKER,
       });
+    const detailsOf = (timezone: string, email: string) =>
+      t.mutation(api.multi_resource.createMultiResourceBooking, {
+        eventTypeId: "ghost", resources: [], start: at("15:00"), end: at("15:00"), timezone, booker: { ...BOOKER, email },
+      });
     expect(await failuresOf({
+      "invalid zone, malformed email and empty range": () => detailsOf("", "ada"),
+      "malformed email and empty range": () => detailsOf("UTC", "ada"),
       "empty range and missing event": () => bundleOf("ghost", [{ resourceId: seed.resourceId }], at("15:00"), at("15:00")),
       "duplicate resource and missing event": () =>
         bundleOf("ghost", [{ resourceId: seed.resourceId }, { resourceId: seed.resourceId }], at("15:00"), at("16:00")),
@@ -381,6 +401,9 @@ describe("check order: a request with several problems reports the first check",
       "add-on with an ineligible room": () => bundle([{ resourceId: "addon-1" }, { resourceId: "res-off" }], "15:00"),
       "add-on alone on a taken slot": () => bundle([{ resourceId: "addon-1" }], "13:00"),
     })).toEqual({
+      "invalid zone, malformed email and empty range":
+        coded("INVALID_INPUT", 'Invalid time zone "": expected an IANA time zone such as "Europe/Berlin"'),
+      "malformed email and empty range": coded("INVALID_INPUT", "Invalid booker email: expected an address such as name@example.com"),
       "empty range and missing event": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
       "duplicate resource and missing event": coded("INVALID_INPUT", 'Duplicate resource ID: "res-1"'),
       "missing event and slot taken": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),

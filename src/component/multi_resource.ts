@@ -20,6 +20,7 @@ import {
 } from "./inventory_helpers";
 import { bookingDoc, bookingWithItemsDoc, successResult } from "./validators";
 import { throwBookingError } from "../shared/booking-errors.js";
+import { assertBookingDetails } from "./input_validation";
 
 // ============================================
 // MULTI-RESOURCE AVAILABILITY CHECK
@@ -176,9 +177,10 @@ export const createMultiResourceBooking = mutation({
   },
   returns: bookingDoc,
   handler: async (ctx, args) => {
-    // 0. Range guard — shared with every other write path (an inverted or
-    // NaN range maps to zero slots and would create a booking that holds
-    // nothing).
+    // 0. Zone and booker address, as for single bookings. Range guard —
+    // shared with every other write path (an inverted or NaN range maps to
+    // zero slots and would create a booking that holds nothing).
+    assertBookingDetails(args);
     assertValidRange(args.start, args.end);
     validateResourceRequests(args.resources);
 

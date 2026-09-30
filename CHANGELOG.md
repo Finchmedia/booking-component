@@ -134,6 +134,14 @@
   (`dateFrom` and `dateTo` included; `INVALID_INPUT`) and `getAvailability`
   at most 366 days (`INVALID_RANGE`). Split longer ranges into several
   calls. Bookings have no length cap; multi-day bookings stay possible.
+- New bookings (`createBooking`, `createProvisionalBooking`,
+  `createMultiResourceBooking`) reject a `timezone` `Intl` does not accept
+  and a booker email that fails the syntax screen of the built-in mail
+  (`isSendableAddress`: one `@`, a dotted domain, no spaces), with
+  `INVALID_INPUT` before any other check (N4, N5, D15). The text does not
+  repeat the address. Validate both in your booking form and show the error;
+  bookings stored earlier keep working, and their mail still renders in UTC
+  or is skipped. Recipient verification stays host policy.
 
 ### Added
 

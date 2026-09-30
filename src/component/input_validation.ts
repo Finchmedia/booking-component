@@ -7,12 +7,13 @@
 // slot indices outside the day, dates like "2027-02-30" — and answered them
 // with silent nonsense (candidates on fully booked days, another day's hours).
 // They now fail fast with an "Invalid …" error (code INVALID_INPUT); calendar
-// days are parsed with parseCivilDate (src/shared/time.ts). 0.5.0 adds
-// range caps and event-type settings. Host policy (allowed durations,
-// notice, horizon) stays in the host.
+// days are parsed with parseCivilDate (src/shared/time.ts). 0.5.0 adds range
+// caps, event-type settings and new bookings' zone and booker address. Host
+// policy (allowed durations, notice, horizon) stays in the host.
 
 import type { CivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
+import { isSendableAddress } from "./emails/recipient.js";
 
 /** An event length must be a finite number of minutes greater than zero. */
 export function assertEventLength(eventLength: number): void {
@@ -172,5 +173,22 @@ export function assertLengthInOptions(lengthInMinutes: number, options: number[]
       "INVALID_INPUT",
       `Invalid lengthInMinutes ${lengthInMinutes}: expected one of lengthInMinutesOptions (${(options ?? []).join(", ")})`
     );
+  }
+}
+
+// ============================================
+// BOOKING DETAILS (0.5.0)
+// ============================================
+
+/**
+ * A new booking's zone and booker address (N4, N5): a time zone Intl
+ * accepts, and an address that passes the syntax screen of the built-in
+ * mail (isSendableAddress). Whether the address belongs to the booker stays
+ * host policy. The address is not repeated in the error.
+ */
+export function assertBookingDetails(details: { timezone: string; booker: { email: string } }): void {
+  assertTimeZone(details.timezone);
+  if (!isSendableAddress(details.booker.email)) {
+    throwBookingError("INVALID_INPUT", "Invalid booker email: expected an address such as name@example.com");
   }
 }

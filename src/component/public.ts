@@ -31,6 +31,7 @@ import { throwBookingError } from "../shared/booking-errors.js";
 import {
     MAX_MONTH_RANGE_DAYS,
     assertAvailabilityRangeLength,
+    assertBookingDetails,
     assertDateOrder,
     assertDateRangeLength,
     assertEventLength,
@@ -699,8 +700,10 @@ export const createBooking = mutation({
   },
   returns: bookingDoc,
   handler: async (ctx, args) => {
-    // 0–4. Range, pool, event type, resource, link and free slots — shared
-    // with createProvisionalBooking, including the order of the checks.
+    // Zone and booker address, then 0–4. range, pool, event type, resource,
+    // link and free slots — shared with createProvisionalBooking, including
+    // the order of the checks.
+    assertBookingDetails(args);
     const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
 
     // 5. Generate unique booking UID
@@ -823,6 +826,7 @@ export const createProvisionalBooking = mutation({
   returns: bookingDoc,
   handler: async (ctx, args) => {
     // The same checks, in the same order, as createBooking.
+    assertBookingDetails(args);
     const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
 
     const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
