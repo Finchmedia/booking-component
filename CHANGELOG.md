@@ -2,8 +2,9 @@
 
 ## 0.5.0 — Unreleased
 
-The component's contract release: coded errors, one set of booking rules,
-closed booking statuses and checked configuration writes. Function paths, the
+The contract release: coded errors, one set of booking rules, closed booking
+statuses and checked configuration writes in the component, and a host
+contract that `BookingProvider` checks at compile time. Function paths, the
 arguments of queued jobs and the version 1 hook payloads are unchanged. Each
 breaking change below names what your host has to do; read _Upgrading_ before
 bumping.
@@ -26,9 +27,11 @@ bumping.
   codes in [docs/errors.md](docs/errors.md); other failures stay plain
   `Error`s. A host that passes every `ConvexError` through to its clients, as
   the reference host's `translateComponentError` does, would now send the
-  component's codes and texts to browsers. Before upgrading, map the codes
-  your clients see (for example `SLOT_UNAVAILABLE` to your "slot taken"
-  error) with `isBookingError(error)` and `error.data.code`, fall back to a
+  component's codes and texts to browsers, and the Booker shows such an
+  error's `message` where it showed its generic text for a plain error.
+  Before upgrading, map the codes your clients see (for example
+  `SLOT_UNAVAILABLE` to your "slot taken" error) with `isBookingError(error)`
+  and `error.data.code` and rethrow your own `ConvexError`, fall back to a
   generic error for the rest, and deploy that change with the upgrade.
   Matching `error.data.message` still works; codes also catch the bundle and
   move conflicts whose texts a needle table missed.
@@ -36,7 +39,10 @@ bumping.
   `getResource` and the `getBooking*` queries; 0.4.x threw
   `EVENT_TYPE_NOT_FOUND` "Event type not found: <id>". Handle `null` where
   you read the result, and drop a wrapper's catch that mapped that error to
-  `null`. The Booker already treats `null` as a deleted event type.
+  `null` (the 0.4.3 workaround): a wrapper that returns the result meets the
+  React contract (`EventTypeView | null`), and the Booker and Calendar show
+  `null` as a deleted event type. A wrapper that throws for a missing event
+  type sends the Booker to your error boundary.
 - New bookings (`createBooking`, `createProvisionalBooking`,
   `createMultiResourceBooking`) reject a `timezone` `Intl` does not accept and
   a booker email that fails the built-in mail's syntax screen (one `@`, a
@@ -158,6 +164,14 @@ bumping.
   dashboard or imported can block it: correct them there and deploy again.
   `booking_status_invalid` then confirms that none is left, history
   included.
+- `Booking.status` in `@mrfinch/booking/react`, and with it
+  `BookingView.status` and what `onBookingComplete` receives, is the
+  component's `BookingStatus` (exported from `/react` too). The deprecated
+  `"rescheduled"`, never stored, is no longer part of it: delete comparisons
+  and `case` branches with it (a moved booking is `cancelled`). A host
+  `createBooking` or `rescheduleBookingByToken` whose returns validator
+  declares `status: v.string()` no longer fits `PublicBookingAPI`: declare it
+  with `bookingStatusValidator`, or return the component's booking.
 - `getQuantityAvailability` returns `bookedQuantities` as
   `Record<string, number>` instead of `any`, and the schema stores
   `quantity_availability.slotQuantities` as that record (PR-66). The
@@ -165,12 +179,20 @@ bumping.
   rows changed outside it. Drop host casts of the result.
 - Slot queries during a reschedule (F13): a host that forwards a client's
   `excludeBookingUid` to `getDaySlots` or `getMonthAvailability` lets anyone
-  who knows a booking's UID see its time as free. Forward the booker's
-  `rescheduleContext: { uid, token }` instead, which frees the booking's own
-  slots only with its management token, and keep `excludeBookingUid` for
-  code that has authorized the move itself. Passing both throws
-  `INVALID_INPUT`. [docs/host-functions.md](docs/host-functions.md) shows a
-  wrapper.
+  who knows a booking's UID see its time as free. Remove it from their
+  arguments and forward the booker's `rescheduleContext: { uid, token }`
+  instead, which frees the booking's own slots only with its management
+  token; keep `excludeBookingUid` for code that has authorized the move
+  itself. Passing both throws `INVALID_INPUT`.
+  [docs/host-functions.md](docs/host-functions.md#slot-queries-while-rescheduling)
+  shows a wrapper. The React components send the context only with
+  `BookingProvider`'s new `availabilityContext`, off by default (see
+  _Added_). Before you turn it on, declare
+  `eventTypeId: v.optional(v.string())` and
+  `rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`
+  in the argument validators of both host wrappers and deploy them ahead of
+  the page: until then the validators reject every slot query.
+  `BookingProvider` rejects a `publicApi` without them at compile time.
 - Hooks keep the version 1 payloads unless registered with
   `payloadVersion: 2` (N7, D16), so existing hooks need no change. To switch
   one to the version 2 envelope, register a handler that declares
@@ -180,6 +202,45 @@ bumping.
 - `convex-helpers` (`^0.1.124`) is a required peer dependency:
   `listBookingsPage` uses its paginator, so your deploy bundles it. Install
   it next to `@mrfinch/booking` (React users already have it).
+- `BookingProvider` checks `publicApi` at compile time. The 11 functions the
+  components call (`getEventType`, `getResource`, `hasResourceEventTypeLink`,
+  `getMonthAvailability`, `getDaySlots`, `getDatePresence`, `getPresence`,
+  `createBooking`, `rescheduleBookingByToken`, `heartbeat`, `leave`) must
+  accept exactly the arguments the components send and return at least the
+  fields they read (`BookingUIOperations`). A mismatch is a type error that
+  names the operation; until 0.4.x it compiled and failed in the browser.
+  Fix the host function: declare every argument the components send (for
+  example `slotInterval` in `getDaySlots`, `eventTypeId` in `heartbeat`), make
+  arguments they never send optional, and return the view fields; the README's
+  host contract table lists them. To find the function, check the gateway on
+  its own with the exported contract type:
+  `api.public satisfies PublicBookingAPI` names it and lists its argument keys
+  next to the keys the components send; the error on `<BookingProvider>` can
+  name the opt-in type and a different function. The generated `api.public`
+  of the reference host compiles unchanged.
+- The other 10 public operations (`getBooking`, `getBookingByUid`,
+  `getBookingByToken`, `cancelBookingByToken`, `getEventTypeBySlug`,
+  `listEventTypes`, `getAvailability`, `listResources`,
+  `getEventTypesForResource`, `getEffectiveAvailability`) are optional: no
+  component calls them, so a host need not export the token-less booking reads.
+  Code that reads them from `useBookingAPI()` must handle `undefined`, or call
+  its own `api.public` references.
+- `useBookingAPI()` types the 11 operations with the contract's arguments and
+  result views (`EventTypeView`, `ResourceView`, `BookingView`, …) instead of
+  `any`. Code that reads other fields through them, such as `eventType.slug`,
+  uses its own generated references instead.
+- Admin operations resolve only from `adminApi` and are `undefined` without
+  it; `publicApi` no longer stands in for them (deprecated in 0.4.3). A
+  plain-object `adminApi` no longer overrides public operations, and names
+  outside `PublicBookingAPI` and `AdminBookingAPI` are no longer passed
+  through. Pass `adminApi={api.admin}` wherever admin operations are used, and
+  call other functions through your own `api`. To route a public operation to
+  another function, pass a plain-object `publicApi` that lists the required
+  operations; a generated `api.public` cannot be spread.
+- `onBookingComplete` receives a `BookingView`: `uid`, `status`, `start`,
+  `end`, `timezone` and `bookerName`, and every other `Booking` field as
+  optional. A callback annotated `(booking: Booking) => …` takes `BookingView`
+  or drops the annotation. `BookingSuccess` accepts a `BookingView`.
 
 ### Fixed
 
@@ -198,6 +259,13 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   (N12).
 - `listBookings` no longer gives limits of 0, negative or fractional values
   a meaning (F18).
+- The React integration keeps its types: Booker, Calendar and
+  `useConvexSlots` read typed results without casts, and a host reference whose
+  kind, visibility, arguments or result do not fit is rejected at compile time.
+  Host wrappers with extra optional arguments, broader argument types, the
+  component's own documents or redacted results with the view fields pass.
+- `BookingProvider` builds the API from its operation lists: public
+  operations from `publicApi`, admin operations from `adminApi`, nothing else.
 
 ### Added
 
@@ -236,95 +304,7 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   `null`.
 - `BOOKING_STATUSES`, the `BookingStatus` type, `bookingStatusValidator` and
   `isBookingStatus` from `@mrfinch/booking`, for host types, validators and
-  status filters.
-
-### Documentation
-
-- [docs/maintenance.md](docs/maintenance.md): the upgrade order, every
-  `maintenance.audit` check with its repair, and the one-time repairs.
-- [docs/host-functions.md](docs/host-functions.md): slot-query wrappers that
-  forward `rescheduleContext`, and a paged booking list.
-- The README states which booking rules the component guarantees and which
-  policy stays with the host: authorization, notice and horizon, buffers,
-  abuse limits and email recipients.
-### Upgrading
-
-- `BookingProvider` checks `publicApi` at compile time. The 11 functions the
-  components call (`getEventType`, `getResource`, `hasResourceEventTypeLink`,
-  `getMonthAvailability`, `getDaySlots`, `getDatePresence`, `getPresence`,
-  `createBooking`, `rescheduleBookingByToken`, `heartbeat`, `leave`) must
-  accept exactly the arguments the components send and return at least the
-  fields they read (`BookingUIOperations`). A mismatch is a type error that
-  names the operation; until 0.4.x it compiled and failed in the browser.
-  Fix the host function: declare every argument the components send (for
-  example `slotInterval` in `getDaySlots`, `eventTypeId` in `heartbeat`), make
-  arguments they never send optional, and return the view fields; the README's
-  host contract table lists them. To find the function, check the gateway on
-  its own with the exported contract type:
-  `api.public satisfies PublicBookingAPI` names it and lists its argument keys
-  next to the keys the components send; the error on `<BookingProvider>` can
-  name the opt-in type and a different function. The generated `api.public`
-  of the reference host compiles unchanged.
-- The other 10 public operations (`getBooking`, `getBookingByUid`,
-  `getBookingByToken`, `cancelBookingByToken`, `getEventTypeBySlug`,
-  `listEventTypes`, `getAvailability`, `listResources`,
-  `getEventTypesForResource`, `getEffectiveAvailability`) are optional: no
-  component calls them, so a host need not export the token-less booking reads.
-  Code that reads them from `useBookingAPI()` must handle `undefined`, or call
-  its own `api.public` references.
-- `useBookingAPI()` types the 11 operations with the contract's arguments and
-  result views (`EventTypeView`, `ResourceView`, `BookingView`, …) instead of
-  `any`. Code that reads other fields through them, such as `eventType.slug`,
-  uses its own generated references instead.
-- `getEventType` must resolve to `null` for a missing event type
-  (`EventTypeView | null`); the Booker and Calendar then show it as deleted.
-  The component's `getEventType` now returns `null` itself, so a wrapper that
-  returns its result needs nothing more and the 0.4.3 workaround that caught
-  `Event type not found` can go. A wrapper that throws for a missing event
-  type sends the Booker to your error boundary.
-- Admin operations resolve only from `adminApi` and are `undefined` without
-  it; `publicApi` no longer stands in for them (deprecated in 0.4.3). A
-  plain-object `adminApi` no longer overrides public operations, and names
-  outside `PublicBookingAPI` and `AdminBookingAPI` are no longer passed
-  through. Pass `adminApi={api.admin}` wherever admin operations are used, and
-  call other functions through your own `api`. To route a public operation to
-  another function, pass a plain-object `publicApi` that lists the required
-  operations; a generated `api.public` cannot be spread.
-- `Booking.status` is a `string`, like the stored field, so component and host
-  booking documents fit `Booking` without a status guard. An exhaustive
-  `switch` over the old union needs a default branch.
-- `onBookingComplete` receives a `BookingView`: `uid`, `status`, `start`,
-  `end`, `timezone` and `bookerName`, and every other `Booking` field as
-  optional. A callback annotated `(booking: Booking) => …` takes `BookingView`
-  or drops the annotation. `BookingSuccess` accepts a `BookingView`.
-- The Booker shows the text of a component `ConvexError({ code, message })`
-  that your host function lets through, such as a taken slot. Until 0.4.x the
-  component threw plain errors, for which the Booker showed its generic
-  message. To keep other wording, catch the error in your host function and
-  rethrow your own `ConvexError`.
-- `BookingProvider`'s new `availabilityContext` is off by default; without it
-  nothing changes. Before you set it, add
-  `eventTypeId: v.optional(v.string())` and
-  `rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`
-  to your public `getDaySlots` and `getMonthAvailability`, pass
-  `rescheduleContext` on unchanged to the component's queries, and deploy
-  them before the page: until then their validators reject the new
-  arguments. `BookingProvider` rejects a `publicApi` without them at compile
-  time. If these functions accept `excludeBookingUid` from the browser,
-  remove it: any caller could make any booking's time show as free.
-
-### Fixed
-
-- The React integration keeps its types: Booker, Calendar and
-  `useConvexSlots` read typed results without casts, and a host reference whose
-  kind, visibility, arguments or result do not fit is rejected at compile time.
-  Host wrappers with extra optional arguments, broader argument types, the
-  component's own documents or redacted results with the view fields pass.
-- `BookingProvider` builds the API from its operation lists: public
-  operations from `publicApi`, admin operations from `adminApi`, nothing else.
-
-### Added
-
+  status filters; the `BookingStatus` type also from `@mrfinch/booking/react`.
 - `@mrfinch/booking/react` exports the contract types: `BookingUIOperations`,
   `OptionalPublicOperations`, the views `EventTypeView`, `ResourceView`,
   `BookingView`, `DaySlotView`, `PresenceView` and `SlotHolderView`, and the
@@ -344,41 +324,54 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
 - `BookingProvider` takes `availabilityContext`, off by default. With it on,
   the Calendar and `useConvexSlots` add `eventTypeId` and, while the Booker
   reschedules, `rescheduleContext: { uid, token }` of the booking being moved
-  to `getDaySlots` and `getMonthAvailability`. A host can then apply the
-  selected event type's schedule and policy, and, by passing
+  to `getDaySlots` and `getMonthAvailability`, so a host can apply the
+  selected event type's schedule and policy and, by passing
   `rescheduleContext` on to the component, offer times that overlap the
-  booking being moved; until now only other times were offered, although the
-  move itself was accepted. `publicApi` must then declare both arguments as
-  optional (`PublicBookingAPIWithAvailabilityContext`, checked at compile
-  time). Presence functions never receive the token. Without the opt-in the
-  arguments are unchanged. For custom calendars `Calendar` takes an optional
-  `rescheduleContext` and `useConvexSlots` an optional seventh argument
+  booking being moved. Presence functions never receive the token; without
+  the opt-in the arguments are unchanged. What the host functions must
+  declare first is under _Upgrading_ (slot queries during a reschedule). For
+  custom calendars `Calendar` takes an optional `rescheduleContext` and
+  `useConvexSlots` an optional seventh argument
   `{ eventTypeId, rescheduleContext }`, sent only with the opt-in. New types:
   `PublicBookingAPIWithAvailabilityContext`, `AvailabilityContextOperations`,
   `BookingProviderPropsWithAvailabilityContext`.
 
 ### Deprecated
 
-- `BookingValidationError`, `BookingValidationResult` and the `"rescheduled"`
-  status stay deprecated. `"rescheduled"` is documented on `Booking.status`
-  but is no longer part of its type; it was never stored.
-- `ValidationError.recoveryPath` and `useConvexSlots().fetchSlots` and
+- `BookingValidationError`, `BookingValidationResult`,
+  `ValidationError.recoveryPath`, `useConvexSlots().fetchSlots` and
   `fetchMonthSlots` stay deprecated and available (see 0.4.3).
 
 ### Removed
 
 - `BookingProvider` no longer resolves admin operations from `publicApi`
   (deprecated in 0.4.3), lets a plain-object `adminApi` override public
-  operations, or passes other names through; see Upgrading.
+  operations, or passes other names through; see _Upgrading_.
+- The `"rescheduled"` member of `Booking.status` (deprecated in 0.4.3, never
+  stored); see _Upgrading_.
 
-### Maintenance and documentation
+### Documentation
 
-- `npm run lint` rejects `any` and the `no-unsafe-*` flows in the React sources
-  (tests excepted). No exception is needed today.
+- [docs/maintenance.md](docs/maintenance.md): the upgrade order, every
+  `maintenance.audit` check with its repair, and the one-time repairs.
+- [docs/host-functions.md](docs/host-functions.md): slot-query wrappers that
+  forward `rescheduleContext` and declare the `availabilityContext`
+  arguments, and a paged booking list.
+- The README states which booking rules the component guarantees and which
+  policy stays with the host: authorization, notice and horizon, buffers,
+  abuse limits and email recipients.
 - The README lists the host contract per operation (required and optional,
   the arguments the components send and the fields they read), shows the
   `satisfies PublicBookingAPI` check, and describes the admin gateway and the
-  availability context opt-in.
+  availability context opt-in, linking the slot-query wrapper.
+
+### Maintenance
+
+- `npm run lint` rejects `any` and the `no-unsafe-*` flows in the React sources
+  (tests excepted). No exception is needed today.
+- Compile-time tests check the React host contract against the component's
+  generated references and passthrough wrappers, so a component result
+  change that breaks them fails `npm run typecheck`.
 
 ## 0.4.3 — Unreleased
 
