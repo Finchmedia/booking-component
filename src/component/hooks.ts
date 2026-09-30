@@ -5,7 +5,12 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { FunctionHandle, WithoutSystemFields } from "convex/server";
 import type { Doc } from "./_generated/dataModel";
-import { assertStillBookable, buildHookEventV2, terminateBooking } from "./booking_lifecycle";
+import {
+  assertStillBookable,
+  buildHookEventV2,
+  terminateBooking,
+  withEventTypeOrganization,
+} from "./booking_lifecycle";
 import { throwBookingError } from "../shared/booking-errors.js";
 import { bookingStatusValidator, type BookingStatus } from "../shared/booking-status.js";
 import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
@@ -447,25 +452,19 @@ export const transitionBookingState = mutation({
     // which tells the booker it awaits approval). After deactivation,
     // unlinking or a change of organization they are rejected. Cancelling,
     // declining and completing never are.
-    // Like a move, such a transition gives the booking its event type's
-    // organization when a missing or another one was stored before 0.5.0
-    // (the rules passed, so every resource belongs to it), in this
-    // transaction and before its hooks and emails are queued: they reach
-    // that organization only. Legacy rows and event types without
-    // organization keep the stored one.
-    let organizationId = booking.organizationId;
     if (args.toStatus === "confirmed" || args.toStatus === "pending") {
       const items = await ctx.db
         .query("booking_items")
         .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
         .collect();
-      const eventType = await assertStillBookable(ctx, booking, items);
-      organizationId = eventType?.organizationId ?? booking.organizationId;
+      await assertStillBookable(ctx, booking, items);
     }
-    const reassigned = organizationId !== booking.organizationId;
-    // What the notifications describe: the booking before this change, in
-    // the organization the change gives it.
-    const notified: Doc<"bookings"> = reassigned ? { ...booking, organizationId } : booking;
+    // Every transition notifies the event type's organization only, and
+    // gives the booking that organization when another one or none was
+    // stored before 0.5.0 (legacy rows and event types without organization
+    // keep the stored one).
+    const notified = await withEventTypeOrganization(ctx, booking);
+    const organizationId = notified.organizationId;
 
     const now = Date.now();
 
@@ -496,7 +495,6 @@ export const transitionBookingState = mutation({
       await ctx.db.patch(args.bookingId, {
         status: args.toStatus,
         updatedAt: now,
-        ...(reassigned ? { organizationId } : {}),
       });
     }
 

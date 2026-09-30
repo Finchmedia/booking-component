@@ -16,7 +16,7 @@
 import { describe, expect, test } from "vitest";
 import { api, internal } from "./_generated/api.js";
 import type { Doc, Id } from "./_generated/dataModel.js";
-import { BOOKER, LOCATION, TUESDAY, book, seedResource, setup, utc, type T } from "./setup.test.js";
+import { BOOKER, LOCATION, TUESDAY, book, seedResource, setup, utc, type SeededResource, type T } from "./setup.test.js";
 
 const hour = (h: number) => utc(TUESDAY, `${String(h).padStart(2, "0")}:00`);
 
@@ -270,7 +270,9 @@ describe("a move gives the new row its event type's organization", () => {
       v2: job.payloadV2.organizationId,
     }).toEqual({ movedPatched: "org-1", movedGap: "org-1", hook: "org-1", emailContext: "org-1", v2: "org-1" });
     expect(await replayHooks(t, job)).toEqual(["probe:org-1"]);
-    expect((await t.query(api.public.listBookings, { organizationId: "org-other", status: "confirmed" }))).toEqual([]);
+    // The cancelled originals are given it too, so org-other lists neither row.
+    expect([await storedOrganization(t, patched._id), await storedOrganization(t, gap._id)]).toEqual(["org-1", "org-1"]);
+    expect(await t.query(api.public.listBookings, { organizationId: "org-other" })).toEqual([]);
 
     // CONTROL: a legacy row and a global event type's bundle keep what they store.
     const legacyId = await t.mutation(api.public.createReservation, {
@@ -289,21 +291,24 @@ describe("a move gives the new row its event type's organization", () => {
   });
 });
 
-describe("confirming a booking or submitting a hold gives it its event type's organization", () => {
-  /** Version 1 and version 2 probes of org-1 and org-other for `eventType`. */
-  async function probes(t: T, eventType: string) {
-    for (const organizationId of ["org-1", "org-other"]) {
-      await t.mutation(api.hooks.registerHook, { eventType, functionHandle: `function://;probe:${organizationId}`, organizationId });
-      await t.mutation(api.hooks.registerHook, {
-        eventType, functionHandle: `function://;probe-v2:${organizationId}`, organizationId, payloadVersion: 2,
-      });
-    }
+/** Version 1 and version 2 probes of org-1 and org-other for `eventType`. */
+async function probes(t: T, eventType: string) {
+  for (const organizationId of ["org-1", "org-other"]) {
+    await t.mutation(api.hooks.registerHook, { eventType, functionHandle: `function://;probe:${organizationId}`, organizationId });
+    await t.mutation(api.hooks.registerHook, {
+      eventType, functionHandle: `function://;probe-v2:${organizationId}`, organizationId, payloadVersion: 2,
+    });
   }
-  const storedOrganization = async (t: T, bookingId: Id<"bookings">) =>
-    (await t.query(api.public.getBooking, { bookingId }))?.organizationId;
-  const transition = (t: T, bookingId: Id<"bookings">, toStatus: "pending" | "confirmed") =>
-    t.mutation(api.hooks.transitionBookingState, { bookingId, toStatus });
+}
+const storedOrganization = async (t: T, bookingId: Id<"bookings">) =>
+  (await t.query(api.public.getBooking, { bookingId }))?.organizationId;
+const transition = (
+  t: T,
+  bookingId: Id<"bookings">,
+  toStatus: "pending" | "confirmed" | "cancelled" | "declined" | "completed",
+) => t.mutation(api.hooks.transitionBookingState, { bookingId, toStatus });
 
+describe("confirming a booking or submitting a hold gives it its event type's organization", () => {
   test("a request stored for another organization: approving it notifies the event type's organization only", async () => {
     const { t } = setup();
     const seed = await seedResource(t, { requiresConfirmation: true }); // et-1 and res-1 in org-1
@@ -399,5 +404,141 @@ describe("confirming a booking or submitting a hold gives it its event type's or
     await expect(transition(t, request._id, "confirmed")).rejects.toMatchObject({ data: { code: "EVENT_TYPE_INACTIVE" } });
     expect(await storedOrganization(t, request._id)).toBe("org-other");
     expect((await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).length).toBe(jobsBefore);
+  });
+});
+
+describe("cancelling, declining, completing and expiring notify the event type's organization", () => {
+  const ENDINGS = ["booking.cancelled", "booking.declined", "booking.completed"];
+
+  /**
+   * One booking per path from hour `h` on (et-1, org-1), stored under
+   * `organizationId`, then ended; every call must succeed. Returns the rows
+   * and the triggerHooks job of each notifying path.
+   */
+  async function endEach(t: T, seed: SeededResource, h: number, organizationId: string) {
+    await t.mutation(api.public.updateEventType, { id: seed.eventTypeId, requiresConfirmation: false });
+    const rows = {
+      cancelBookingByToken: await book(t, seed, hour(h), hour(h + 1)),
+      cancelReservation: await book(t, seed, hour(h + 1), hour(h + 2)),
+      cancelMultiResourceBooking: await bundle(t, seed.eventTypeId, h + 2),
+      "transition to cancelled": await book(t, seed, hour(h + 3), hour(h + 4)),
+      "transition to completed": await book(t, seed, hour(h + 4), hour(h + 5)),
+      expireProvisionalBooking: await t.mutation(api.public.createProvisionalBooking, {
+        eventTypeId: seed.eventTypeId, resourceId: seed.resourceId, start: hour(h + 5), end: hour(h + 6),
+        timezone: "UTC", booker: BOOKER, location: LOCATION,
+      }),
+      "transition to declined": await (async () => {
+        await t.mutation(api.public.updateEventType, { id: seed.eventTypeId, requiresConfirmation: true });
+        return await book(t, seed, hour(h + 6), hour(h + 7));
+      })(),
+    };
+    await t.run(async (ctx) => {
+      for (const row of Object.values(rows)) await ctx.db.patch(row._id, { organizationId });
+    });
+
+    expect({
+      cancelBookingByToken: await t.mutation(api.public.cancelBookingByToken, {
+        uid: rows.cancelBookingByToken.uid, token: rows.cancelBookingByToken.managementToken!,
+      }),
+      cancelReservation: await t.mutation(api.public.cancelReservation, { reservationId: rows.cancelReservation._id }),
+      cancelMultiResourceBooking: await t.mutation(api.multi_resource.cancelMultiResourceBooking, {
+        bookingId: rows.cancelMultiResourceBooking._id,
+      }),
+      "transition to cancelled": await transition(t, rows["transition to cancelled"]._id, "cancelled"),
+      "transition to completed": await transition(t, rows["transition to completed"]._id, "completed"),
+      "transition to declined": await transition(t, rows["transition to declined"]._id, "declined"),
+      expireProvisionalBooking: await t.mutation(api.public.expireProvisionalBooking, { bookingId: rows.expireProvisionalBooking._id }),
+    }).toEqual({
+      cancelBookingByToken: { success: true },
+      cancelReservation: { success: true, alreadyCancelled: false },
+      cancelMultiResourceBooking: { success: true },
+      "transition to cancelled": { success: true },
+      "transition to completed": { success: true },
+      "transition to declined": { success: true },
+      expireProvisionalBooking: { success: true },
+    });
+
+    const jobs = {
+      cancelBookingByToken: await hookJob(t, rows.cancelBookingByToken._id, "booking.cancelled"),
+      cancelReservation: await hookJob(t, rows.cancelReservation._id, "booking.cancelled"),
+      cancelMultiResourceBooking: await hookJob(t, rows.cancelMultiResourceBooking._id, "booking.cancelled"),
+      "transition to cancelled": await hookJob(t, rows["transition to cancelled"]._id, "booking.cancelled"),
+      "transition to completed": await hookJob(t, rows["transition to completed"]._id, "booking.completed"),
+      "transition to declined": await hookJob(t, rows["transition to declined"]._id, "booking.declined"),
+    };
+    return { rows, jobs };
+  }
+
+  /** Where a job is routed and which organization its email context and payloads name. */
+  const routing = (job: Record<string, any>) => ({
+    hook: job.organizationId,
+    email: job.emailContext?.organizationId,
+    v1Booking: job.payload.booking?.organizationId,
+    v2: job.payloadV2.organizationId,
+  });
+
+  test("a booking stored for another organization: only the event type's organization is notified, and it is stored", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t); // et-1 and res-1 in org-1
+    for (const event of ENDINGS) await probes(t, event);
+    const foreign = await endEach(t, seed, 0, "org-other");
+    const control = await endEach(t, seed, 8, "org-1");
+
+    for (const [name, job] of Object.entries(foreign.jobs)) {
+      const controlJob = control.jobs[name as keyof typeof control.jobs];
+      expect({ name, ...routing(job) }).toEqual({ name, ...routing(controlJob) });
+      expect({ name, hook: job.organizationId, v2: job.payloadV2.organizationId }).toEqual({ name, hook: "org-1", v2: "org-1" });
+      // org-other's hooks receive nothing, in either payload version.
+      expect({ name, hooks: await replayHooks(t, job) }).toEqual({ name, hooks: ["probe-v2:org-1", "probe:org-1"] });
+      // CONTROL: the key sets are the ones a matching organization produces (hook-payloads-v1.test.ts pins those).
+      expect({ name, keys: Object.keys(job.payload).sort() }).toEqual({ name, keys: Object.keys(controlJob.payload).sort() });
+      expect({ name, keys: Object.keys(job.payloadV2).sort() }).toEqual({ name, keys: Object.keys(controlJob.payloadV2).sort() });
+    }
+    for (const [name, row] of Object.entries({ ...foreign.rows, ...Object.fromEntries(
+      Object.entries(control.rows).map(([key, value]) => [`control ${key}`, value])
+    ) })) {
+      expect({ name, stored: await storedOrganization(t, row._id) }).toEqual({ name, stored: "org-1" });
+    }
+    expect(await t.query(api.public.listBookings, { organizationId: "org-other" })).toEqual([]);
+  });
+
+  test("legacy rows and event types without organization keep the stored one (CONTROL); cancelling never fails", async () => {
+    const { t } = setup();
+    const global = await seedResource(t, {
+      resourceId: "res-g", eventTypeId: "et-g", eventType: { organizationId: undefined },
+    }); // res-g in org-1
+    const scoped = await t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId: global.eventTypeId, organizationId: "org-1", resources: [{ resourceId: "res-g" }],
+      start: hour(8), end: hour(9), timezone: "UTC", booker: BOOKER, location: LOCATION,
+    });
+    const unscoped = await book(t, global, hour(10), hour(11));
+    const legacyId = await t.mutation(api.public.createReservation, {
+      resourceId: "legacy-room", actorId: "ops@example.com", start: hour(12), end: hour(13),
+    });
+    await t.run((ctx) => ctx.db.patch(legacyId, { organizationId: "org-legacy" }));
+    // A deactivated event type and an unlinked resource block nothing here.
+    const seed = await seedResource(t);
+    const stale = await book(t, seed, hour(14), hour(15));
+    await t.run((ctx) => ctx.db.patch(stale._id, { organizationId: "org-other" }));
+    await t.mutation(api.public.toggleEventTypeActive, { id: seed.eventTypeId, isActive: false });
+    await t.mutation(api.resource_event_types.unlinkResourceFromEventType, { resourceId: seed.resourceId, eventTypeId: seed.eventTypeId });
+
+    expect([
+      await t.mutation(api.multi_resource.cancelMultiResourceBooking, { bookingId: scoped._id }),
+      await t.mutation(api.public.cancelBookingByToken, { uid: unscoped.uid, token: unscoped.managementToken! }),
+      await t.mutation(api.public.cancelReservation, { reservationId: legacyId }),
+      await t.mutation(api.public.cancelBookingByToken, { uid: stale.uid, token: stale.managementToken! }),
+    ]).toEqual([{ success: true }, { success: true }, { success: true, alreadyCancelled: false }, { success: true }]);
+    expect({
+      scoped: [await storedOrganization(t, scoped._id), (await hookJob(t, scoped._id, "booking.cancelled")).organizationId],
+      unscoped: [await storedOrganization(t, unscoped._id), (await hookJob(t, unscoped._id, "booking.cancelled")).organizationId],
+      legacy: [await storedOrganization(t, legacyId), (await hookJob(t, legacyId, "booking.cancelled")).organizationId],
+      stale: [await storedOrganization(t, stale._id), (await hookJob(t, stale._id, "booking.cancelled")).organizationId],
+    }).toEqual({
+      scoped: ["org-1", "org-1"],
+      unscoped: [undefined, undefined],
+      legacy: ["org-legacy", "org-legacy"],
+      stale: ["org-1", "org-1"],
+    });
   });
 });

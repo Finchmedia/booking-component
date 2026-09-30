@@ -396,9 +396,9 @@ shows how and lists every check with its repair.
   an add-on (`isStandalone: false`). A booking belongs to its event type's
   organization; under an event type without organization its resources
   belong to one organization, and a bundle's `organizationId`, when given, is
-  theirs. A move gives the new booking its event type's organization, and
-  a confirmation or a hold submitted as a request gives it to the booking
-  before its hooks and emails go out. A
+  theirs. Hooks and emails about a booking go to its event type's
+  organization: a move, a transition, a cancellation or an expiry first
+  gives a booking stored with another organization or none that one. A
   bundle's primary resource is its first item and may be an
   add-on. There is no administrator override: to move, confirm or submit a
   hold after deactivating or unlinking, reactivate or relink first.

@@ -33,9 +33,9 @@ import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 // Cancelling, declining and expiring never check them, and deactivating or
 // unlinking configuration never ends an existing booking. Legacy
 // createReservation rows (eventTypeId "legacy") keep the legacy path's
-// rules: none beyond the pool guard (see isLegacyReservation). Moves and
-// the transitions that check the rules give the booking its event type's
-// organization.
+// rules: none beyond the pool guard (see isLegacyReservation). Every
+// lifecycle write that notifies gives the booking its event type's
+// organization first (withEventTypeOrganization).
 //
 // "single" texts are the ones createBooking has always used; "bundle" texts
 // name the offending ids. bookingRuleProblems reports the same rules for the
@@ -343,6 +343,27 @@ export async function assertSingleBookable(
   }
 
   return { eventType, requiredSlots };
+}
+
+/**
+ * The booking as its notifications describe it, in the organization every
+ * hook and email about an existing booking goes to: its event type's when
+ * that has one, else the stored one (legacy createReservation rows, whose
+ * "legacy" names no event type, event types without organization, deleted
+ * event types). A booking stored before 0.5.0 without that organization or
+ * with another one is given it here, in the caller's transaction and before
+ * hooks and emails are queued, so hook routing, the email context and both
+ * payload versions name it. Never rejects: cancelling, declining,
+ * completing and expiring always succeed.
+ */
+export async function withEventTypeOrganization(
+  ctx: MutationCtx,
+  booking: Doc<"bookings">,
+): Promise<Doc<"bookings">> {
+  const organizationId = (await findEventType(ctx, booking.eventTypeId))?.organizationId ?? booking.organizationId;
+  if (organizationId === booking.organizationId) return booking;
+  await ctx.db.patch(booking._id, { organizationId });
+  return { ...booking, organizationId };
 }
 
 /**

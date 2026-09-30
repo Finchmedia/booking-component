@@ -594,10 +594,10 @@ async function linkIssue(
  * event type's organization (backfillBookingOrganizations fills it);
  * `organizationMismatch`, another organizationId, or none while a resource
  * is missing or belongs to another organization (the backfill lists these
- * and leaves them; a move, a confirmation or a hold submitted as a request
- * gives the booking the event type's organization once the booking rules
- * pass). Also `poolWithoutItems`: an active booking without items on a pool
- * (isFungible), which moves reject.
+ * and leaves them; the booking's next move, transition, cancellation or
+ * expiry gives it the event type's organization, see
+ * withEventTypeOrganization). Also `poolWithoutItems`: an active booking
+ * without items on a pool (isFungible), which moves reject.
  */
 async function bookingIntegrityIssue(
   db: DatabaseReader,
@@ -819,11 +819,9 @@ const organizationMismatch = v.object({
  * - `mismatches` lists rows whose organization differs from their event
  *   type's, and rows without one whose resources do not all belong to the
  *   event type's organization (no `organizationId`). The backfill reports
- *   them and never rewrites them: stamping the event type's organization on
- *   another organization's booking would list it and send its hooks there.
- *   Moving such a booking, confirming it or submitting its hold as a
- *   request gives it the event type's organization, since those check the
- *   booking rules first (every resource then belongs to it).
+ *   them and never rewrites them in bulk; the booking's next move,
+ *   transition, cancellation or expiry gives it the event type's
+ *   organization before anyone is notified (withEventTypeOrganization).
  *
  * Idempotent: a second run updates nothing. Start without a cursor and pass
  * `continueCursor` back until `isDone`; call it from a host internal mutation.

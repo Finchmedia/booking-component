@@ -151,18 +151,21 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
   rejected, and its `organizationId`, when given, must be the organization of
   its resources (0.4.3 stored any value; without it the bundle has none, like
   a single booking of that event type). Moves and confirmations apply this
-  to stored bundles too. A move gives the new booking its event type's
-  organization, and confirming a booking or submitting a hold as a request
-  (the transitions that check the booking rules) gives it to the booking
-  itself in the same transaction, before its hooks and emails are queued: a
-  booking stored without one or with another one moves into it, only that
-  organization's hooks receive the event (version 1 payloads, whose
-  `booking` then carries that `organizationId`, include the management
-  token), and the organization it named no longer lists it. Cancelling,
-  declining and completing keep the stored organization. Unlink the pairs
-  `link_integrity` lists as `crossOrganization`, and link a resource of the
-  event type's organization instead; `booking_integrity` lists stored
-  bookings of another organization as `organizationMismatch`.
+  to stored bundles too. Every hook and email about a booking goes to its
+  event type's organization when that has one: a move, every
+  `transitionBookingState` call, `cancelBookingByToken`, `cancelReservation`,
+  `cancelMultiResourceBooking` and `expireProvisionalBooking` give a booking
+  stored without it or with another one that organization in the same
+  transaction, before anything is queued (a move gives it to the original
+  and the new booking). Only that organization's hooks receive the event
+  (version 1 payloads include the management token, and their `booking`
+  carries that `organizationId`), and the organization the booking named no
+  longer lists it. Cancelling, declining, completing and expiring still
+  never fail. Legacy rows and event types without organization keep the
+  stored one. Unlink the pairs `link_integrity` lists as
+  `crossOrganization`, and link a resource of the event type's organization
+  instead; `booking_integrity` lists stored bookings of another
+  organization as `organizationMismatch`.
 - `backfillBookingOrganizations` (new in 0.4.3) gives a booking without
   organization its event type's only when every resource the booking holds
   (every item of a bundle) exists and belongs to that organization;
@@ -346,9 +349,9 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
 - A bundle of an event type without organization no longer holds resources
   of two organizations or names a third organization, and a move no longer
   carries a missing or foreign organization over to the new booking.
-  Confirming a booking or submitting a hold as a request no longer sends a
-  foreign organization's hooks the booking and its management token: the
-  booking takes its event type's organization first.
+  No confirmation, request, cancellation, decline, completion or move sends
+  a foreign organization's hooks the booking and its management token any
+  more: the booking takes its event type's organization first.
 - The slot queries' `excludeBookingUid` and `rescheduleContext` free a
   bundle's own slots on every item, not only on its first, so an overlapping
   move of the bundle is offered on each of its resources.

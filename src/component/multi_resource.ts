@@ -10,6 +10,7 @@ import {
   buildHookEventV2,
   loadBookableEventType,
   terminateBooking,
+  withEventTypeOrganization,
 } from "./booking_lifecycle";
 import { generateManagementToken } from "./tokens";
 import {
@@ -422,9 +423,12 @@ export const cancelMultiResourceBooking = mutation({
       throwBookingError("INVALID_STATE", `Cannot cancel booking with status: ${booking.status}`);
     }
 
-    // Release every booked resource (quantity_availability for pooled
-    // resources, daily_availability otherwise), record history and stamp the
-    // cancellation — shared with every other cancel path.
+    // Notify the event type's organization only (see
+    // withEventTypeOrganization). Release every booked resource
+    // (quantity_availability for pooled resources, daily_availability
+    // otherwise), record history and stamp the cancellation — shared with
+    // every other cancel path.
+    const notified = await withEventTypeOrganization(ctx, booking);
     const changedBy = args.cancelledBy ?? "unknown";
     await terminateBooking(ctx, booking, {
       to: "cancelled",
@@ -436,8 +440,8 @@ export const cancelMultiResourceBooking = mutation({
     // Trigger booking.cancelled hook
     await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
       eventType: "booking.cancelled",
-      emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason: args.reason }),
-      organizationId: booking.organizationId,
+      emailContext: createBookingEmailContext("cancelled", notified, args.resendOptions, { reason: args.reason }),
+      organizationId: notified.organizationId,
       payload: {
         bookingId: args.bookingId,
         resourceId: booking.resourceId,

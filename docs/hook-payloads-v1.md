@@ -18,7 +18,9 @@ Register hooks only from trusted server code.
   call passes one. `?` marks the keys the pinned calls show both ways; treat `managementToken` and
   `organizationId` as optional for every emitter, and `reason` for `transitionBookingState`.
 - Hooks registered without `organizationId` receive every event of their type. Hooks registered
-  for an organization receive the events of that organization's bookings only.
+  for an organization receive the events of that organization's bookings only. A booking belongs
+  to its event type's organization when that has one; a booking stored before 0.5.0 with another
+  one or none is given it before its next event.
 - `createBooking` for an event type that requires confirmation emits `booking.created` with
   `status: "pending"`. `booking.pending` comes only from `transitionBookingState`.
 - `createProvisionalBooking` and `expireProvisionalBooking` emit no event. `presence.timeout` is
@@ -295,9 +297,9 @@ Reaches global hooks only: these bookings have no organization.
 ## StoredBooking
 
 `booking` is the stored booking document as it was before the change, with `status` set to the
-new status and, when the transition gave the booking its event type's organization (a booking
-stored before 0.5.0 without it or with another one), that `organizationId`. Besides the keys
-below it carries `bookerPhone`, `bookerNotes` and `eventDescription` when the booking has them.
+new status and, when the change gave the booking its event type's organization, that
+`organizationId`. Besides the keys below it carries `bookerPhone`, `bookerNotes` and
+`eventDescription` when the booking has them.
 
 ```ts
 {

@@ -2,8 +2,9 @@
 /**
  * maintenance.backfillBookingOrganizations (F7 repair, PR-28).
  *
- * Bundles created by 0.4.2 and earlier without `organizationId` stored none,
- * and no other function can set a booking's organization. The backfill fills
+ * Bundles created by 0.4.2 and earlier without `organizationId` stored none.
+ * Since 0.5.0 a booking takes its event type's organization when it is
+ * moved, transitioned or cancelled; for the untouched ones the backfill fills
  * it from the event type when every resource the booking holds belongs to
  * that organization, skips legacy rows and rows whose event type is gone or
  * has no organization, and reports (never rewrites) rows whose organization
@@ -72,10 +73,10 @@ function bundle(t: T, eventTypeId: string, h: number, organizationId?: string) {
 }
 
 /**
- * One row per case on res-1 (org-1): complete, missing (bundle and a moved
- * single booking, whose successor takes the event type's organization since
- * 0.5.0), foreign, legacy, deleted event type and event type without
- * organization.
+ * One row per case on res-1 (org-1): complete, missing (a bundle), a moved
+ * single booking stored without organization (since 0.5.0 the move gives
+ * the original and its successor the event type's organization), foreign,
+ * legacy, deleted event type and event type without organization.
  */
 async function seedMixed(t: T) {
   const seed = await seedResource(t);
@@ -125,8 +126,8 @@ async function seedMixed(t: T) {
   expect(await organizations(t)).toEqual({
     [complete.uid]: ORG,
     [missing.uid]: undefined,
-    [movedAway.uid]: undefined,
-    [successor.uid]: ORG, // a move does not carry a gap over (0.5.0)
+    [movedAway.uid]: ORG, // a move fills the gap on both rows (0.5.0)
+    [successor.uid]: ORG,
     [foreign.uid]: "org-2",
     [legacy.uid]: undefined,
     [gone.uid]: undefined,
@@ -143,7 +144,7 @@ describe("backfillBookingOrganizations", () => {
 
     expect(await backfill(t, { limit: 100, dryRun: true })).toEqual({
       scanned: 8,
-      updated: 2,
+      updated: 1,
       skipped: 3,
       mismatches: [{ uid: rows.foreign.uid, organizationId: "org-2", eventTypeOrganizationId: ORG }],
       continueCursor: expect.any(String),
@@ -157,7 +158,7 @@ describe("backfillBookingOrganizations", () => {
     const rows = await seedMixed(t);
 
     const first = await backfill(t, { limit: 100, dryRun: false });
-    expect(first).toMatchObject({ scanned: 8, updated: 2, skipped: 3, isDone: true });
+    expect(first).toMatchObject({ scanned: 8, updated: 1, skipped: 3, isDone: true });
     expect(await organizations(t)).toEqual({
       [rows.complete.uid]: ORG,
       [rows.missing.uid]: ORG,
