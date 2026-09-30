@@ -320,6 +320,8 @@
   implemented) carry tracked lint exceptions; the props are unchanged.
 - Removed the internal `LegacyBookingProviderProps` type, which
   `@mrfinch/booking/react` never exported.
+- The README describes the Booker's error display and recovery callbacks, its
+  accessibility, calendar days and time zones, and module loading.
 
 ## 0.4.2 — 23 September 2026
 

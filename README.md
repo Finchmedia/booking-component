@@ -69,13 +69,41 @@ export default function BookingPage() {
 The Booker handles date, duration and slot selection, contact details and
 confirmation for one exclusive resource. Use `onBookingComplete(booking)` to
 connect your management pages to the returned booking UID and secret token.
-Failed bookings are shown in the Booker with the message from the `ConvexError`
-your host function throws, or a generic message; `onBookingError(error, { phase })`
-also reports them to your app.
-If the event type or resource stops being bookable, the Booker explains why.
-Pass `onEventTypeReset(recovery)` and `onNavigate(path, recovery)` to offer a way
-back; map `recovery` (`"select-event-type"` or `"select-resource"`) to your own
-routes.
+
+## Booker behavior
+
+- **Errors:** a failed booking or reschedule appears in an announced alert, on
+  the details step or above the calendar for one-click reschedules. Throw
+  `ConvexError({ code, message })` from your host functions to show a specific
+  message; other failures show a generic message, never Convex transport text.
+  `onBookingError(error, { phase })` also reports each failure to your app. If
+  you already toast mutation errors, move that into `onBookingError` so users
+  see one message. `UNAUTHENTICATED` goes to `onAuthRequired` when you pass it;
+  otherwise the Booker asks the user to sign in.
+- **Recovery:** if the event type or resource stops being bookable, the Booker
+  explains why. Pass `onEventTypeReset(recovery)` and `onNavigate(path, recovery)`
+  to offer a way back, and map `recovery` (`"select-event-type"` or
+  `"select-resource"`) to your own routes; `path` is a deprecated demo route.
+  With the matching callback the error is a modal alert dialog with focus on
+  its action, and Escape performs the action. Without it, an inline alert
+  replaces the Booker's content and the rest of your page stays usable. An
+  invalid duration resets on its own.
+- **Accessibility:** durations are a native radio group, form fields are named
+  by their labels and expose required and invalid state, reserved slots keep
+  their time in their name, and day buttons name the full date and mark today
+  and the selected day. Each step change moves focus to the new step's heading.
+  The error dialog is a native `dialog` opened with `showModal()`, so it renders
+  above your page.
+- **Calendar days and time zones:** the Calendar asks your `getMonthAvailability`
+  and `getDaySlots` functions for `"YYYY-MM-DD"` dates. Each date is a day of the
+  resource's schedule, in the schedule's time zone. Slot times are shown in the
+  visitor's time zone, or the stored zone of the booking being rescheduled, and
+  today and past days are judged in that zone. A time zone selector and the
+  event type's `lockTimeZoneToggle` are not implemented yet.
+- **Module loading:** `@mrfinch/booking/react` is ESM with fully specified
+  imports. It loads in Node, in Vitest without `server.deps.inline`, and in
+  webpack 5, Rspack, Next.js and Vite builds, and keeps its types under
+  `moduleResolution: "bundler"` or `"nodenext"`.
 
 The Booker and Calendar treat a `null` event type as deleted. Until 0.5.0 the
 component's `getEventType` throws `Event type not found: <id>` instead, so make
