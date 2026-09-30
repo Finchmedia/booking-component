@@ -2,8 +2,8 @@
 
 import React from "react";
 import { Calendar, CheckCircle, Clock, MapPin, User } from "lucide-react";
-import type { Booking } from "../../types";
-import { formatDateTime, formatDuration } from "../../utils/formatting";
+import type { Booking } from "../../types.js";
+import { formatDateTime, formatDuration } from "../../utils/formatting.js";
 
 interface EventType {
   title: string;

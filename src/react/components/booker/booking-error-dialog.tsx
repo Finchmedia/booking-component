@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useId, useRef } from "react";
-import type { ValidationError } from "../../hooks/use-booking-validation";
-import { getRecoveryAction, type RecoveryHandlers } from "./recovery";
+import type { ValidationError } from "../../hooks/use-booking-validation.js";
+import { getRecoveryAction, type RecoveryHandlers } from "./recovery.js";
 
 interface BookingErrorDialogProps extends RecoveryHandlers {
   error: ValidationError;

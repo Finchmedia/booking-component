@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback } from "react";
-import type { CalendarDay } from "../../utils/date-utils";
+import type { CalendarDay } from "../../utils/date-utils.js";
 
 interface CalendarDayButtonProps {
   day: CalendarDay;

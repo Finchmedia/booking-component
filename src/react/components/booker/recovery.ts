@@ -2,7 +2,7 @@ import type {
   ValidationError,
   ValidationErrorType,
   ValidationRecovery,
-} from "../../hooks/use-booking-validation";
+} from "../../hooks/use-booking-validation.js";
 
 /** Host callbacks that can perform a validation error's recovery. */
 export interface RecoveryHandlers {

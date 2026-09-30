@@ -3,13 +3,13 @@
 import React, { useId } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { EventMetaPanel } from "../calendar/event-meta-panel";
+import { EventMetaPanel } from "../calendar/event-meta-panel.js";
 import {
   bookingFormSchema,
   type BookingFormValues,
-} from "../../utils/validation";
-import { formatDate, formatTimeDisplay } from "../../utils/formatting";
-import type { BookingFormData } from "../../types";
+} from "../../utils/validation.js";
+import { formatDate, formatTimeDisplay } from "../../utils/formatting.js";
+import type { BookingFormData } from "../../types.js";
 
 // Define a local interface for EventType to match EventMetaPanel's expectation
 interface EventType {

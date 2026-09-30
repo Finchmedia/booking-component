@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import type { BookingSlot } from "../../types";
-import { TimeSlotButton } from "./time-slot-button";
+import type { BookingSlot } from "../../types.js";
+import { TimeSlotButton } from "./time-slot-button.js";
 
 interface TimeSlotsPanelProps {
   selectedDate: Date | null;

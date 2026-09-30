@@ -2,11 +2,11 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
-import { useBookingAPI } from "../context";
-import { getSessionId } from "../utils/session";
-import { formatDateInTimezone } from "../utils/date-utils";
-import { isCivilDate, monthGrid } from "../utils/civil-date";
-import type { TimeSlot, MonthSlots } from "../types";
+import { useBookingAPI } from "../context.js";
+import { getSessionId } from "../utils/session.js";
+import { formatDateInTimezone } from "../utils/date-utils.js";
+import { isCivilDate, monthGrid } from "../utils/civil-date.js";
+import type { TimeSlot, MonthSlots } from "../types.js";
 
 export interface UseConvexSlotsResult {
   monthSlots: MonthSlots;

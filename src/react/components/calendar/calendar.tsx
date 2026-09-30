@@ -2,14 +2,14 @@
 
 import { useEffect } from "react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
-import { CalendarGrid } from "./calendar-grid";
-import { TimeSlotsPanel } from "./time-slots-panel";
-import { EventMetaPanel } from "./event-meta-panel";
-import { CalendarSkeleton } from "./calendar-skeleton";
-import { useBookingAPI } from "../../context";
-import { useConvexSlots } from "../../hooks/use-convex-slots";
-import { useIntersectionObserver } from "../../hooks/use-intersection-observer";
-import { fromLocalFields, toLocalMidnight, todayIn } from "../../utils/civil-date";
+import { CalendarGrid } from "./calendar-grid.js";
+import { TimeSlotsPanel } from "./time-slots-panel.js";
+import { EventMetaPanel } from "./event-meta-panel.js";
+import { CalendarSkeleton } from "./calendar-skeleton.js";
+import { useBookingAPI } from "../../context.js";
+import { useConvexSlots } from "../../hooks/use-convex-slots.js";
+import { useIntersectionObserver } from "../../hooks/use-intersection-observer.js";
+import { fromLocalFields, toLocalMidnight, todayIn } from "../../utils/civil-date.js";
 
 interface CalendarProps {
   resourceId: string;

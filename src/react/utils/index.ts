@@ -1,22 +1,22 @@
-export { getSessionId } from "./session";
+export { getSessionId } from "./session.js";
 export {
   DAYS,
   MONTHS,
   formatTime,
   generateCalendarDays,
   type CalendarDay,
-} from "./date-utils";
+} from "./date-utils.js";
 export {
   getTimezoneOffset,
   getRegionFromTimezone,
   getTimezoneDisplayName,
   getAvailableTimezones,
   type TimezoneOption,
-} from "./timezone-utils";
+} from "./timezone-utils.js";
 export {
   formatDate,
   formatTimeDisplay,
   formatDuration,
   formatDateTime,
-} from "./formatting";
-export { bookingFormSchema, type BookingFormValues } from "./validation";
+} from "./formatting.js";
+export { bookingFormSchema, type BookingFormValues } from "./validation.js";

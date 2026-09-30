@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { EventType, Resource } from "../types";
+import type { EventType, Resource } from "../types.js";
 
 export type ValidationErrorType =
   | "event_deleted"

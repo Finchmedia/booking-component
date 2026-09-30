@@ -8,7 +8,7 @@ export {
   type PublicBookingAPI,
   type AdminBookingAPI,
   type BookingProviderProps,
-} from "./context";
+} from "./context.js";
 
 // Types
 export type {
@@ -24,51 +24,51 @@ export type {
   PresenceRecord,
   BookingValidationError,
   BookingValidationResult,
-} from "./types";
+} from "./types.js";
 
 // Hooks
 export {
   useConvexSlots,
   type UseConvexSlotsResult,
-} from "./hooks/use-convex-slots";
-export { useSlotHold } from "./hooks/use-slot-hold";
+} from "./hooks/use-convex-slots.js";
+export { useSlotHold } from "./hooks/use-slot-hold.js";
 export {
   useBookingValidation,
   type ValidationError,
   type ValidationErrorType,
   type ValidationRecovery,
   type ValidationResult,
-} from "./hooks/use-booking-validation";
-export { useSlotPresence } from "./hooks/use-slot-presence";
-export { useIntersectionObserver } from "./hooks/use-intersection-observer";
+} from "./hooks/use-booking-validation.js";
+export { useSlotPresence } from "./hooks/use-slot-presence.js";
+export { useIntersectionObserver } from "./hooks/use-intersection-observer.js";
 
 // Utilities
-export { getSessionId } from "./utils/session";
+export { getSessionId } from "./utils/session.js";
 export {
   DAYS,
   MONTHS,
   formatTime,
   generateCalendarDays,
   type CalendarDay,
-} from "./utils/date-utils";
+} from "./utils/date-utils.js";
 export {
   getTimezoneOffset,
   getRegionFromTimezone,
   getTimezoneDisplayName,
   getAvailableTimezones,
   type TimezoneOption,
-} from "./utils/timezone-utils";
+} from "./utils/timezone-utils.js";
 export {
   formatDate,
   formatTimeDisplay,
   formatDuration,
   formatDateTime,
-} from "./utils/formatting";
-export { bookingFormSchema, type BookingFormValues } from "./utils/validation";
+} from "./utils/formatting.js";
+export { bookingFormSchema, type BookingFormValues } from "./utils/validation.js";
 
 // Main Components
-export { Booker, type BookerProps } from "./components/booker";
-export { BookingErrorDialog } from "./components/booker";
+export { Booker, type BookerProps } from "./components/booker/index.js";
+export { BookingErrorDialog } from "./components/booker/index.js";
 
 // Calendar Components
 export {
@@ -79,7 +79,7 @@ export {
   TimeSlotsPanel,
   TimeSlotButton,
   EventMetaPanel,
-} from "./components/calendar";
+} from "./components/calendar/index.js";
 
 // Form Components
-export { BookingForm, BookingSuccess, type CurrentUser } from "./components/form";
+export { BookingForm, BookingSuccess, type CurrentUser } from "./components/form/index.js";

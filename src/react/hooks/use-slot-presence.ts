@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "convex-helpers/react/cache/hooks";
-import { useBookingAPI } from "../context";
-import { getSessionId } from "../utils/session";
+import { useBookingAPI } from "../context.js";
+import { getSessionId } from "../utils/session.js";
 
 /**
  * Checks if a specific slot is currently held by another user: isLocked is

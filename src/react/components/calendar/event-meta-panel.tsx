@@ -2,7 +2,7 @@
 
 import React, { useId } from "react";
 import { Clock, MapPin, Globe, User } from "lucide-react";
-import { getTimezoneDisplayName } from "../../utils/timezone-utils";
+import { getTimezoneDisplayName } from "../../utils/timezone-utils.js";
 
 interface EventType {
   title: string;

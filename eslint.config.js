@@ -59,6 +59,13 @@ export default [
       ],
     },
   },
+  // Packaging tests - Node environment
+  {
+    files: ["test/**/*.{js,mjs}"],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
   // React app code - Browser environment
   {
     files: ["src/react/**/*.{ts,tsx}", "example/src/**/*.{ts,tsx}"],

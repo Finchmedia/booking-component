@@ -201,6 +201,14 @@
   (`null`) or full, which crashed the Booker and the Calendar.
 - `useConvexSlots().fetchMonthSlots` requests the same range in every browser
   zone; east of the display zone it was shifted by a day.
+- `@mrfinch/booking/react` uses fully specified relative imports
+  (`./context.js`, `./components/calendar/index.js`). The entry now loads with
+  Node's ESM loader and Vitest's default dependency handling, builds with plain
+  webpack 5 or Rspack, and keeps its types under `moduleResolution: "nodenext"`.
+  Before, these failed with `ERR_MODULE_NOT_FOUND` or "Can't resolve
+  './context'", and nodenext typed every React export as `any`. Next.js and Vite
+  builds were not affected. A Vitest `server.deps.inline` workaround for the
+  package keeps working and is no longer needed.
 
 ### Added
 

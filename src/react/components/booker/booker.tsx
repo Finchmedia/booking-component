@@ -4,26 +4,26 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useQuery } from "convex-helpers/react/cache/hooks";
-import { useBookingAPI } from "../../context";
-import { useSlotHold } from "../../hooks/use-slot-hold";
+import { useBookingAPI } from "../../context.js";
+import { useSlotHold } from "../../hooks/use-slot-hold.js";
 import {
   useBookingValidation,
   type ValidationRecovery,
-} from "../../hooks/use-booking-validation";
-import { resolveBookingErrorMessage } from "../../utils/booking-error";
-import { toLocalMidnight, todayIn } from "../../utils/civil-date";
-import { Calendar, CalendarSkeleton } from "../calendar";
-import { BookingForm, type CurrentUser } from "../form/booking-form";
-import { BookingSuccess } from "../form/booking-success";
-import { BookingErrorDialog } from "./booking-error-dialog";
-import { getRecoveryAction } from "./recovery";
+} from "../../hooks/use-booking-validation.js";
+import { resolveBookingErrorMessage } from "../../utils/booking-error.js";
+import { toLocalMidnight, todayIn } from "../../utils/civil-date.js";
+import { Calendar, CalendarSkeleton } from "../calendar/index.js";
+import { BookingForm, type CurrentUser } from "../form/booking-form.js";
+import { BookingSuccess } from "../form/booking-success.js";
+import { BookingErrorDialog } from "./booking-error-dialog.js";
+import { getRecoveryAction } from "./recovery.js";
 import type {
   BookingStep,
   BookingFormData,
   Booking,
   EventType,
   Resource,
-} from "../../types";
+} from "../../types.js";
 
 type BookingPhase = "create" | "reschedule";
 

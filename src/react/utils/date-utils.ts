@@ -1,4 +1,4 @@
-import { fromLocalFields, monthGrid, toLocalMidnight, todayIn } from "./civil-date";
+import { fromLocalFields, monthGrid, toLocalMidnight, todayIn } from "./civil-date.js";
 
 export const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 export const MONTHS = [

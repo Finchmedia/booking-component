@@ -2,7 +2,7 @@
 
 import React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { MONTHS } from "../../utils/date-utils";
+import { MONTHS } from "../../utils/date-utils.js";
 
 interface CalendarNavigationProps {
   currentDate: Date;
