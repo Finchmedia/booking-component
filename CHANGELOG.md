@@ -321,7 +321,8 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
 - All component indexes follow Convex's `by_field1_and_field2` naming: each
   is named after its fields, in order, which do not change (`by_external_id`
   keeps its name, since Convex reserves `by_id`). The deploy builds the
-  renamed indexes and drops the old ones (a rollback to 0.4.x does the
+  renamed indexes and the new `event_types` index `by_scheduleId` (for
+  `SCHEDULE_IN_USE`) and drops the old ones (a rollback to 0.4.x does the
   reverse), so allow time on large tables. Component tables are internal, so
   host code is unaffected.
 - Rolling back to 0.4.x: every 0.5.0 emitter queues `triggerHooks` with a
