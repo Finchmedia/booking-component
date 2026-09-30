@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../context", () => ({ useBookingAPI: () => mocks.api }));
+vi.mock("../context", () => ({ useBookingAPI: () => mocks.api, useAvailabilityContextEnabled: () => false }));
 vi.mock("convex/react", () => ({
   useMutation: (reference: string) => reference === "heartbeat" ? mocks.heartbeat : mocks.leave,
 }));

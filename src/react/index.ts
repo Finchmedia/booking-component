@@ -6,8 +6,10 @@ export {
   useBookingAPI,
   type BookingAPI,
   type PublicBookingAPI,
+  type PublicBookingAPIWithAvailabilityContext,
   type AdminBookingAPI,
   type BookingProviderProps,
+  type BookingProviderPropsWithAvailabilityContext,
 } from "./context.js";
 
 // Host contract: what the components send and read
@@ -21,6 +23,7 @@ export type {
   PresenceView,
   SlotHolderView,
   AvailabilityContextArgs,
+  AvailabilityContextOperations,
   MonthAvailabilityArgs,
   DaySlotsArgs,
   CreateBookingArgs,

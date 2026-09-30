@@ -2,13 +2,13 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
-import { useBookingAPI } from "../context.js";
+import { useAvailabilityContextEnabled, useBookingAPI } from "../context.js";
 import { getSessionId } from "../utils/session.js";
 import { formatDateInTimezone } from "../utils/date-utils.js";
 import { isCivilDate, monthGrid } from "../utils/civil-date.js";
 import { effectiveSlotInterval } from "../../shared/durations.js";
 import type { TimeSlot, MonthSlots } from "../types.js";
-import type { PresenceView } from "../contract.js";
+import type { AvailabilityContextArgs, PresenceView } from "../contract.js";
 
 export interface UseConvexSlotsResult {
   monthSlots: MonthSlots;
@@ -89,15 +89,48 @@ function hasPresenceConflict(
   });
 }
 
+/**
+ * Helper: The availability context keys to add to the month and day queries.
+ * None without the provider's opt-in, so the arguments stay those of 0.4.x;
+ * with it, only the keys that are defined. rescheduleContext is copied to
+ * exactly uid and token: a validator rejects surplus nested keys.
+ */
+function availabilityContextArgs(
+  optedIn: boolean,
+  context: AvailabilityContextArgs | undefined
+): AvailabilityContextArgs {
+  if (!optedIn || !context) return {};
+  const { eventTypeId, rescheduleContext } = context;
+  return {
+    ...(eventTypeId !== undefined ? { eventTypeId } : {}),
+    ...(rescheduleContext
+      ? { rescheduleContext: { uid: rescheduleContext.uid, token: rescheduleContext.token } }
+      : {}),
+  };
+}
+
+/**
+ * Loads the month availability, the free slots of the selected date and the
+ * presence holds for one resource.
+ *
+ * @param context - The availability context for getMonthAvailability and
+ * getDaySlots: the selected `eventTypeId` and, when rescheduling, the
+ * `rescheduleContext` of the booking being moved. Sent only when the
+ * surrounding BookingProvider has `availabilityContext` on; otherwise the
+ * queries receive the 0.4.x arguments. Presence queries never receive it.
+ */
 export const useConvexSlots = (
   resourceId: string,
   eventLength: number,
   slotInterval?: number,
   allDurationOptions?: number[],
   enabled: boolean = true,
-  timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone
+  timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  context?: AvailabilityContextArgs
 ): UseConvexSlotsResult => {
   const api = useBookingAPI();
+  const optedIn = useAvailabilityContextEnabled();
+  const contextArgs = availabilityContextArgs(optedIn, context);
   // Refresh time outside render so an open calendar drops elapsed slots even
   // when neither inventory nor presence changes.
   const [now, setNow] = useState(() => Date.now());
@@ -130,6 +163,7 @@ export const useConvexSlots = (
           dateTo: dateRange.to,
           eventLength,
           slotInterval: effectiveInterval,
+          ...contextArgs,
         }
       : "skip"
   );
@@ -142,6 +176,7 @@ export const useConvexSlots = (
           date: selectedDateStr,
           eventLength,
           slotInterval: effectiveInterval,
+          ...contextArgs,
         }
       : "skip"
   );

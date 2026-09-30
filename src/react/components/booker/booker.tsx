@@ -73,6 +73,9 @@ export interface BookerProps {
   /**
    * Reschedule mode: Provide the original booking to modify
    * When present, the Booker will call rescheduleBookingByToken instead of createBooking
+   * With BookingProvider's `availabilityContext` on, its `uid` and
+   * `managementToken` also go to getDaySlots and getMonthAvailability as
+   * `rescheduleContext`, so times overlapping it can be offered.
    */
   originalBooking?: Booking;
   /**
@@ -191,6 +194,11 @@ function BookerFlow({
 
   // Detect reschedule mode
   const isRescheduling = !!originalBooking;
+  // The booking being moved, for slot queries that exclude its own occupancy.
+  // Sent only with the provider's availabilityContext opt-in.
+  const rescheduleContext = originalBooking?.managementToken
+    ? { uid: originalBooking.uid, token: originalBooking.managementToken }
+    : undefined;
 
   // Step state
   const [bookingStep, setBookingStep] = useState<BookingStep>("event-meta");
@@ -566,6 +574,7 @@ function BookerFlow({
               timeFormat={timeFormat}
               onTimeFormatChange={setTimeFormat}
               disabled={isSubmitting}
+              rescheduleContext={rescheduleContext}
             />
           )}
 

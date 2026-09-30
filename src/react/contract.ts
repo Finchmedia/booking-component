@@ -62,16 +62,21 @@ export type SlotHolderView = Pick<PresenceRecord, "user">;
 
 /**
  * Optional availability context for getDaySlots and getMonthAvailability.
- * The shipped components send it only when the host opts in. A host function
- * that declares these arguments must accept these types; one that does not
- * declare them still satisfies the contract.
+ * The shipped components send it only with BookingProvider's
+ * `availabilityContext` on, and then the host functions must declare both
+ * keys (see {@link PublicBookingAPIWithAvailabilityContext}). Without the
+ * opt-in a host function that declares these arguments must accept these
+ * types; one that does not declare them still satisfies the contract.
  */
 export type AvailabilityContextArgs = {
-  /** The event type the visitor is booking. */
+  /** The event type the visitor is booking. Sent whenever it is known. */
   eventTypeId?: string;
   /**
-   * The booking being rescheduled and its management token. Verify the token
-   * before excluding the booking's own occupancy, and never echo either value.
+   * The booking being rescheduled and its management token, sent only in
+   * reschedule mode. Pass it on to the component's query as
+   * `rescheduleContext`, which excludes the booking's own occupancy only when
+   * the token matches. Never turn it into `excludeBookingUid`, and never echo
+   * or log either value.
    */
   rescheduleContext?: { uid: string; token: string };
 };
@@ -127,7 +132,9 @@ type Operation<
  * the result they read. `unknown` results are not read.
  *
  * The availability queries take the base arguments, or the base arguments
- * plus {@link AvailabilityContextArgs}. Only the base keys must be declared.
+ * plus {@link AvailabilityContextArgs}. Only the base keys must be declared,
+ * unless BookingProvider's `availabilityContext` is on
+ * ({@link AvailabilityContextOperations}).
  */
 export interface BookingUIOperations {
   /** Booker, Calendar. Resolve to `null` for a missing event type. */
@@ -190,6 +197,17 @@ export type HostReferences = {
 };
 
 /**
+ * The availability queries as the components call them with BookingProvider's
+ * `availabilityContext` on: the base arguments plus both context keys.
+ */
+export interface AvailabilityContextOperations {
+  /** Calendar, useConvexSlots: which days have a free slot. */
+  getMonthAvailability: Operation<"query", MonthAvailabilityArgs & AvailabilityContextArgs, MonthSlots>;
+  /** Calendar, useConvexSlots: the free starts of one day. */
+  getDaySlots: Operation<"query", DaySlotsArgs & AvailabilityContextArgs, DaySlotView[]>;
+}
+
+/**
  * What useBookingAPI() returns for each operation: a plain reference with the
  * contract's arguments and result, usable with every Convex React hook.
  */
@@ -245,6 +263,29 @@ export interface OptionalPublicOperations {
  * any exported Convex function. Your host functions enforce authorization.
  */
 export interface PublicBookingAPI extends HostReferences, OptionalPublicOperations {}
+
+/**
+ * publicApi with BookingProvider's `availabilityContext` on. As
+ * {@link PublicBookingAPI}, except that getDaySlots and getMonthAvailability
+ * must also declare the optional `eventTypeId` and `rescheduleContext` of
+ * {@link AvailabilityContextArgs}, because the components send them. A host
+ * function that lacks them, or requires them, is a type error.
+ */
+export interface PublicBookingAPIWithAvailabilityContext
+  extends Omit<PublicBookingAPI, keyof AvailabilityContextOperations> {
+  getMonthAvailability: FunctionReference_future<
+    "query",
+    "public",
+    AvailabilityContextOperations["getMonthAvailability"]["args"],
+    AvailabilityContextOperations["getMonthAvailability"]["result"]
+  >;
+  getDaySlots: FunctionReference_future<
+    "query",
+    "public",
+    AvailabilityContextOperations["getDaySlots"]["args"],
+    AvailabilityContextOperations["getDaySlots"]["result"]
+  >;
+}
 
 /**
  * References to your host's administration functions, usually the generated

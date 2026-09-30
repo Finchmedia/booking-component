@@ -304,9 +304,25 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   `RescheduleBookingByTokenArgs` and `AvailabilityContextArgs`. The
   availability queries accept the optional `eventTypeId` and
   `rescheduleContext` of `AvailabilityContextArgs`; a host that declares them
-  must accept these types, one that does not still fits.
+  must accept these types, one that does not still fits unless it opts in
+  (below).
 - `useBookingValidation` accepts the views, so a host DTO with the read fields
   is enough.
+- `BookingProvider` takes `availabilityContext`, off by default. With it on,
+  the Calendar and `useConvexSlots` add `eventTypeId` and, while the Booker
+  reschedules, `rescheduleContext: { uid, token }` of the booking being moved
+  to `getDaySlots` and `getMonthAvailability`. A host can then apply the
+  selected event type's schedule and policy, and, by passing
+  `rescheduleContext` on to the component, offer times that overlap the
+  booking being moved; until now only other times were offered, although the
+  move itself was accepted. `publicApi` must then declare both arguments as
+  optional (`PublicBookingAPIWithAvailabilityContext`, checked at compile
+  time). Presence functions never receive the token. Without the opt-in the
+  arguments are unchanged. For custom calendars `Calendar` takes an optional
+  `rescheduleContext` and `useConvexSlots` an optional seventh argument
+  `{ eventTypeId, rescheduleContext }`, sent only with the opt-in. New types:
+  `PublicBookingAPIWithAvailabilityContext`, `AvailabilityContextOperations`,
+  `BookingProviderPropsWithAvailabilityContext`.
 
 ### Deprecated
 

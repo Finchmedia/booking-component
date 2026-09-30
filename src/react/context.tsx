@@ -9,9 +9,15 @@ import type {
   AdminBookingAPI,
   BookingAPI,
   PublicBookingAPI,
+  PublicBookingAPIWithAvailabilityContext,
 } from "./contract.js";
 
-export type { AdminBookingAPI, BookingAPI, PublicBookingAPI } from "./contract.js";
+export type {
+  AdminBookingAPI,
+  BookingAPI,
+  PublicBookingAPI,
+  PublicBookingAPIWithAvailabilityContext,
+} from "./contract.js";
 
 // ============================================
 // OPERATION OWNERSHIP
@@ -132,7 +138,13 @@ function resolveBookingAPI(
 // CONTEXT
 // ============================================
 
-const BookingContext = createContext<BookingAPI | null>(null);
+interface BookingContextValue {
+  api: BookingAPI;
+  /** BookingProvider's `availabilityContext` */
+  availabilityContext: boolean;
+}
+
+const BookingContext = createContext<BookingContextValue | null>(null);
 
 // ============================================
 // PROVIDER PROPS
@@ -175,7 +187,42 @@ export interface BookingProviderProps {
    */
   adminApi?: Partial<AdminBookingAPI>;
 
+  /**
+   * Off (the default): getDaySlots and getMonthAvailability receive the same
+   * arguments as in 0.4.x. Set it to send the availability context; see
+   * {@link BookingProviderPropsWithAvailabilityContext}.
+   */
+  availabilityContext?: false;
+
   children: ReactNode;
+}
+
+/**
+ * BookingProvider's props with `availabilityContext` on. The Calendar and
+ * `useConvexSlots` then add to getDaySlots and getMonthAvailability the
+ * selected `eventTypeId` and, when the Booker reschedules, `rescheduleContext`
+ * (`{ uid, token }` of the booking being moved), so your host functions can
+ * apply the event type's own schedule and policy and offer times that overlap
+ * the booking being moved. Presence functions never receive the token.
+ *
+ * `publicApi` must then declare both arguments as optional in those two
+ * functions ({@link PublicBookingAPIWithAvailabilityContext}); a host that
+ * lacks them is a type error here instead of a validator error in the browser.
+ */
+export interface BookingProviderPropsWithAvailabilityContext
+  extends Omit<BookingProviderProps, "publicApi" | "availabilityContext"> {
+  /**
+   * References to your host's public booking functions, with getDaySlots and
+   * getMonthAvailability declaring
+   * `eventTypeId: v.optional(v.string())` and
+   * `rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`.
+   * Pass `rescheduleContext` on to the component's query unchanged; it
+   * excludes the moved booking only when the token matches.
+   */
+  publicApi: PublicBookingAPIWithAvailabilityContext;
+
+  /** Send the availability context. A `boolean` also needs the declaring publicApi. */
+  availabilityContext: boolean;
 }
 
 /**
@@ -229,21 +276,35 @@ export interface BookingProviderProps {
  *   );
  * }
  * ```
+ *
+ * @example
+ * ```tsx
+ * // Opt in to the availability context: getDaySlots and getMonthAvailability
+ * // must declare the optional eventTypeId and rescheduleContext
+ * <BookingProvider publicApi={api.public} availabilityContext>
+ *   <Booker eventTypeId="event-1" resourceId="studio-a" originalBooking={booking} />
+ * </BookingProvider>
+ * ```
  */
 export function BookingProvider({
   publicApi,
   adminApi,
+  availabilityContext = false,
   children,
-}: BookingProviderProps) {
+}: BookingProviderProps | BookingProviderPropsWithAvailabilityContext) {
   // Resolved from the operation lists: a generated api is a proxy that has no
   // members to spread and returns a reference for any name
   const api = useMemo(
     () => resolveBookingAPI(publicApi, adminApi),
     [publicApi, adminApi]
   );
+  const value = useMemo(
+    () => ({ api, availabilityContext }),
+    [api, availabilityContext]
+  );
 
   return (
-    <BookingContext.Provider value={api}>
+    <BookingContext.Provider value={value}>
       {children}
     </BookingContext.Provider>
   );
@@ -278,12 +339,20 @@ export function BookingProvider({
  * ```
  */
 export function useBookingAPI(): BookingAPI {
-  const api = useContext(BookingContext);
-  if (!api) {
+  const context = useContext(BookingContext);
+  if (!context) {
     throw new Error(
       "useBookingAPI must be used within a BookingProvider. " +
         "Wrap your booking components with <BookingProvider publicApi={api.public}>."
     );
   }
-  return api;
+  return context.api;
+}
+
+/**
+ * @internal Whether the nearest BookingProvider sends the availability
+ * context (`availabilityContext`). False outside a provider.
+ */
+export function useAvailabilityContextEnabled(): boolean {
+  return useContext(BookingContext)?.availabilityContext ?? false;
 }

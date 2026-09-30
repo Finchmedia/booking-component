@@ -139,6 +139,51 @@ them.
 `useBookingAPI().createResource` and the other admin operations are
 `undefined`, and `publicApi` never stands in for them.
 
+### Availability context (opt-in)
+
+By default `getDaySlots` and `getMonthAvailability` receive the 0.4.x
+arguments, so your host does not know which event type is selected or which
+booking is being moved. A reschedule then cannot offer times that overlap the
+booking being moved. With
+`<BookingProvider publicApi={api.public} availabilityContext>` the Calendar
+and `useConvexSlots` add two optional arguments to both functions:
+`eventTypeId`, the selected event type, and, while the Booker reschedules,
+`rescheduleContext: { uid, token }`, the booking being moved and its
+management token. Presence functions never receive the token.
+
+Both functions must then declare both arguments as optional
+(`PublicBookingAPIWithAvailabilityContext`); `BookingProvider` rejects a
+`publicApi` without them at compile time. Pass `rescheduleContext` on
+unchanged: the component frees the moved booking's own time only when the
+token matches it, and otherwise ignores it. Never turn it into
+`excludeBookingUid`, which trusts any UID and is meant for trusted server
+code, and never log or return either value.
+
+```ts
+export const getDaySlots = query({
+  args: {
+    resourceId: v.string(), date: v.string(), eventLength: v.number(), slotInterval: v.number(),
+    eventTypeId: v.optional(v.string()),
+    rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() })),
+  },
+  handler: async (ctx, { eventTypeId, ...args }) => {
+    // Your access and policy checks; the event type's schedule, for example
+    const eventType = eventTypeId
+      ? await ctx.runQuery(components.booking.public.getEventType, { eventTypeId })
+      : null;
+    return await ctx.runQuery(components.booking.public.getDaySlots, {
+      ...args, // includes rescheduleContext: the component checks the token
+      scheduleId: eventType?.scheduleId,
+    });
+  },
+});
+```
+
+A custom calendar passes the context to `Calendar` as `rescheduleContext`
+(it sends its `eventTypeId` itself) or to `useConvexSlots` as its seventh
+argument, `{ eventTypeId, rescheduleContext }`. Both are sent only with the
+opt-in.
+
 ## Backend integration
 
 Browser clients call **your host functions**. Those functions check access and

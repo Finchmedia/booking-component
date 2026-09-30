@@ -39,6 +39,14 @@ interface CalendarProps {
   onTimeFormatChange: (format: "12h" | "24h") => void;
   /** Optional: disables slot selection, e.g. while a reschedule is being sent */
   disabled?: boolean;
+  /**
+   * Optional: the booking being rescheduled and its management token. With
+   * BookingProvider's `availabilityContext` on, the slot queries send it as
+   * `rescheduleContext` (and always `eventTypeId`), so a host that verifies
+   * the token offers times overlapping the booking being moved. Ignored
+   * without the opt-in; never sent to presence queries.
+   */
+  rescheduleContext?: { uid: string; token: string };
 }
 
 export const Calendar: React.FC<CalendarProps> = (props) => {
@@ -64,8 +72,7 @@ export const Calendar: React.FC<CalendarProps> = (props) => {
 // Inner component: all hooks called unconditionally (no early return before hooks)
 const CalendarContent: React.FC<CalendarProps & { eventType: EventTypeView }> = ({
   resourceId,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- F13: slot queries do not send the event type yet (0.5.0)
-  eventTypeId: _eventTypeId,
+  eventTypeId,
   onSlotSelect,
   title,
   description,
@@ -84,6 +91,7 @@ const CalendarContent: React.FC<CalendarProps & { eventType: EventTypeView }> = 
   timeFormat,
   onTimeFormatChange,
   disabled,
+  rescheduleContext,
   // Loaded data
   eventType,
 }) => {
@@ -117,7 +125,9 @@ const CalendarContent: React.FC<CalendarProps & { eventType: EventTypeView }> = 
     slotInterval,
     undefined, // allDurationOptions: only used without a slotInterval
     hasIntersected,
-    timezone // Days are civil dates; only the deprecated fetchSlots reads the zone
+    timezone, // Days are civil dates; only the deprecated fetchSlots reads the zone
+    // Sent only with the provider's availabilityContext opt-in
+    { eventTypeId, rescheduleContext }
   );
 
   // Handle date selection: the clicked cell's label is the day queried

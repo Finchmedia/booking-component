@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../context", () => ({ useBookingAPI: () => mocks.api }));
+vi.mock("../context", () => ({ useBookingAPI: () => mocks.api, useAvailabilityContextEnabled: () => false }));
 vi.mock("convex-helpers/react/cache/hooks", () => ({ useQuery: mocks.query }));
 
 // The hook compares instants only; each case still runs in several process zones.

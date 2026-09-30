@@ -3,6 +3,7 @@
 // A `@ts-expect-error` line must be rejected; every group has an accepted
 // control next to its rejections, so a check cannot pass vacuously.
 
+import { createElement } from "react";
 import { describe, expectTypeOf, test } from "vitest";
 import { useMutation, useQuery as useConvexQuery } from "convex/react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
@@ -20,9 +21,10 @@ import type {
   BookingView,
   EventTypeView,
   PublicBookingAPI,
+  PublicBookingAPIWithAvailabilityContext,
   ResourceView,
 } from "./contract.js";
-import type { BookingProviderProps } from "./context.js";
+import { BookingProvider, type BookingProviderProps } from "./context.js";
 import type { Booking, EventType, Resource } from "./types.js";
 
 type Slot<K extends keyof PublicBookingAPI> = PublicBookingAPI[K];
@@ -214,6 +216,58 @@ describe("accepted host references", () => {
     expectTypeOf<{ children: null }>().toExtend<BookingProviderProps>();
   });
 });
+
+// F13: with BookingProvider's availabilityContext on, the components send
+// eventTypeId and rescheduleContext to the availability queries.
+type ContextSlot<K extends keyof PublicBookingAPIWithAvailabilityContext> = PublicBookingAPIWithAvailabilityContext[K];
+type Context = { eventTypeId?: string; rescheduleContext?: { uid: string; token: string } };
+/** The host module of the opt-in: both availability queries declare the context. */
+type HostWithContext = Omit<HostPublic, "getDaySlots" | "getMonthAvailability"> & {
+  getDaySlots: Q<DaySlotBase & Context, Array<{ time: string }>>;
+  getMonthAvailability: Q<MonthBase & Context, Record<string, boolean>>;
+};
+type ProviderProps = Parameters<typeof BookingProvider>[0];
+
+describe("availability context opt-in", () => {
+  test("the opted-in contract requires both context arguments, optional", () => {
+    // CONTROL
+    expectTypeOf<Q<DaySlotBase & Context, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    expectTypeOf<Q<MonthBase & Context, Record<string, boolean>>>().toExtend<ContextSlot<"getMonthAvailability">>();
+    expectTypeOf<HostWithContext>().toExtend<PublicBookingAPIWithAvailabilityContext>();
+    // @ts-expect-error the 0.4.x arguments: the validator would reject eventTypeId
+    expectTypeOf<Q<DaySlotBase, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    // @ts-expect-error without rescheduleContext every reschedule query fails
+    expectTypeOf<Q<MonthBase & { eventTypeId?: string }, Record<string, boolean>>>().toExtend<ContextSlot<"getMonthAvailability">>();
+    // @ts-expect-error eventTypeId must stay optional
+    expectTypeOf<Q<DaySlotBase & Required<Pick<Context, "eventTypeId">> & Pick<Context, "rescheduleContext">, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    // @ts-expect-error rescheduleContext of another type
+    expectTypeOf<Q<DaySlotBase & { eventTypeId?: string; rescheduleContext?: string }, { time: string }[]>>().toExtend<ContextSlot<"getDaySlots">>();
+    // @ts-expect-error the component's own getDaySlots has no eventTypeId: wrap it
+    expectTypeOf<Passthrough<C["getDaySlots"]>>().toExtend<ContextSlot<"getDaySlots">>();
+    // @ts-expect-error the module of the 0.4.x contract
+    expectTypeOf<HostPublic>().toExtend<PublicBookingAPIWithAvailabilityContext>();
+  });
+
+  test("BookingProvider takes the opt-in only with a declaring publicApi", () => {
+    // CONTROL: opted in with the declaring host; off with either host
+    expectTypeOf<{ publicApi: HostWithContext; availabilityContext: true; children: null }>().toExtend<ProviderProps>();
+    expectTypeOf<{ publicApi: HostWithContext; availabilityContext: boolean; children: null }>().toExtend<ProviderProps>();
+    expectTypeOf<{ publicApi: HostPublic; availabilityContext: false; children: null }>().toExtend<ProviderProps>();
+    expectTypeOf<{ publicApi: HostWithContext; children: null }>().toExtend<ProviderProps>();
+    // @ts-expect-error the opt-in with a host that does not declare the context
+    expectTypeOf<{ publicApi: HostPublic; availabilityContext: true; children: null }>().toExtend<ProviderProps>();
+    // @ts-expect-error a boolean flag can be true
+    expectTypeOf<{ publicApi: HostPublic; availabilityContext: boolean; children: null }>().toExtend<ProviderProps>();
+  });
+});
+
+/** Provider call sites as a host writes them. Never called. */
+export function providerCallSites(host: HostPublic, contextHost: HostWithContext) {
+  createElement(BookingProvider, { publicApi: contextHost, availabilityContext: true, children: null });
+  createElement(BookingProvider, { publicApi: host, children: null });
+  // @ts-expect-error getDaySlots and getMonthAvailability do not declare the context
+  createElement(BookingProvider, { publicApi: host, availabilityContext: true, children: null });
+}
 
 describe("views and documents", () => {
   test("stored documents fit the exported types and the views", () => {
