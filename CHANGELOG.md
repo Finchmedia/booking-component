@@ -61,6 +61,22 @@ The internal email mutations keep their names and arguments, so jobs queued by
   `getEffectiveAvailability` and the schedule-aware month view, and hosts that
   validate bookings against the day view enforced the wrong days. Date
   overrides were not affected.
+- On a spring-forward day, a window that reaches into or across the skipped
+  hour no longer offers bookings that end after it closes. Berlin 01:00–04:00
+  on 2027-03-28 lasts two hours: a 120-minute booking now starts at 01:00
+  only (01:15–01:45 ended up to 45 minutes after closing), a 01:00–03:00
+  window no longer offers one at all, and a full-day event on a 00:00–24:00
+  window is not offered on the 23-hour day. A window closes when its last
+  existing quarter hour ends, so one that ends where the gap starts keeps its
+  starts. Starts inside the gap are still skipped, and 15-minute events are
+  unaffected.
+- A wall-clock time that occurs twice on a fall-back day now means its first
+  occurrence in every zone (as in RFC 5545 and Temporal's default). Zones west
+  of UTC already worked that way; zones east of UTC used the second. In
+  Europe/Berlin on 2027-10-31, 02:00–02:45 are now offered in summer time
+  (00:00Z–00:45Z) instead of winter time (01:00Z–01:45Z). As before, only one
+  of the two occurrences is offered, and a booking that fits only in elapsed
+  time (four hours in a 01:00–04:00 window) is not.
 - The availability queries reject inputs that have no meaning instead of
   answering them with silent nonsense: an `eventLength` of zero, below zero,
   `NaN` or infinite (-900 offered 60 starts on a fully booked day), slot
@@ -135,8 +151,9 @@ The internal email mutations keep their names and arguments, so jobs queued by
   that hosts match. Changing any of them fails the suite and must be deliberate.
 - Time-sensitive tests can run under a chosen process time zone
   (`src/testing/process-time-zone.ts`).
-- Regression suites for weekdays in 14 zones and for input validation. The
-  weekday suite runs under several process time zones.
+- Regression suites for weekdays in 14 zones, DST days (including a sweep
+  against an `Intl`-only oracle) and input validation. The time-dependent ones
+  run under several process time zones.
 
 ## 0.4.2 — 23 September 2026
 

@@ -300,23 +300,26 @@ describe("generateDaySlotsWithTimezone: DST transition days (Europe/Berlin)", ()
     expect(spring[1]).toBe(iso(zoned(SPRING_FORWARD, "01:00", TZ)));
 
     // Fall back: 01:00 CEST is 2026-10-24T23:00Z. The ambiguous 02:00 (it occurs
-    // twice) resolves to its LATER occurrence (02:00 CET = 01:00Z), as in
-    // date-fns-tz; the first occurrence (00:00Z) is never offered.
+    // twice) resolves to its EARLIER occurrence (02:00 CEST = 00:00Z), as in
+    // every other zone; the second occurrence (01:00Z) is never offered.
+    // date-fns-tz is no oracle for the repeated hour: its pick depends on the
+    // process time zone.
     expect(wallClockToUTC(FALL_BACK, "01:00", TZ)).toBe(zoned(FALL_BACK, "01:00", TZ));
-    expect(wallClockToUTC(FALL_BACK, "02:00", TZ)).toBe(zoned(FALL_BACK, "02:00", TZ));
+    expect(wallClockToUTC(FALL_BACK, "02:00", TZ)).toBe(Date.parse("2026-10-25T00:00:00.000Z"));
     const fall = startsOf(
       generateDaySlotsWithTimezone(FALL_BACK, 60, 60, slotWindow("00:00", "06:00"), TZ)
     );
     expect(fall).toEqual([
       "2026-10-24T22:00:00.000Z", // 00:00 CEST
       "2026-10-24T23:00:00.000Z", // 01:00 CEST
-      "2026-10-25T01:00:00.000Z", // 02:00 CET (second occurrence)
+      "2026-10-25T00:00:00.000Z", // 02:00 CEST (first occurrence)
       "2026-10-25T02:00:00.000Z", // 03:00 CET
       "2026-10-25T03:00:00.000Z", // 04:00 CET
       "2026-10-25T04:00:00.000Z", // 05:00 CET
     ]);
-    expect(fall).toEqual(
-      ["00:00", "01:00", "02:00", "03:00", "04:00", "05:00"].map((time) =>
+    // The unambiguous hours still match the oracle.
+    expect(fall.filter((_, index) => index !== 2)).toEqual(
+      ["00:00", "01:00", "03:00", "04:00", "05:00"].map((time) =>
         iso(zoned(FALL_BACK, time, TZ))
       )
     );
