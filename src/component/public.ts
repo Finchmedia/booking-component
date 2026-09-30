@@ -752,6 +752,11 @@ export const createProvisionalBooking = mutation({
   },
 });
 
+/**
+ * The whole booking document, `managementToken` and booker contact details
+ * included. The token lets its holder cancel and reschedule the booking, so a
+ * host must not pass this result to a caller that only knows the id.
+ */
 export const getBooking = query({
   args: { bookingId: v.id("bookings") },
   returns: v.union(bookingDoc, v.null()),
@@ -1094,6 +1099,12 @@ export const toggleEventTypeActive = mutation({
 // BOOKING LIST & DETAIL QUERIES
 // ============================================
 
+/**
+ * The whole booking document, `managementToken` and booker contact details
+ * included. Knowing a uid must not be enough to obtain the token: a host that
+ * serves this to browsers removes the token (and details the caller may not
+ * see) unless the caller already proved ownership.
+ */
 export const getBookingByUid = query({
   args: { uid: v.string() },
   returns: v.union(bookingDoc, v.null()),
@@ -1212,6 +1223,8 @@ async function firstMatching(
  *
  * `resourceId` matches a booking's primary resource: a bundle is listed under
  * its first resource only, not under its other items (pools included).
+ *
+ * Bookings are returned whole, `managementToken` included (see getBookingByUid).
  *
  * With no selector at all the scan is bounded: only the 1000 most recently
  * *created* bookings are considered (then filtered, sorted and limited). That

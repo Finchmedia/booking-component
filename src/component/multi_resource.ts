@@ -352,6 +352,7 @@ export const createMultiResourceBooking = mutation({
 // GET BOOKING WITH ITEMS
 // ============================================
 
+/** The whole booking, `managementToken` included (see public.getBookingByUid), plus its items. */
 export const getBookingWithItems = query({
   args: { bookingId: v.id("bookings") },
   returns: v.union(bookingWithItemsDoc, v.null()),

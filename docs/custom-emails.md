@@ -84,6 +84,45 @@ do not copy a renderer handle, API key or sender from browser arguments. Omittin
 `resendOptions` still disables built-in email delivery. Existing custom hooks
 remain independent; avoid also sending the same guest notification from a hook.
 
+## One Resend account
+
+Booking's nested Resend component keeps one delivery configuration: the one
+from the most recent call that passed `resendOptions`. Queued mail goes out in
+batches, and each batch is authorized with the API key stored when the batch
+is formed, whichever key the individual mail was queued with. Use one Resend
+account per Booking component instance.
+
+- Rotating the key is supported. After you deploy the new key, mail still
+  waiting goes out with it. A batch already handed to the delivery worker keeps
+  the key it started with for its retries, so revoke the old key once that mail
+  has been sent.
+- Several senders within the account work: every mail keeps its own
+  `fromEmail`, as long as the account may send from each of them.
+- Keys of different accounts, such as one per tenant, are not supported. Their
+  mail can share a batch that goes out with only one of the keys, and when
+  Resend rejects that key, every mail in the batch fails.
+
+To deliver through several accounts, omit `resendOptions` so that Booking sends
+nothing, and send from your hooks through a Resend component per account in
+your app. The [hook payloads](hook-payloads-v1.md) carry the booker's address
+and, for most events, the management token for links.
+
+## Recipients
+
+Built-in mail goes to the address the booker entered, and nobody has verified
+it. Anyone who can create a booking through your host can therefore have your
+sender mail any address. Booking does not decide who may receive mail: before
+enabling email for public booking, apply your own policy in the host functions
+that create bookings, such as address verification, rate limits per address or
+client, or a CAPTCHA.
+
+Since 0.4.3, Booking skips any email whose recipient fails a conservative syntax
+check. The job returns `INVALID_RECIPIENT` and queues nothing, so one malformed
+address cannot fail a Resend batch shared with other bookers' mail. The check is
+exported as `isSendableAddress` from `@mrfinch/booking/emails`, so your booking
+form can apply the same rule. It screens syntax only; it does not prove that an
+address exists or belongs to the guest.
+
 ## Links and templates
 
 `email.links` provides view, reschedule and cancel URLs based on `baseUrl` and the
@@ -109,14 +148,9 @@ must be nonempty. Subjects must contain no CR, LF or NUL characters and are limi
 to 200 UTF-16 code units. Combined UTF-8 subject, HTML and text must fit in 128 KiB.
 These checks validate the payload, not its visual appearance or deliverability.
 
-Since 0.4.3, Booking skips any email whose recipient fails a conservative syntax
-check. The job returns `INVALID_RECIPIENT` and queues nothing, so one malformed
-address cannot fail a Resend batch shared with other bookers' mail. The check is
-exported as `isSendableAddress` from `@mrfinch/booking/emails`, so your booking
-form can apply the same rule. It screens syntax only; it does not prove that an
-address exists or belongs to the guest. A stored time zone that `Intl` rejects
-renders the built-in templates in UTC, while renderers receive the stored value
-unchanged.
+Since 0.4.3, a stored time zone that `Intl` rejects renders the built-in
+templates in UTC, while renderers receive the stored value unchanged. Mail to a
+malformed address is skipped; see [Recipients](#recipients).
 
 Rendering runs after the booking mutation commits. Diagnose a renderer failure
 in the Convex scheduled-function logs, fix and deploy the host renderer, then

@@ -19,6 +19,14 @@
   before release.
 - Do not mass-cancel `presence:cleanup` jobs to tidy up. That orphans live
   holds until their next heartbeat or the sweep.
+- New rejections, all of inputs without a valid meaning: an `eventLength`
+  that is not a positive number or slot indices outside the integers 0–95 in
+  the availability queries; dates that do not exist, or `dateFrom` after
+  `dateTo`, in the availability and date-override functions; instants a
+  `Date` cannot hold in booking writes and `getAvailability`; a zone `Intl`
+  rejects in schedule, resource and event-type writes; anything but a
+  function handle in `registerHook` and `updateHook`. The entries below give
+  their error texts; existing error texts are unchanged.
 - The availability queries now reject an `eventLength` that is not a positive
   number. The Booker takes it from the event type, so check stored event types
   before upgrading, for example in a host query:
@@ -85,6 +93,32 @@
 The internal email mutations keep their names and arguments, so jobs queued by
 0.4.2 still run and render with the escaped templates.
 
+### Still the host's job
+
+The component does not take these over in 0.4.x; the README now describes
+them.
+
+- Check eligibility before bundles, moves and confirmations.
+  `createMultiResourceBooking`, both reschedule mutations and
+  `transitionBookingState` do not check that the event type and resources are
+  active and linked, and no function compares their organizations.
+- Keep management tokens from callers who know only an id or uid: every booking
+  document the component returns contains the token and the booker's contact
+  details.
+- Register hooks only from administrator-only server code; see the new
+  [hook payload reference](docs/hook-payloads-v1.md) for the v1 shapes.
+- Decide who may receive built-in mail (verification, rate limits, CAPTCHA).
+  Addresses are not verified, and the `isSendableAddress` screen checks syntax
+  only.
+- Use one Resend account per component instance. Key rotation works; keys of
+  different accounts can share a batch, and a rejected key fails all of it.
+- Pass `scheduleId` to the availability queries; the partial argument shapes
+  still fall back to 09:00–17:00. Call `deleteAllLinksForResource` or
+  `deleteAllLinksForEventType` when deleting. Omitted update fields stay
+  unchanged, so an event type's `scheduleId` and numeric settings cannot be
+  cleared. `listBookings({ resourceId })` lists primary resources only. Bound
+  the date ranges your host forwards to `getAvailability`.
+
 ### Fixed
 
 - Weekly hours apply to the weekday of the calendar day itself, whatever the
@@ -150,8 +184,6 @@ The internal email mutations keep their names and arguments, so jobs queued by
   Previously such an address could fail the whole Resend batch it shared with
   valid mail. This is input hardening, not the provider's full validation.
   Bookings are still accepted with any address.
-- `isSendableAddress` is exported from `@mrfinch/booking/emails`, so hosts can
-  apply the same rule in their booking forms.
 - A stored booking time zone that `Intl` rejects, or an empty one, no longer
   fails every email for that booking. The built-in templates render the
   times in UTC, labelled "UTC"; custom renderers still receive the stored
@@ -268,15 +300,32 @@ The internal email mutations keep their names and arguments, so jobs queued by
   (`{ uid, organizationId, eventTypeOrganizationId }`), `continueCursor` and
   `isDone`, and is idempotent. Backfilled bundles have the existing "bundle
   with organization" v1 hook payload shape.
+- `isSendableAddress` from `@mrfinch/booking/emails`, the recipient screen
+  described under Fixed, so hosts can apply the same rule in their booking
+  forms.
+- The `makeInternalBookingAPI` wrapper `getEventTypeBySlug` takes the optional
+  `organizationId` (see Fixed).
 
 ### Maintenance and documentation
 
-- The `listBookings` documentation states that `resourceId` matches a
-  booking's primary resource: a bundle is listed under its first resource
-  only, not under its other items (pools included).
-- The README states when presence releases a selection: an explicit leave
-  releases it immediately, an abandoned one 10–20 s after its last heartbeat,
-  plus scheduler latency.
+- The README documents the contract hosts rely on: management tokens are
+  bearer secrets, and it lists the functions that return them; registering a
+  hook is an administrator action; one Resend account per instance; built-in
+  mail goes to unverified addresses; calendar days are the schedule's days,
+  slot times are shown in the visitor's zone, and the DST rule; the schedule
+  arguments and their fallbacks; `listBookings({ resourceId })` matches the
+  primary resource only (a bundle is listed under its first resource, not
+  under its other items, pools included); omitted update fields stay
+  unchanged; deletes leave link rows; writes to one resource and UTC day are
+  serialized; when presence releases a selection (an explicit leave at once,
+  an abandoned one 10–20 s after its last heartbeat, plus scheduler latency);
+  and the eligibility checks that bundles, moves and confirmations skip.
+- New `docs/hook-payloads-v1.md` lists the v1 payload of every emitter. It is
+  generated from the characterization tests, which fail when it is out of
+  date.
+- `docs/custom-emails.md` explains key rotation and several Resend accounts,
+  and that recipient policy is the host's. The booking reads and
+  `bookingEmailOptionsValidator` say the same in their JSDoc.
 - The npm package excludes every test file (`*.test.*`, `*.test-d.*`) and the
   test-only helpers in `src/testing/`, under `src/` and `dist/` alike.
   Previously only `*.test.ts` was excluded, so a `.test.tsx` file would have
@@ -323,6 +372,12 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - `listBookings` is compared with a copy of the 0.4.2 implementation over
   randomized bookings with many equal starts, every selector, status, date
   and limit combination, with the documents each call reads counted.
+- Canary tests run the nested Resend component's delivery worker: mail waiting
+  for a batch goes out with the newest key, a rejected key of another account
+  fails its whole batch, and one account with several senders sends all mail.
+  A Resend upgrade that changes this fails them.
+- The documented host duties are pinned as current behaviour: eligibility per
+  entry point, `scheduleId: ""`, and omitted or emptied update fields.
 
 ## 0.4.2 — 23 September 2026
 

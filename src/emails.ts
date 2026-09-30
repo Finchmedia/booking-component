@@ -61,7 +61,12 @@ export const bookingEmailResultValidator = v.union(
 );
 export type RenderedBookingEmail = Infer<typeof bookingEmailResultValidator>;
 
-/** Wire format. Only trusted host functions should construct these options. */
+/**
+ * Wire format. Only trusted host functions should construct these options.
+ * Every `apiKey` one booking instance receives must belong to the same Resend
+ * account: queued mail is sent in batches with the most recent key. Rotating
+ * the key is fine (see docs/custom-emails.md).
+ */
 export const bookingEmailOptionsValidator = v.object({
   apiKey: v.string(),
   fromEmail: v.optional(v.string()),
@@ -80,6 +85,7 @@ export type BookingEmailRenderer = FunctionReference<
 /**
  * Call inside a host Convex function, not at module initialization.
  * The renderer stays in the app; only its function handle crosses the boundary.
+ * Use one Resend account per booking instance (see bookingEmailOptionsValidator).
  */
 export async function createBookingEmailOptions(
   options: Omit<BookingEmailOptions, "renderer"> & {
