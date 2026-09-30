@@ -50,6 +50,10 @@
   earlier with another string are skipped when their event fires and log
   `Skipped hook <id>: …`; find them with `listHooks` and remove them with
   `unregisterHook`. They never reached the host (see Security).
+- The component's `bookings` table gains the index `by_event_type_start`
+  (`eventTypeId`, `start`) and drops `by_event_type`, a prefix of it. Convex
+  builds the new index during the deploy; on a large table allow time for
+  the backfill. Host code cannot reference component indexes.
 
 ### Security
 
@@ -212,6 +216,19 @@ The internal email mutations keep their names and arguments, so jobs queued by
   argument, so a multi-tenant host could not scope slug lookups through the
   factory and got the oldest event type with that slug in any organization.
   Unscoped lookups still return that one.
+- `listBookings` with a positive integer `limit` stops reading once enough
+  bookings match. The `organizationId`, `resourceId` and `eventTypeId`
+  branches read their whole index range before filtering and cutting, so
+  `{ organizationId, limit: 10 }` read the organization's entire booking
+  history, cancelled rows and old moves included. Reads are now the limit
+  plus the rows the other filters skip (for `eventTypeId`, plus the other
+  bookings sharing the last one's `start`). `dateFrom` and `dateTo` now
+  narrow the `eventTypeId` branch's index range as well; they were applied
+  after reading every booking of the event type. Results are unchanged,
+  including the order of equal starts and the meaning of `limit` 0 (no
+  limit), negative and fractional values. Without a limit a selector still
+  reads its whole range (narrowed by the dates), and the no-selector branch
+  still considers the 1000 most recently created bookings.
 
 ### Added
 
@@ -254,6 +271,9 @@ The internal email mutations keep their names and arguments, so jobs queued by
 
 ### Maintenance and documentation
 
+- The `listBookings` documentation states that `resourceId` matches a
+  booking's primary resource: a bundle is listed under its first resource
+  only, not under its other items (pools included).
 - The README states when presence releases a selection: an explicit leave
   releases it immediately, an abandoned one 10–20 s after its last heartbeat,
   plus scheduler latency.
@@ -296,6 +316,9 @@ The internal email mutations keep their names and arguments, so jobs queued by
   `makeInternalBookingAPI` wrapper with its component function's
   (`exportArgs()`, nested fields and optional flags included). The only
   allowed difference is a component `v.id(…)` taken as a string.
+- `listBookings` is compared with a copy of the 0.4.2 implementation over
+  randomized bookings with many equal starts, every selector, status, date
+  and limit combination, with the documents each call reads counted.
 
 ## 0.4.2 — 23 September 2026
 

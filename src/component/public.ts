@@ -1023,7 +1023,7 @@ export const deleteEventType = mutation({
     // Check for existing bookings
     const bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.id))
+      .withIndex("by_event_type_start", (q) => q.eq("eventTypeId", args.id))
       .first();
 
     if (bookings) {
@@ -1101,14 +1101,113 @@ export const getBookingByUid = query({
   },
 });
 
+type ListBookingsArgs = {
+  organizationId?: string;
+  resourceId?: string;
+  eventTypeId?: string;
+  status?: string;
+  dateFrom?: number;
+  dateTo?: number;
+};
+
+/**
+ * listBookings' selector as an index range in `order`, with `dateFrom` /
+ * `dateTo` narrowing `start`; null without a selector. As in the filters, an
+ * empty id selects nothing.
+ */
+function bookingsInRange(ctx: QueryCtx, args: ListBookingsArgs, order: "asc" | "desc") {
+  const { organizationId, resourceId, eventTypeId, dateFrom, dateTo } = args;
+  const bookings = ctx.db.query("bookings");
+  if (organizationId) {
+    return bookings
+      .withIndex("by_org_start", (q) => {
+        const byOrg = q.eq("organizationId", organizationId);
+        const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
+        return dateTo !== undefined ? from.lte("start", dateTo) : from;
+      })
+      .order(order);
+  }
+  if (resourceId) {
+    return bookings
+      .withIndex("by_resource_start", (q) => {
+        const byResource = q.eq("resourceId", resourceId);
+        const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
+        return dateTo !== undefined ? from.lte("start", dateTo) : from;
+      })
+      .order(order);
+  }
+  if (eventTypeId) {
+    return bookings
+      .withIndex("by_event_type_start", (q) => {
+        const byEventType = q.eq("eventTypeId", eventTypeId);
+        const from = dateFrom !== undefined ? byEventType.gte("start", dateFrom) : byEventType;
+        return dateTo !== undefined ? from.lte("start", dateTo) : from;
+      })
+      .order(order);
+  }
+  return null;
+}
+
+function matchesListing(booking: Doc<"bookings">, args: ListBookingsArgs): boolean {
+  // The ids that did not pick the index still narrow the result — a caller
+  // asking for one resource's bookings of one event type must not get that
+  // resource's bookings of every event type. (Redundant for the indexed id.)
+  if (args.organizationId && booking.organizationId !== args.organizationId) return false;
+  if (args.resourceId && booking.resourceId !== args.resourceId) return false;
+  if (args.eventTypeId && booking.eventTypeId !== args.eventTypeId) return false;
+  // Hide provisional reservations from regular booking lists unless explicitly requested.
+  if (args.status ? booking.status !== args.status : booking.status === "provisional") return false;
+  // Redundant for the index ranges, still needed for the no-selector branch.
+  if (args.dateFrom !== undefined && !(booking.start >= args.dateFrom)) return false;
+  if (args.dateTo !== undefined && !(booking.start <= args.dateTo)) return false;
+  return true;
+}
+
+/**
+ * The first `limit` matching bookings of `rows` (newest `start` first),
+ * reading no further than needed. With `oldestFirstTies`, equal starts come
+ * out oldest first although `rows` yields them newest first: each group is
+ * buffered, so the rest of the group at the cut is read as well.
+ */
+async function firstMatching(
+  rows: AsyncIterable<Doc<"bookings">>,
+  args: ListBookingsArgs,
+  limit: number,
+  oldestFirstTies: boolean
+): Promise<Doc<"bookings">[]> {
+  const result: Doc<"bookings">[] = [];
+  let group: Doc<"bookings">[] = [];
+  for await (const booking of rows) {
+    if (group.length > 0 && booking.start !== group[0].start) {
+      result.push(...group.reverse());
+      group = [];
+      if (result.length >= limit) break;
+    }
+    if (!matchesListing(booking, args)) continue;
+    if (oldestFirstTies) group.push(booking);
+    else if (result.push(booking) >= limit) break;
+  }
+  result.push(...group.reverse());
+  return result.slice(0, limit);
+}
+
 /**
  * Lists bookings, newest `start` first, hiding provisional reservations
  * unless `status` asks for them.
  *
- * Pass `organizationId` or `resourceId`: those branches read the
- * `by_org_start` / `by_resource_start` indexes, so `dateFrom` / `dateTo`
- * narrow the index range itself and the scan is proportional to the window.
- * The `eventTypeId` branch uses `by_event_type` and range-filters in JS.
+ * Pass `organizationId`, `resourceId` or `eventTypeId` (tried in that order):
+ * the branch reads the `by_org_start` / `by_resource_start` /
+ * `by_event_type_start` index, so `dateFrom` / `dateTo` narrow the index range
+ * itself and the scan is proportional to the window. With a positive integer
+ * `limit` the scan also stops once `limit` bookings match, so it reads the
+ * limit plus the rows the other filters skip (for `eventTypeId`, plus the rest
+ * of the bookings sharing the last one's `start`). Without a limit it reads
+ * the whole range. Other `limit` values keep their earlier meaning (0: no
+ * limit). Bookings with equal `start` come newest-created first, except in
+ * the `eventTypeId` branch, where they come oldest-created first.
+ *
+ * `resourceId` matches a booking's primary resource: a bundle is listed under
+ * its first resource only, not under its other items (pools included).
  *
  * With no selector at all the scan is bounded: only the 1000 most recently
  * *created* bookings are considered (then filtered, sorted and limited). That
@@ -1127,79 +1226,30 @@ export const listBookings = query({
   },
   returns: v.array(bookingDoc),
   handler: async (ctx, args) => {
-    let bookings;
-    const { dateFrom, dateTo } = args;
+    const { limit } = args;
+    // The eventTypeId branch used to read `by_event_type` (creation order) and
+    // then sort by start, so its equal starts come oldest first.
+    const oldestFirstTies = !args.organizationId && !args.resourceId && !!args.eventTypeId;
 
-    // Use the most specific index available
-    if (args.organizationId) {
-      const organizationId = args.organizationId;
-      bookings = await ctx.db
-        .query("bookings")
-        .withIndex("by_org_start", (q) => {
-          const byOrg = q.eq("organizationId", organizationId);
-          const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
-          return dateTo !== undefined ? from.lte("start", dateTo) : from;
-        })
-        .order("desc")
-        .collect();
-    } else if (args.resourceId) {
-      const resourceId = args.resourceId;
-      bookings = await ctx.db
-        .query("bookings")
-        .withIndex("by_resource_start", (q) => {
-          const byResource = q.eq("resourceId", resourceId);
-          const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
-          return dateTo !== undefined ? from.lte("start", dateTo) : from;
-        })
-        .order("desc")
-        .collect();
-    } else if (args.eventTypeId) {
-      bookings = await ctx.db
-        .query("bookings")
-        .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId!))
-        .collect();
-    } else {
-      // No selector: bounded scan of the most recently created bookings (see docstring).
-      bookings = await ctx.db.query("bookings").order("desc").take(1000);
+    if (limit !== undefined && Number.isInteger(limit) && limit > 0) {
+      const rows = bookingsInRange(ctx, args, "desc");
+      if (rows) return await firstMatching(rows, args, limit, oldestFirstTies);
     }
 
-    // The ids that did not pick the index still narrow the result — a caller
-    // asking for one resource's bookings of one event type must not get that
-    // resource's bookings of every event type. (Redundant for the indexed id.)
-    if (args.organizationId) {
-      bookings = bookings.filter((b) => b.organizationId === args.organizationId);
-    }
-    if (args.resourceId) {
-      bookings = bookings.filter((b) => b.resourceId === args.resourceId);
-    }
-    if (args.eventTypeId) {
-      bookings = bookings.filter((b) => b.eventTypeId === args.eventTypeId);
-    }
-
-    // Hide provisional reservations from regular booking lists unless explicitly requested.
-    if (!args.status) {
-      bookings = bookings.filter((b) => b.status !== "provisional");
-    }
-
-    if (args.status) {
-      bookings = bookings.filter((b) => b.status === args.status);
-    }
-    // Redundant for the org/resource branches (already an index range), still
-    // needed for the event-type and no-selector branches.
-    if (dateFrom !== undefined) {
-      bookings = bookings.filter((b) => b.start >= dateFrom);
-    }
-    if (dateTo !== undefined) {
-      bookings = bookings.filter((b) => b.start <= dateTo);
-    }
+    const range = bookingsInRange(ctx, args, oldestFirstTies ? "asc" : "desc");
+    // No selector: bounded scan of the most recently created bookings (see docstring).
+    let bookings = range
+      ? await range.collect()
+      : await ctx.db.query("bookings").order("desc").take(1000);
+    bookings = bookings.filter((booking) => matchesListing(booking, args));
 
     // Sort by start time descending (newest first). A no-op for the org/resource
     // branches (index order, stable sort keeps it); orders the other two.
     bookings.sort((a, b) => b.start - a.start);
 
     // Apply limit
-    if (args.limit) {
-      bookings = bookings.slice(0, args.limit);
+    if (limit) {
+      bookings = bookings.slice(0, limit);
     }
 
     return bookings;
