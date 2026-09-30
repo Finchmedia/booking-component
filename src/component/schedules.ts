@@ -105,6 +105,29 @@ function assertValidCustomHours(
   assertNonOverlappingWindows(customHours, "customHours");
 }
 
+/**
+ * The override types a write accepts (0.5.0). Rows stored earlier with
+ * another type stay readable; they fall through to the weekly hours.
+ */
+const overrideTypeValidator = v.union(v.literal("unavailable"), v.literal("custom"));
+
+/**
+ * A "custom" override needs at least one window: without one it used to
+ * fall through to the weekly hours, reopening a day meant to be changed.
+ * Checked on the override a write leaves behind.
+ */
+function assertCustomHoursPresent(
+  type: string,
+  customHours: Array<{ startTime: string; endTime: string }> | undefined
+): void {
+  if (type === "custom" && !customHours?.length) {
+    throwBookingError(
+      "INVALID_INPUT",
+      'Invalid date override: type "custom" needs customHours with at least one window'
+    );
+  }
+}
+
 // ============================================
 // SCHEDULE QUERIES
 // ============================================
@@ -371,11 +394,17 @@ export const getDateOverride = query({
 // DATE OVERRIDE MUTATIONS
 // ============================================
 
+/**
+ * Creates the override of a schedule's date, or replaces the one stored for
+ * that date. Rejects an impossible date, windows that are malformed or
+ * overlap, and "custom" without customHours (INVALID_INPUT); `type` accepts
+ * "unavailable" and "custom" only.
+ */
 export const createDateOverride = mutation({
   args: {
     scheduleId: v.id("schedules"),
     date: v.string(),
-    type: v.string(), // "unavailable" | "custom"
+    type: overrideTypeValidator,
     customHours: v.optional(
       v.array(
         v.object({
@@ -392,6 +421,7 @@ export const createDateOverride = mutation({
     if (args.customHours !== undefined) {
       assertValidCustomHours(args.customHours);
     }
+    assertCustomHoursPresent(args.type, args.customHours);
 
     // Check for existing override on this date
     const existing = await ctx.db
@@ -418,10 +448,16 @@ export const createDateOverride = mutation({
   },
 });
 
+/**
+ * Changes an override's type or hours, with the checks of
+ * createDateOverride. "custom" without hours is checked on the merged
+ * override: a change of either field must leave a "custom" override with at
+ * least one window.
+ */
 export const updateDateOverride = mutation({
   args: {
     overrideId: v.id("date_overrides"),
-    type: v.optional(v.string()),
+    type: v.optional(overrideTypeValidator),
     customHours: v.optional(
       v.array(
         v.object({
@@ -440,6 +476,9 @@ export const updateDateOverride = mutation({
     const override = await ctx.db.get(args.overrideId);
     if (!override) {
       throwBookingError("DATE_OVERRIDE_NOT_FOUND", "Date override not found");
+    }
+    if (args.type !== undefined || args.customHours !== undefined) {
+      assertCustomHoursPresent(args.type ?? override.type, args.customHours ?? override.customHours);
     }
 
     const updates: Partial<WithoutSystemFields<Doc<"date_overrides">>> = {};

@@ -1370,7 +1370,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           customHours?: Array<{ endTime: string; startTime: string }>;
           date: string;
           scheduleId: string;
-          type: string;
+          type: "unavailable" | "custom";
         },
         string,
         Name
@@ -1536,7 +1536,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         {
           customHours?: Array<{ endTime: string; startTime: string }>;
           overrideId: string;
-          type?: string;
+          type?: "unavailable" | "custom";
         },
         string,
         Name

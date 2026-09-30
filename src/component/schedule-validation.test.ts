@@ -577,28 +577,48 @@ describe("createDateOverride: customHours validation", () => {
     expect(await effectiveSlots("ovr", MONDAY_DATE)).toEqual(range(40, 48));
   });
 
-  test("customHours is optional and an empty array is validated vacuously", async () => {
-    await t.mutation(api.schedules.createDateOverride, {
-      scheduleId,
-      date: MONDAY_DATE,
-      type: "custom",
-      customHours: [],
-    });
+  test('"custom" needs at least one window; "unavailable" needs none (0.5.0)', async () => {
+    // Until 0.4.3 both were stored and fell through to the weekly hours.
+    for (const customHours of [[], undefined]) {
+      await expect(
+        t.mutation(api.schedules.createDateOverride, { scheduleId, date: MONDAY_DATE, type: "custom", customHours })
+      ).rejects.toThrow('Invalid date override: type "custom" needs customHours with at least one window');
+    }
+    expect(await listOverrides(scheduleId)).toEqual([]);
+    // CONTROL: "unavailable" without customHours.
     await t.mutation(api.schedules.createDateOverride, {
       scheduleId,
       date: "2027-03-09",
       type: "unavailable",
     });
-
-    const overrides = await listOverrides(scheduleId);
-    expect(overrides.map((o) => [o.date, o.type, o.customHours])).toEqual([
-      [MONDAY_DATE, "custom", []],
+    expect((await listOverrides(scheduleId)).map((o) => [o.date, o.type, o.customHours])).toEqual([
       ["2027-03-09", "unavailable", undefined],
     ]);
-    // An empty customHours list is accepted and falls through to the weekly
-    // hours (Monday 09:00–17:00); "unavailable" needs no customHours at all.
-    expect(await effectiveSlots("ovr", MONDAY_DATE)).toEqual(range(36, 68));
     expect(await effectiveSlots("ovr", "2027-03-09")).toEqual([]);
+  });
+
+  test('a "custom" row without hours stored before 0.5.0 still reads as the weekly hours', async () => {
+    await t.run(async (ctx) => {
+      await ctx.db.insert("date_overrides", { scheduleId, date: MONDAY_DATE, type: "custom", customHours: [] });
+      await ctx.db.insert("date_overrides", { scheduleId, date: "2027-03-15", type: "holiday" });
+    });
+    expect(await effectiveSlots("ovr", MONDAY_DATE)).toEqual(range(36, 68));
+    expect(await effectiveSlots("ovr", "2027-03-15")).toEqual(range(36, 68));
+  });
+
+  test("types other than unavailable and custom are rejected by the argument validator", async () => {
+    for (const type of ["holiday", "", "Custom"]) {
+      await expect(
+        t.mutation(api.schedules.createDateOverride, {
+          scheduleId,
+          date: MONDAY_DATE,
+          // @ts-expect-error -- not an override type
+          type,
+          customHours: [{ startTime: "10:00", endTime: "12:00" }],
+        })
+      ).rejects.toThrow("Validator error");
+    }
+    expect(await listOverrides(scheduleId)).toEqual([]);
   });
 
   test("the upsert path validates before patching an existing override", async () => {
@@ -713,6 +733,36 @@ describe("updateDateOverride: customHours validation", () => {
       })
     );
     expect(missing).toContain("Date override not found");
+  });
+
+  test('the "custom" rule applies to the merged override', async () => {
+    const message = 'Invalid date override: type "custom" needs customHours with at least one window';
+    // Emptying the hours of a "custom" override.
+    await expect(t.mutation(api.schedules.updateDateOverride, { overrideId, customHours: [] })).rejects.toThrow(message);
+    // Turning an override without hours into "custom".
+    await t.mutation(api.schedules.updateDateOverride, { overrideId, type: "unavailable", customHours: [] });
+    await expect(t.mutation(api.schedules.updateDateOverride, { overrideId, type: "custom" })).rejects.toThrow(message);
+    // CONTROLS: the type together with hours, and a type change that keeps stored hours.
+    await t.mutation(api.schedules.updateDateOverride, {
+      overrideId,
+      type: "custom",
+      customHours: [{ startTime: "13:00", endTime: "14:00" }],
+    });
+    await t.mutation(api.schedules.updateDateOverride, { overrideId, type: "unavailable" });
+    await t.mutation(api.schedules.updateDateOverride, { overrideId, type: "custom" });
+    expect(await effectiveSlots("ovr", MONDAY_DATE)).toEqual(range(52, 56));
+  });
+
+  test("a patch of a row with a type stored before 0.5.0 keeps working", async () => {
+    await t.run(async (ctx) => {
+      await ctx.db.patch(overrideId, { type: "holiday" });
+    });
+    await t.mutation(api.schedules.updateDateOverride, { overrideId, customHours: [] });
+    expect((await listOverrides(scheduleId))[0]).toMatchObject({ type: "holiday", customHours: [] });
+    await expect(
+      // @ts-expect-error -- not an override type
+      t.mutation(api.schedules.updateDateOverride, { overrideId, type: "holiday" })
+    ).rejects.toThrow("Validator error");
   });
 
   test("a valid customHours patch replaces the window", async () => {

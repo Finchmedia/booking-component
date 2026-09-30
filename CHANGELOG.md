@@ -122,6 +122,14 @@
   `event_type_config` audit check (it now also lists fractional minutes and a
   horizon of 0) and repair the rows it lists before provisioning scripts
   re-run `createEventType`, which checks every setting it passes.
+- Date overrides: `createDateOverride` and `updateDateOverride` take `type:
+  "unavailable" | "custom"` (other strings fail argument validation, and the
+  generated types narrow), and a `custom` override needs at least one window
+  (`INVALID_INPUT`), also after an update of either field. 0.4.3 stored
+  other types and hour-less `custom` overrides, which fall through to the
+  weekly hours; stored rows still read that way, and the
+  `date_override_config` audit check lists them. Replace them with
+  `unavailable` or with hours.
 
 ### Added
 

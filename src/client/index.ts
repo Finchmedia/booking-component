@@ -565,7 +565,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       args: {
         scheduleId: v.string(),
         date: v.string(),
-        type: v.string(),
+        type: v.union(v.literal("unavailable"), v.literal("custom")),
         customHours: v.optional(
           v.array(
             v.object({

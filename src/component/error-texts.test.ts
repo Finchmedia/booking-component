@@ -523,6 +523,8 @@ describe("configuration writes and arguments", () => {
         t.mutation(api.public.updateEventType, { id: seed.eventTypeId, lengthInMinutesOptions: [30, 90] }),
       "updateEventType: negative buffer": () => t.mutation(api.public.updateEventType, { id: seed.eventTypeId, bufferBefore: -5 }),
       "updateEventType: zero horizon": () => t.mutation(api.public.updateEventType, { id: seed.eventTypeId, maxFutureMinutes: 0 }),
+      "createDateOverride: custom without hours": () =>
+        t.mutation(api.schedules.createDateOverride, { scheduleId: scheduleDocId, date: TUESDAY, type: "custom" }),
       "audit: limit 0": () => t.query(api.maintenance.audit, { check: "f10_weekday", limit: 0 }),
       "sweepOrphanedHolds: foreign cursor": () =>
         t.mutation(api.presence.sweepOrphanedHolds, { cursor: "not-a-cursor", limit: 10, dryRun: true }),
@@ -579,6 +581,8 @@ describe("configuration writes and arguments", () => {
         coded("INVALID_INPUT", "Invalid lengthInMinutes 60: expected one of lengthInMinutesOptions (30, 90)"),
       "updateEventType: negative buffer": coded("INVALID_INPUT", "Invalid bufferBefore -5: expected a number of minutes of 0 or more"),
       "updateEventType: zero horizon": coded("INVALID_INPUT", "Invalid maxFutureMinutes 0: expected a number of minutes greater than 0"),
+      "createDateOverride: custom without hours":
+        coded("INVALID_INPUT", 'Invalid date override: type "custom" needs customHours with at least one window'),
       "audit: limit 0": coded("INVALID_INPUT", "limit must be an integer from 1 to 500"),
       "sweepOrphanedHolds: foreign cursor": coded("INVALID_INPUT", "Invalid sweep cursor"),
     });
