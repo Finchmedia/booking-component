@@ -11,6 +11,7 @@ import {
   makeFunctionReference,
   mutationGeneric,
   queryGeneric,
+  type FunctionReference,
 } from "convex/server";
 import { v } from "convex/values";
 import { convexTest } from "convex-test";
@@ -41,7 +42,8 @@ function resolved(props: { publicApi: PublicBookingAPI; adminApi?: Partial<Admin
   return result.current;
 }
 
-const nameOf = (api: BookingAPI, key: keyof BookingAPI) => getFunctionName(api[key]!);
+const nameOf = (api: BookingAPI, key: keyof BookingAPI) =>
+  getFunctionName(api[key] as FunctionReference<"query" | "mutation">);
 
 function stubClient() {
   const sent: string[] = [];
@@ -71,6 +73,16 @@ describe("operation lists", () => {
   });
 });
 
+const BOOKING_ARGS = {
+  eventTypeId: "e",
+  resourceId: "r",
+  start: 0,
+  end: 3_600_000,
+  timezone: "UTC",
+  booker: { name: "Ada", email: "ada@example.com" },
+  location: { type: "address" },
+};
+
 describe("generated publicApi and adminApi", () => {
   it("resolves every admin operation to admin:<name> and every public one to public:<name>", () => {
     // The generated proxies report no members; routing must not depend on it
@@ -94,7 +106,7 @@ describe("generated publicApi and adminApi", () => {
       const createBooking = useMutation(bookingApi.createBooking);
       return createElement("div", null,
         createElement("button", { onClick: () => void createResource({ id: "room" }) }, "resource"),
-        createElement("button", { onClick: () => void createBooking({}) }, "booking"));
+        createElement("button", { onClick: () => void createBooking(BOOKING_ARGS) }, "booking"));
     }
     render(createElement(ConvexProvider, { client },
       createElement(BookingProvider, {
@@ -112,7 +124,11 @@ describe("generated publicApi and adminApi", () => {
     const host = convexTest(defineSchema({}), {
       "./host/_generated/api.js": async () => ({}),
       "./host/public.ts": async () => ({
-        getEventType: queryGeneric({ args: {}, returns: v.string(), handler: async () => "public getEventType" }),
+        getEventType: queryGeneric({
+          args: { eventTypeId: v.string() },
+          returns: v.string(),
+          handler: async () => "public getEventType",
+        }),
       }),
       "./host/admin.ts": async () => ({
         createResource: mutationGeneric({
@@ -121,13 +137,17 @@ describe("generated publicApi and adminApi", () => {
           handler: async () => "admin createResource",
         }),
         // Same name as a public operation: must not be picked for public calls
-        getEventType: queryGeneric({ args: {}, returns: v.string(), handler: async () => "admin getEventType" }),
+        getEventType: queryGeneric({
+          args: { eventTypeId: v.string() },
+          returns: v.string(),
+          handler: async () => "admin getEventType",
+        }),
       }),
     });
     const merged = resolved({ publicApi: api.public, adminApi: api.admin });
 
     await expect(host.mutation(merged.createResource!, { id: "room" })).resolves.toBe("admin createResource");
-    await expect(host.query(merged.getEventType, {})).resolves.toBe("public getEventType");
+    await expect(host.query(merged.getEventType, { eventTypeId: "e" })).resolves.toBe("public getEventType");
   });
 
   it("routes admin operations to a generated adminApi next to a plain-object publicApi", () => {

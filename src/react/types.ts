@@ -15,7 +15,8 @@ export interface BookingFormData {
   notes?: string;
 }
 
-// Complete booking object (matches extended DB schema)
+// A booking as the React components use it. The component's booking documents
+// fit it; they carry more fields.
 export interface Booking {
   _id: string;
   uid: string;
@@ -24,15 +25,13 @@ export interface Booking {
   start: number;
   end: number;
   timezone: string;
-  /** "rescheduled" is deprecated: it is never stored; a moved booking is "cancelled". */
-  status:
-    | "provisional"
-    | "pending"
-    | "confirmed"
-    | "cancelled"
-    | "completed"
-    | "declined"
-    | "rescheduled";
+  /**
+   * The stored status, a string like the component's: "provisional",
+   * "pending", "confirmed", "cancelled", "completed" or "declined".
+   * "rescheduled" is deprecated: it is never stored; a moved booking is
+   * "cancelled".
+   */
+  status: string;
   bookerName: string;
   bookerEmail: string;
   bookerPhone?: string;

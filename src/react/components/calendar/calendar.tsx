@@ -13,6 +13,7 @@ import { eventDeletedError } from "../../hooks/use-booking-validation.js";
 import { useIntersectionObserver } from "../../hooks/use-intersection-observer.js";
 import { fromLocalFields, toLocalMidnight, todayIn } from "../../utils/civil-date.js";
 import { effectiveSlotInterval } from "../../../shared/durations.js";
+import type { EventTypeView } from "../../contract.js";
 
 interface CalendarProps {
   resourceId: string;
@@ -61,9 +62,7 @@ export const Calendar: React.FC<CalendarProps> = (props) => {
 };
 
 // Inner component: all hooks called unconditionally (no early return before hooks)
-const CalendarContent: React.FC<
-  CalendarProps & { eventType: NonNullable<ReturnType<typeof useQuery>> }
-> = ({
+const CalendarContent: React.FC<CalendarProps & { eventType: EventTypeView }> = ({
   resourceId,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- F13: slot queries do not send the event type yet (0.5.0)
   eventTypeId: _eventTypeId,
@@ -88,7 +87,7 @@ const CalendarContent: React.FC<
   // Loaded data
   eventType,
 }) => {
-  const isTimezoneLocked = eventType?.lockTimeZoneToggle || false;
+  const isTimezoneLocked = eventType.lockTimeZoneToggle || false;
 
   // Use controlled duration from props
   const eventLength = selectedDuration;

@@ -5,147 +5,13 @@
 
 import { createContext, useContext, useMemo } from "react";
 import type { ReactNode } from "react";
-import type { FunctionReference } from "convex/server";
+import type {
+  AdminBookingAPI,
+  BookingAPI,
+  PublicBookingAPI,
+} from "./contract.js";
 
-// ============================================
-// TYPE HELPERS
-// ============================================
-
-type QueryReference = FunctionReference<"query", "public", any, any>;
-type MutationReference = FunctionReference<"mutation", "public", any, any>;
-
-// ============================================
-// PUBLIC BOOKING API
-// Functions available for anonymous/public booking flow
-// ============================================
-
-/**
- * References to your host's public booking functions.
- * Used by: Booker, Calendar, public booking pages
- *
- * Passing a reference does not grant or restrict access: any client can call
- * any exported Convex function. Your host functions enforce authorization.
- * Booking reads (getBooking, getBookingByUid, getBookingByToken) return the
- * booking's contact details and `managementToken`. Check the management token
- * or the caller's ownership in your host function, and never return
- * `managementToken` to anonymous callers.
- */
-export interface PublicBookingAPI {
-  // Event Types (Read-only)
-  getEventType: QueryReference;
-  getEventTypeBySlug: QueryReference;
-  listEventTypes: QueryReference;
-
-  // Availability (Read-only)
-  getAvailability: QueryReference;
-  getMonthAvailability: QueryReference;
-  getDaySlots: QueryReference;
-
-  // Bookings (Create + Read; host functions check the token or ownership)
-  createBooking: MutationReference;
-  getBooking: QueryReference;
-  getBookingByUid: QueryReference;
-  getBookingByToken: QueryReference;
-
-  // Booking Management (Token-based)
-  cancelBookingByToken: MutationReference;
-  rescheduleBookingByToken: MutationReference;
-
-  // Resources (Read-only)
-  getResource: QueryReference;
-  listResources: QueryReference;
-
-  // Resource ↔ Event Type Mapping (Read-only)
-  getEventTypesForResource: QueryReference;
-  hasResourceEventTypeLink: QueryReference;
-
-  // Schedules (Read-only for display)
-  getEffectiveAvailability: QueryReference;
-
-  // Presence (Session-based, no strict auth)
-  heartbeat: MutationReference;
-  leave: MutationReference;
-  getPresence: QueryReference;
-  getDatePresence: QueryReference;
-}
-
-// ============================================
-// ADMIN BOOKING API
-// Functions requiring authentication + admin role
-// ============================================
-
-/**
- * References to your host's administration functions.
- * Used by: Admin dashboard, management pages
- *
- * Your host functions must check authentication and permissions: omitting
- * these references from a page does not stop a client from calling them.
- */
-export interface AdminBookingAPI {
-  // Event Types (CRUD)
-  createEventType: MutationReference;
-  updateEventType: MutationReference;
-  deleteEventType: MutationReference;
-  toggleEventTypeActive: MutationReference;
-
-  // Bookings (Admin operations)
-  createReservation: MutationReference;
-  listBookings: QueryReference;
-  cancelReservation: MutationReference;
-
-  // Resources (CRUD)
-  createResource: MutationReference;
-  updateResource: MutationReference;
-  deleteResource: MutationReference;
-  toggleResourceActive: MutationReference;
-
-  // Resource ↔ Event Type Mapping (Read + Write)
-  getResourcesForEventType: QueryReference;
-  getResourceIdsForEventType: QueryReference;
-  getEventTypeIdsForResource: QueryReference;
-  linkResourceToEventType: MutationReference;
-  unlinkResourceFromEventType: MutationReference;
-  setResourcesForEventType: MutationReference;
-  setEventTypesForResource: MutationReference;
-
-  // Schedules (CRUD)
-  getSchedule: QueryReference;
-  listSchedules: QueryReference;
-  getDefaultSchedule: QueryReference;
-  createSchedule: MutationReference;
-  updateSchedule: MutationReference;
-  deleteSchedule: MutationReference;
-  listDateOverrides: QueryReference;
-  createDateOverride: MutationReference;
-  deleteDateOverride: MutationReference;
-
-  // Multi-Resource Booking
-  checkMultiResourceAvailability: QueryReference;
-  createMultiResourceBooking: MutationReference;
-  getBookingWithItems: QueryReference;
-  cancelMultiResourceBooking: MutationReference;
-
-  // Hooks (State machine)
-  registerHook: MutationReference;
-  unregisterHook: MutationReference;
-  transitionBookingState: MutationReference;
-  getBookingHistory: QueryReference;
-
-  // Presence (Admin view)
-  getActivePresenceCount: QueryReference;
-}
-
-// ============================================
-// MERGED API TYPE
-// The combined API available through useBookingAPI()
-// ============================================
-
-/**
- * Combined Booking API type.
- * Merges PublicBookingAPI with optional AdminBookingAPI functions.
- * Components access functions through this unified interface.
- */
-export type BookingAPI = PublicBookingAPI & Partial<AdminBookingAPI>;
+export type { AdminBookingAPI, BookingAPI, PublicBookingAPI } from "./contract.js";
 
 // ============================================
 // OPERATION OWNERSHIP
@@ -247,6 +113,11 @@ export interface BookingProviderProps {
    * References to your host's public booking functions, usually the generated
    * `api.public`. Required for all booking flows.
    *
+   * The 11 operations the components call are required and type-checked: each
+   * host function must accept exactly the arguments the components send and
+   * return at least the fields they read (see `BookingUIOperations`). The other
+   * public operations are optional.
+   *
    * @example
    * // In your convex/public.ts (each function checks its own access rules):
    * export const getEventType = publicQuery({ ... });
@@ -341,9 +212,14 @@ export function BookingProvider({
   // Note: Spreading Proxy objects (like api.public) doesn't work - it loses the Proxy behavior
   const mergedApi = useMemo<BookingAPI>(
     () => {
+      // The operations the components call are typed as FunctionReference_future
+      // in PublicBookingAPI, which checks host arguments the way Convex
+      // validators do; convex-helpers' cached useQuery accepts only a plain
+      // FunctionReference. BookingAPI holds the same references as plain ones.
+      const target = publicApi as unknown as BookingAPI;
       // Without adminApi every name resolves from publicApi (admin names: deprecated)
-      if (!adminApi) return publicApi;
-      return new Proxy(publicApi as BookingAPI, {
+      if (!adminApi) return target;
+      return new Proxy(target, {
         get(target, prop) {
           if (PUBLIC_KEYS.has(prop)) {
             // A plain-object adminApi's own property still overrides, as before;
@@ -375,8 +251,10 @@ export function BookingProvider({
  * Hook to access the booking API from within a BookingProvider.
  *
  * Returns the merged API object: public operations from publicApi, admin
- * operations from adminApi (see BookingProvider). Calling a reference does not
- * bypass authorization; your host functions decide who may run them.
+ * operations from adminApi (see BookingProvider). The operations the components
+ * call are typed with the contract's arguments and result views; the others
+ * are untyped. Calling a reference does not bypass authorization; your host
+ * functions decide who may run them.
  *
  * @throws Error if used outside of a BookingProvider
  *

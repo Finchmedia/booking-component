@@ -10,6 +10,23 @@ export {
   type BookingProviderProps,
 } from "./context.js";
 
+// Host contract: what the components send and read
+export type {
+  BookingUIOperations,
+  OptionalPublicOperations,
+  EventTypeView,
+  ResourceView,
+  BookingView,
+  DaySlotView,
+  PresenceView,
+  SlotHolderView,
+  AvailabilityContextArgs,
+  MonthAvailabilityArgs,
+  DaySlotsArgs,
+  CreateBookingArgs,
+  RescheduleBookingByTokenArgs,
+} from "./contract.js";
+
 // Types
 export type {
   BookingStep,

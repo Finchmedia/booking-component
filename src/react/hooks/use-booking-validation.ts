@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { EventType, Resource } from "../types.js";
+import type { EventTypeView, ResourceView } from "../contract.js";
 import { allowedDurations } from "../../shared/durations.js";
 
 export type ValidationErrorType =
@@ -63,8 +63,8 @@ export function eventDeletedError(resourceId: string): ValidationError {
  * @returns Validation result with status and optional error
  */
 export function useBookingValidation(
-  eventType: EventType | null | undefined,
-  resource: Resource | null | undefined,
+  eventType: EventTypeView | null | undefined,
+  resource: ResourceView | null | undefined,
   hasLink: boolean | null | undefined,
   selectedDuration: number,
   resourceId: string

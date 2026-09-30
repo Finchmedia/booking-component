@@ -8,6 +8,7 @@ import { formatDateInTimezone } from "../utils/date-utils.js";
 import { isCivilDate, monthGrid } from "../utils/civil-date.js";
 import { effectiveSlotInterval } from "../../shared/durations.js";
 import type { TimeSlot, MonthSlots } from "../types.js";
+import type { PresenceView } from "../contract.js";
 
 export interface UseConvexSlotsResult {
   monthSlots: MonthSlots;
@@ -75,7 +76,7 @@ function presenceDatesFor(starts: number[], durationMinutes: number): string[] {
 function hasPresenceConflict(
   slotTime: string,
   durationMinutes: number,
-  presence: Array<{ slot: string; user: string; updated: number }>,
+  presence: readonly PresenceView[],
   currentUserId: string
 ): boolean {
   const start = Date.parse(slotTime);
@@ -157,7 +158,7 @@ export const useConvexSlots = (
     if (!daySlots) return [];
 
     // Map and filter out past slots (slots that have already passed)
-    const formatted = (daySlots as any[])
+    const formatted = daySlots
       .map((slot) => ({
         time: slot.time,
         attendees: 0,

@@ -119,6 +119,22 @@ written for it that map that error to `null` keep working.)
 Like any Convex `useQuery` consumer, the Booker rethrows other query errors
 during rendering, so place it inside an error boundary.
 
+### Host contract
+
+`BookingProvider` checks `publicApi` at compile time. The components call 11
+of your public functions: `getEventType`, `getResource`,
+`hasResourceEventTypeLink`, `getMonthAvailability`, `getDaySlots`,
+`getDatePresence`, `getPresence`, `createBooking`, `rescheduleBookingByToken`,
+`heartbeat` and `leave`. Each must accept every argument the components send
+and require none they never send; extra optional arguments are fine. Each must
+return at least the fields the components read: `BookingUIOperations` lists
+the arguments and result views (`EventTypeView`, `ResourceView`,
+`BookingView`, …). The component's own documents pass, and so do redacted
+results that keep those fields. Return `null` from `getEventType` and
+`getResource` for a missing record. The other public operations are optional;
+no component calls `getBooking` or `getBookingByUid`, so you need not expose
+them.
+
 ## Backend integration
 
 Browser clients call **your host functions**. Those functions check access and

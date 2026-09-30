@@ -247,6 +247,64 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
 - The README states which booking rules the component guarantees and which
   policy stays with the host: authorization, notice and horizon, buffers,
   abuse limits and email recipients.
+### Upgrading
+
+- `BookingProvider` checks `publicApi` at compile time. The 11 functions the
+  components call (`getEventType`, `getResource`, `hasResourceEventTypeLink`,
+  `getMonthAvailability`, `getDaySlots`, `getDatePresence`, `getPresence`,
+  `createBooking`, `rescheduleBookingByToken`, `heartbeat`, `leave`) must
+  accept exactly the arguments the components send and return at least the
+  fields they read (`BookingUIOperations`). A mismatch is a type error that
+  names the operation; until 0.4.x it compiled and failed in the browser.
+  Fix the host function: declare every argument the components send (for
+  example `slotInterval` in `getDaySlots`, `eventTypeId` in `heartbeat`), make
+  arguments they never send optional, and return the view fields. The
+  generated `api.public` of the reference host compiles unchanged.
+- The other 10 public operations (`getBooking`, `getBookingByUid`,
+  `getBookingByToken`, `cancelBookingByToken`, `getEventTypeBySlug`,
+  `listEventTypes`, `getAvailability`, `listResources`,
+  `getEventTypesForResource`, `getEffectiveAvailability`) are optional: no
+  component calls them, so a host need not export the token-less booking reads.
+  Code that reads them from `useBookingAPI()` must handle `undefined`, or call
+  its own `api.public` references.
+- `useBookingAPI()` types the 11 operations with the contract's arguments and
+  result views (`EventTypeView`, `ResourceView`, `BookingView`, …) instead of
+  `any`. Code that reads other fields through them, such as `eventType.slug`,
+  uses its own generated references instead.
+- `Booking.status` is a `string`, like the stored field, so component and host
+  booking documents fit `Booking` without a status guard. An exhaustive
+  `switch` over the old union needs a default branch.
+- `onBookingComplete` receives a `BookingView`: `uid`, `status`, `start`,
+  `end`, `timezone` and `bookerName`, and every other `Booking` field as
+  optional. A callback annotated `(booking: Booking) => …` takes `BookingView`
+  or drops the annotation. `BookingSuccess` accepts a `BookingView`.
+
+### Fixed
+
+- The React integration keeps its types: Booker, Calendar and
+  `useConvexSlots` read typed results without casts, and a host reference whose
+  kind, visibility, arguments or result do not fit is rejected at compile time.
+  Host wrappers with extra optional arguments, broader argument types, the
+  component's own documents or redacted results with the view fields pass.
+
+### Added
+
+- `@mrfinch/booking/react` exports the contract types: `BookingUIOperations`,
+  `OptionalPublicOperations`, the views `EventTypeView`, `ResourceView`,
+  `BookingView`, `DaySlotView`, `PresenceView` and `SlotHolderView`, and the
+  argument types `MonthAvailabilityArgs`, `DaySlotsArgs`, `CreateBookingArgs`,
+  `RescheduleBookingByTokenArgs` and `AvailabilityContextArgs`. The
+  availability queries accept the optional `eventTypeId` and
+  `rescheduleContext` of `AvailabilityContextArgs`; a host that declares them
+  must accept these types, one that does not still fits.
+- `useBookingValidation` accepts the views, so a host DTO with the read fields
+  is enough.
+
+### Deprecated
+
+- `BookingValidationError`, `BookingValidationResult` and the `"rescheduled"`
+  status stay deprecated. `"rescheduled"` is documented on `Booking.status`
+  but is no longer part of its type; it was never stored.
 
 ## 0.4.3 — Unreleased
 
