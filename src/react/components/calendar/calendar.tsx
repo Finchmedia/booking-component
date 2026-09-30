@@ -9,6 +9,7 @@ import { CalendarSkeleton } from "./calendar-skeleton";
 import { useBookingAPI } from "../../context";
 import { useConvexSlots } from "../../hooks/use-convex-slots";
 import { useIntersectionObserver } from "../../hooks/use-intersection-observer";
+import { fromLocalFields, toLocalMidnight, todayIn } from "../../utils/civil-date";
 
 interface CalendarProps {
   resourceId: string;
@@ -20,7 +21,8 @@ interface CalendarProps {
   organizerName?: string; // Organizer name to display
   organizerAvatar?: string; // Organizer avatar URL
 
-  // Controlled state props (lifted to parent)
+  // Controlled state props (lifted to parent). Days are carriers: a Date's
+  // local calendar fields name the day, as in the Dates this calendar emits.
   selectedDate: Date | null;
   onDateChange: (date: Date | null) => void;
   currentMonth: Date;
@@ -102,21 +104,21 @@ const CalendarContent: React.FC<
     availableSlots,
     reservedSlots,
     isLoading,
-    fetchMonthSlots,
-    fetchSlots,
+    fetchMonthSlotsFor,
+    fetchSlotsForDate,
   } = useConvexSlots(
     resourceId,
     eventLength,
     slotInterval,
     allDurationOptions,
     hasIntersected,
-    timezone // Pass timezone for proper date string generation
+    timezone // Days are civil dates; only the deprecated fetchSlots reads the zone
   );
 
-  // Handle date selection
+  // Handle date selection: the clicked cell's label is the day queried
   const handleDateSelect = (date: Date) => {
     onDateChange(date);
-    fetchSlots(date);
+    fetchSlotsForDate(fromLocalFields(date));
   };
 
   // Navigation
@@ -138,23 +140,23 @@ const CalendarContent: React.FC<
   // Fetch month slots when calendar becomes visible or month changes.
   useEffect(() => {
     if (hasIntersected) {
-      fetchMonthSlots(new Date(monthYear, monthIndex, 1));
+      fetchMonthSlotsFor(monthYear, monthIndex + 1);
     }
-  }, [hasIntersected, monthYear, monthIndex, fetchMonthSlots]);
+  }, [hasIntersected, monthYear, monthIndex, fetchMonthSlotsFor]);
 
-  // Auto-select today's date when month slots are loaded
+  // Auto-select today (in the display zone) when month slots are loaded
   useEffect(() => {
     if (!selectedDate && Object.keys(monthSlots).length > 0) {
-      onDateChange(new Date());
+      onDateChange(toLocalMidnight(todayIn(timezone)));
     }
-  }, [monthSlots, selectedDate, onDateChange]);
+  }, [monthSlots, selectedDate, onDateChange, timezone]);
 
   // Fetch slots for selected date when it changes (including on mount with persisted date)
   useEffect(() => {
     if (selectedDate) {
-      fetchSlots(selectedDate);
+      fetchSlotsForDate(fromLocalFields(selectedDate));
     }
-  }, [selectedDate, fetchSlots]);
+  }, [selectedDate, fetchSlotsForDate]);
 
   return (
     <div

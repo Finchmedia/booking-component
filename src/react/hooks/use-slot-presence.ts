@@ -5,7 +5,8 @@ import { useBookingAPI } from "../context";
 import { getSessionId } from "../utils/session";
 
 /**
- * Checks if a specific slot is currently held by another user.
+ * Checks if a specific slot is currently held by another user: isLocked is
+ * true while any other session holds it, even if this session holds it too.
  * @param resourceId - The resource ID (e.g. "studio-a")
  * @param slotId - The ID of the slot to check
  */
@@ -29,13 +30,11 @@ export function useSlotPresence(resourceId: string, slotId: string) {
 
   // Logic:
   // 1. If presence list is empty -> Free
-  // 2. If most recent user is ME -> Free (for me)
-  // 3. If most recent user is OTHER -> Locked
+  // 2. If any other user holds the slot -> Locked, whoever sent the latest heartbeat
+  // 3. If only ME -> Free (for me)
 
-  const holdingUser = presence[0]; // List is sorted by `updated` desc
-  const isHeld = !!holdingUser;
-  const isHeldByMe = holdingUser?.user === myUserId;
-  const isHeldByOther = isHeld && !isHeldByMe;
+  const isHeldByMe = presence.some((holder: { user: string }) => holder.user === myUserId);
+  const isHeldByOther = presence.some((holder: { user: string }) => holder.user !== myUserId);
 
   return {
     isLocked: isHeldByOther, // The main flag for UI

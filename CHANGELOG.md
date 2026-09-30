@@ -179,6 +179,28 @@
   full-screen overlay offered a button that did nothing. The error no longer
   covers the success screen. While it is shown, a new booking cannot continue;
   reschedules are not blocked by the UI.
+- Calendar days no longer shift when the display time zone differs from the
+  browser's. A day's label, availability dot, queried date, heading and
+  highlight are the same calendar date in every browser zone. Before, a display
+  zone west of the browser (for example `America/New_York` viewed from Europe,
+  or rescheduling a booking stored in another zone) queried and booked the
+  previous day and disabled today, and DST months repeated a date. Today and
+  past days are judged in the display zone; the automatic selection is today
+  there, and the Booker opens on that month. Calendar days remain the
+  schedule's days; slot times are shown in the display zone.
+- "Reserved" slots compare instants: a slot is reserved exactly when another
+  session holds a 15-minute quantum that overlaps it. Presence is read for
+  every UTC date the day's slots and their duration cover. Before, one UTC date
+  was read and holds were matched by time of day, so days that span two UTC
+  dates (New Zealand and Australia, American evenings, windows around local
+  midnight) showed held slots as free and free slots as reserved.
+- `useSlotPresence` reports `isLocked` while any other session holds the slot
+  and `isHeldByMe` while this session does. Before, the latest heartbeat
+  decided, so a slot held by two sessions flickered between locked and free.
+- `getSessionId` no longer throws when `sessionStorage` is blocked, disabled
+  (`null`) or full, which crashed the Booker and the Calendar.
+- `useConvexSlots().fetchMonthSlots` requests the same range in every browser
+  zone; east of the display zone it was shifted by a day.
 
 ### Added
 
@@ -193,6 +215,10 @@
   `"reset-duration"`) and the exported `ValidationRecovery` type.
   `onEventTypeReset` and `onNavigate` on `Booker` and `BookingErrorDialog`
   receive it as an extra argument.
+- `CalendarDay.civilDate` (`"YYYY-MM-DD"`), always set by
+  `generateCalendarDays`. On `useConvexSlots`: `fetchSlotsForDate(date)` for a
+  `"YYYY-MM-DD"` date, `fetchMonthSlotsFor(year, month)` with `month` 1-12, and
+  `presenceIncomplete`.
 
 ### Deprecated
 
@@ -200,6 +226,10 @@
   `recovery` to your own routes instead. The unused `BookingValidationError` and
   `BookingValidationResult` types and the never-stored `"rescheduled"` booking
   status are deprecated too. All remain available.
+- `useConvexSlots().fetchSlots(date)` and `fetchMonthSlots(date)`: use
+  `fetchSlotsForDate` and `fetchMonthSlotsFor`. `fetchSlots` keeps its meaning,
+  the date of that instant in the hook's time zone, which is not the day a
+  calendar cell names when that zone is west of the browser's.
 
 ### Integration
 
@@ -220,6 +250,23 @@
   `fieldset` instead of `li` elements; `BookingErrorDialog` renders a native
   `dialog` (opened with `showModal()`) or an inline `role="alert"` instead of a
   fixed overlay; the Booker wraps its steps in a `display: contents` element.
+- Dates passed to and emitted by `Calendar` (`selectedDate`, `onDateChange`,
+  `currentMonth`) and `generateCalendarDays` are day carriers: their local
+  calendar fields name the day. The automatic selection emits local midnight of
+  today in the display zone instead of the current instant. If you query with
+  `fetchSlots(date)` yourself, switch to `fetchSlotsForDate(day.civilDate)`.
+- `useConvexSlots` reads presence once the day's slots have arrived, with up
+  to three `getDatePresence` queries (one per UTC date) instead of one. When
+  the slots and their duration span more dates, which needs bookings of about
+  a day or longer, it logs one warning, sets `presenceIncomplete` and shows no
+  holds from the dates it did not read. The booking mutation still checks
+  inventory.
+- `fetchSlotsForDate` and `fetchMonthSlotsFor` throw a `RangeError` for
+  impossible dates or months. `generateCalendarDays` and `fetchMonthSlots` do
+  the same for an invalid `Date` instead of producing "Invalid Date" keys.
+- Without usable `sessionStorage` the presence session ID is kept in memory,
+  so it changes on reload: until it expires (about 10 seconds), the visitor's
+  own earlier hold shows as another session's.
 
 ## 0.4.2 — 23 September 2026
 

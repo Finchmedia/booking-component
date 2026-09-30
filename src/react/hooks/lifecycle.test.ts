@@ -5,6 +5,9 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { useSlotHold } from "./use-slot-hold";
 import { useConvexSlots } from "./use-convex-slots";
 
+// Vitest runs in Node, but the package's tsconfig has no Node types.
+declare const process: { env: Record<string, string | undefined> };
+
 const mocks = vi.hoisted(() => ({
   heartbeat: vi.fn(async (_args: unknown) => undefined),
   leave: vi.fn(async (_args: unknown) => undefined),
@@ -112,28 +115,102 @@ describe("available slot lifecycle", () => {
     unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
+});
+
+// Query keys are civil dates, so they must not depend on the process
+// (browser) zone. Each case runs in several; the display zones are east and
+// west of some of them.
+const PROCESS_ZONES = [
+  "UTC", "Europe/Berlin", "America/New_York", "Pacific/Auckland", "America/Denver",
+  "Europe/London", "Europe/Helsinki", "Asia/Tokyo", "America/Los_Angeles",
+];
+const ORIGINAL_TZ = process.env.TZ;
+
+/** Arguments of the latest call to one query. */
+function lastQuery(reference: string) {
+  const calls = mocks.query.mock.calls.filter(([ref]) => ref === reference);
+  return calls[calls.length - 1]?.[1];
+}
+
+describe.each(PROCESS_ZONES)("slot query keys in process TZ %s", (zone) => {
+  beforeEach(() => {
+    process.env.TZ = zone;
+  });
+  afterEach(() => {
+    if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+    else process.env.TZ = ORIGINAL_TZ;
+  });
+
+  it("CONTROL: the process zone is in effect", () => {
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(zone);
+  });
 
   it("updates query inputs when resource, duration, month and timezone change", () => {
     const { result, rerender, unmount } = renderHook(
       ({ resource, duration, timezone, enabled }) => useConvexSlots(resource, duration, undefined, [30, 60], enabled, timezone),
       { initialProps: { resource: "room-a", duration: 30, timezone: "UTC", enabled: true } },
     );
-    const selected = new Date("2026-09-22T23:30:00Z");
     act(() => {
-      result.current.fetchSlots(selected);
-      result.current.fetchMonthSlots(new Date(2026, 8, 1));
+      result.current.fetchSlotsForDate("2026-09-22");
+      result.current.fetchMonthSlotsFor(2026, 9);
     });
     expect(mocks.query).toHaveBeenCalledWith("day", { resourceId: "room-a", date: "2026-09-22", eventLength: 30, slotInterval: 30 });
+    expect(mocks.query).toHaveBeenCalledWith("month", expect.objectContaining({ resourceId: "room-a", dateFrom: "2026-08-31", dateTo: "2026-10-04" }));
     rerender({ resource: "room-b", duration: 60, timezone: "Europe/Berlin", enabled: true });
     act(() => {
-      result.current.fetchSlots(selected);
-      result.current.fetchMonthSlots(new Date(2026, 9, 1));
+      result.current.fetchSlotsForDate("2026-09-23");
+      result.current.fetchMonthSlotsFor(2026, 10);
     });
     expect(mocks.query).toHaveBeenCalledWith("day", { resourceId: "room-b", date: "2026-09-23", eventLength: 60, slotInterval: 30 });
     expect(mocks.query).toHaveBeenCalledWith("month", expect.objectContaining({ resourceId: "room-b", eventLength: 60, dateFrom: "2026-09-28", dateTo: "2026-11-01" }));
+    // The display zone does not move a civil date
+    rerender({ resource: "room-b", duration: 60, timezone: "Pacific/Auckland", enabled: true });
+    expect(lastQuery("day")).toMatchObject({ date: "2026-09-23" });
     rerender({ resource: "room-b", duration: 60, timezone: "Europe/Berlin", enabled: false });
     expect(mocks.query).toHaveBeenCalledWith("day", "skip");
     expect(vi.getTimerCount()).toBe(0);
     unmount();
+  });
+
+  it("the month range is the month's weeks, whichever display zone is used", () => {
+    for (const timezone of ["Europe/Berlin", "America/Los_Angeles", "Pacific/Kiritimati"]) {
+      mocks.query.mockClear();
+      const { result, unmount } = renderHook(() => useConvexSlots("room", 60, undefined, [30, 60], true, timezone));
+      act(() => result.current.fetchMonthSlotsFor(2026, 10));
+      expect(lastQuery("month")).toMatchObject({ dateFrom: "2026-09-28", dateTo: "2026-11-01" });
+      // Months that start on a Monday and end on a Sunday: February 2027 and August 2027
+      act(() => result.current.fetchMonthSlotsFor(2027, 2));
+      expect(lastQuery("month")).toMatchObject({ dateFrom: "2027-02-01", dateTo: "2027-02-28" });
+      act(() => result.current.fetchMonthSlotsFor(2027, 8));
+      expect(lastQuery("month")).toMatchObject({ dateFrom: "2027-07-26", dateTo: "2027-09-05" });
+      unmount();
+    }
+  });
+
+  it("deprecated Date fetches keep their meaning: fetchSlots keys the instant in the display zone, fetchMonthSlots reads the local month", () => {
+    const { result, rerender } = renderHook(
+      ({ timezone }) => useConvexSlots("room", 60, undefined, [30, 60], true, timezone),
+      { initialProps: { timezone: "UTC" } },
+    );
+    const instant = new Date("2026-09-22T23:30:00Z");
+    act(() => result.current.fetchSlots(instant));
+    expect(lastQuery("day")).toMatchObject({ date: "2026-09-22" });
+    rerender({ timezone: "Europe/Berlin" });
+    act(() => {
+      result.current.fetchSlots(instant);
+      result.current.fetchMonthSlots(new Date(2026, 9, 1));
+    });
+    expect(mocks.query).toHaveBeenCalledWith("day", expect.objectContaining({ date: "2026-09-23" }));
+    expect(mocks.query).toHaveBeenCalledWith("month", expect.objectContaining({ dateFrom: "2026-09-28", dateTo: "2026-11-01" }));
+  });
+
+  it("rejects a date that is not YYYY-MM-DD", () => {
+    const { result } = renderHook(() => useConvexSlots("room", 60, undefined, [30, 60], true, "UTC"));
+    for (const date of ["", "2026-9-22", "2026-02-30"]) {
+      expect(() => result.current.fetchSlotsForDate(date)).toThrow(RangeError);
+    }
+    expect(() => result.current.fetchMonthSlotsFor(2026, 13)).toThrow(RangeError);
+    expect(() => result.current.fetchMonthSlots(new Date(NaN))).toThrow(RangeError);
+    expect(mocks.query).not.toHaveBeenCalledWith("day", expect.objectContaining({ date: "" }));
   });
 });

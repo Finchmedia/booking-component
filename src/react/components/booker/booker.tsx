@@ -11,6 +11,7 @@ import {
   type ValidationRecovery,
 } from "../../hooks/use-booking-validation";
 import { resolveBookingErrorMessage } from "../../utils/booking-error";
+import { toLocalMidnight, todayIn } from "../../utils/civil-date";
 import { Calendar, CalendarSkeleton } from "../calendar";
 import { BookingForm, type CurrentUser } from "../form/booking-form";
 import { BookingSuccess } from "../form/booking-success";
@@ -138,16 +139,19 @@ function BookerFlow({
   );
 
   // Calendar state (persists across navigation)
+  const [timezone, setTimezone] = useState<string>(
+    originalBooking?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+  );
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  // Open on the month that contains today in the display zone
+  const [currentMonth, setCurrentMonth] = useState<Date>(() =>
+    toLocalMidnight(todayIn(timezone))
+  );
   // Pre-populate duration from original booking if rescheduling
   const [requestedDuration, setSelectedDuration] = useState<number>(
     originalBooking
       ? Math.round((originalBooking.end - originalBooking.start) / 60000)
       : 60
-  );
-  const [timezone, setTimezone] = useState<string>(
-    originalBooking?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
   );
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
   // Confirm and success steps use the calendar's (browser) locale
