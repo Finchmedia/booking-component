@@ -116,33 +116,107 @@ connect your management pages to the returned booking UID and secret token.
   extensionless relative imports that plain webpack 5 and Rspack builds could
   not resolve ("Can't resolve './context'") are gone.
 
-The Booker and Calendar treat a `null` event type as deleted. The component's
-`getEventType` returns `null` for an unknown ID since 0.5.0, so a public wrapper
-can return its result as is. (0.4.x threw `Event type not found: <id>`; wrappers
-written for it that map that error to `null` keep working.)
+The Booker and Calendar treat a `null` event type as deleted, so your public
+`getEventType` must return `null` for a missing event type. The component's
+`getEventType` does so from 0.5.0: a wrapper that returns its result needs
+nothing more, and the 0.4.3 workaround that caught `Event type not found` can
+go. A wrapper that throws for a missing event type sends the Booker to your
+error boundary instead of its "deleted" notice.
 
 Like any Convex `useQuery` consumer, the Booker rethrows other query errors
 during rendering, so place it inside an error boundary.
 
 ### Host contract
 
-`BookingProvider` checks `publicApi` at compile time. The components call 11
-of your public functions: `getEventType`, `getResource`,
-`hasResourceEventTypeLink`, `getMonthAvailability`, `getDaySlots`,
-`getDatePresence`, `getPresence`, `createBooking`, `rescheduleBookingByToken`,
-`heartbeat` and `leave`. Each must accept every argument the components send
-and require none they never send; extra optional arguments are fine. Each must
-return at least the fields the components read: `BookingUIOperations` lists
-the arguments and result views (`EventTypeView`, `ResourceView`,
-`BookingView`, …). The component's own documents pass, and so do redacted
-results that keep those fields. Return `null` from `getEventType` and
-`getResource` for a missing record. The other public operations are optional;
-no component calls `getBooking` or `getBookingByUid`, so you need not expose
-them.
+`BookingProvider` checks `publicApi`, usually your generated `api.public`,
+against `PublicBookingAPI` at compile time. The components call the 11
+required functions below. Each must accept every argument listed, must not
+require any other, and must return at least the fields listed. Extra optional
+arguments and extra result fields are fine, so the component's own documents
+and redacted results both pass.
 
-`adminApi` supplies the admin operations and nothing else: without it,
-`useBookingAPI().createResource` and the other admin operations are
-`undefined`, and `publicApi` never stands in for them.
+| Required | Kind | Called by | Arguments the components send | Result fields read |
+| --- | --- | --- | --- | --- |
+| `getEventType` | query | Booker, Calendar | `eventTypeId` | `EventTypeView`, or `null` when missing |
+| `getResource` | query | Booker | `id` | `isActive`, or `null` when missing |
+| `hasResourceEventTypeLink` | query | Booker | `resourceId`, `eventTypeId` | `boolean` |
+| `getMonthAvailability` | query | Calendar (`useConvexSlots`) | `resourceId`, `dateFrom`, `dateTo`, `eventLength`, `slotInterval`; with `availabilityContext` also the optional `eventTypeId` and `rescheduleContext` | `MonthSlots`, a boolean per date |
+| `getDaySlots` | query | Calendar (`useConvexSlots`) | `resourceId`, `date`, `eventLength`, `slotInterval`; with `availabilityContext` also the optional `eventTypeId` and `rescheduleContext` | `time` of each slot |
+| `getDatePresence` | query | Calendar (`useConvexSlots`) | `resourceId`, `date` | `slot`, `user` of each hold |
+| `getPresence` | query | `useSlotPresence` hook | `resourceId`, `slot` | `user` of each hold |
+| `createBooking` | mutation | Booker | `eventTypeId`, `resourceId`, `start`, `end`, `timezone`, `booker`, `location` | `BookingView` |
+| `rescheduleBookingByToken` | mutation | Booker when rescheduling | `uid`, `token`, `newStart`, `newEnd` | `BookingView` |
+| `heartbeat` | mutation | Booker (`useSlotHold`) | `resourceId`, `slots`, `user`, `eventTypeId` (optional) | nothing |
+| `leave` | mutation | Booker (`useSlotHold`) | `resourceId`, `slots`, `user` | nothing |
+
+Arguments marked optional are not always sent: declare them with
+`v.optional(…)`. `EventTypeView` is `id`, `title` and `lengthInMinutes`, plus
+`description`, `lengthInMinutesOptions`, `slotInterval`, `locations`,
+`isActive` and `lockTimeZoneToggle` where set. `BookingView` is `uid`,
+`status`, `start`, `end`, `timezone` and `bookerName`; the Booker hands it to
+`onBookingComplete`, with whatever else your function returns.
+`BookingUIOperations` holds the same list as types.
+
+| Optional | Notes |
+| --- | --- |
+| `getEventTypeBySlug`, `listEventTypes`, `listResources`, `getEventTypesForResource`, `getAvailability`, `getEffectiveAvailability` | Not called by the components. |
+| `getBooking`, `getBookingByUid` | Not called. Authorized host code only: a UID is not a credential. |
+| `getBookingByToken`, `cancelBookingByToken` | Not called. Check the management token. |
+
+`publicApi` need not have the optional ones. `useBookingAPI()` returns them
+without argument types and as possibly `undefined`; call your own
+`api.public` references to keep their types.
+
+If `BookingProvider` rejects your `api.public`, check the gateway on its own
+with the exported contract type:
+
+```ts
+import type { PublicBookingAPI } from "@mrfinch/booking/react";
+import { api } from "@/convex/_generated/api";
+
+export const bookingPublicApi = api.public satisfies PublicBookingAPI;
+```
+
+The error names the function that does not fit, as in
+`The types of 'getDaySlots._fn' are incompatible`, and for arguments lists
+the keys it declares next to the keys the components send. One function at a
+time works too:
+`api.public.getDaySlots satisfies PublicBookingAPI["getDaySlots"]`. The error
+on the `BookingProvider` element itself can name
+`PublicBookingAPIWithAvailabilityContext` and a different function, because
+TypeScript tries both props variants. With `availabilityContext` on, check
+against `PublicBookingAPIWithAvailabilityContext`.
+
+### Admin gateway
+
+`adminApi`, usually your generated `api.admin`, supplies the operations of
+`AdminBookingAPI` (`createResource`, `listBookings`, `createSchedule`,
+`transitionBookingState`, …) and nothing else. Pass it only where admin
+operations are used:
+
+```tsx
+// app/admin/layout.tsx
+<BookingProvider publicApi={api.public} adminApi={api.admin}>
+  {children}
+</BookingProvider>
+```
+
+- Each operation comes from the gateway that owns it: public operations only
+  from `publicApi`, admin operations only from `adminApi`.
+- Without `adminApi`, `useBookingAPI().createResource` and the other admin
+  operations are `undefined`. `publicApi` never stands in for them.
+- A hand-built `adminApi` object never overrides a public operation, even one
+  it defines, and names outside both interfaces are not passed through. To
+  route a public operation to another function, pass a hand-built `publicApi`
+  object that lists the required operations one by one; a generated
+  `api.public` is a proxy and cannot be spread.
+- `useBookingAPI()` returns admin operations untyped, for components that take
+  them from the provider. In your own pages,
+  `useMutation(api.admin.createResource)` keeps your generated argument types.
+- The gateways choose which functions the UI calls; they are not access
+  control. Every admin function checks the caller's role and organization
+  itself, as in the
+  [authorization guide](https://convexbooking.dev/docs/authentication).
 
 ### Availability context (opt-in)
 
@@ -163,6 +237,14 @@ unchanged: the component frees the moved booking's own time only when the
 token matches it, and otherwise ignores it. Never turn it into
 `excludeBookingUid`, which trusts any UID and is meant for trusted server
 code, and never log or return either value.
+
+To turn it on, add both arguments to the two functions, pass
+`rescheduleContext` on as below, and deploy them before the page that sets
+`availabilityContext`: until then their validators reject the new arguments.
+The Booker takes the token from `originalBooking.managementToken`, which
+rescheduling already needs. If these functions accept `excludeBookingUid` from
+the browser today, remove it: with it any caller can make any booking's time
+show as free.
 
 ```ts
 export const getDaySlots = query({

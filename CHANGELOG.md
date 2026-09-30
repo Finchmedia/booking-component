@@ -258,8 +258,13 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   names the operation; until 0.4.x it compiled and failed in the browser.
   Fix the host function: declare every argument the components send (for
   example `slotInterval` in `getDaySlots`, `eventTypeId` in `heartbeat`), make
-  arguments they never send optional, and return the view fields. The
-  generated `api.public` of the reference host compiles unchanged.
+  arguments they never send optional, and return the view fields; the README's
+  host contract table lists them. To find the function, check the gateway on
+  its own with the exported contract type:
+  `api.public satisfies PublicBookingAPI` names it and lists its argument keys
+  next to the keys the components send; the error on `<BookingProvider>` can
+  name the opt-in type and a different function. The generated `api.public`
+  of the reference host compiles unchanged.
 - The other 10 public operations (`getBooking`, `getBookingByUid`,
   `getBookingByToken`, `cancelBookingByToken`, `getEventTypeBySlug`,
   `listEventTypes`, `getAvailability`, `listResources`,
@@ -271,12 +276,20 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   result views (`EventTypeView`, `ResourceView`, `BookingView`, …) instead of
   `any`. Code that reads other fields through them, such as `eventType.slug`,
   uses its own generated references instead.
+- `getEventType` must resolve to `null` for a missing event type
+  (`EventTypeView | null`); the Booker and Calendar then show it as deleted.
+  The component's `getEventType` now returns `null` itself, so a wrapper that
+  returns its result needs nothing more and the 0.4.3 workaround that caught
+  `Event type not found` can go. A wrapper that throws for a missing event
+  type sends the Booker to your error boundary.
 - Admin operations resolve only from `adminApi` and are `undefined` without
   it; `publicApi` no longer stands in for them (deprecated in 0.4.3). A
   plain-object `adminApi` no longer overrides public operations, and names
   outside `PublicBookingAPI` and `AdminBookingAPI` are no longer passed
   through. Pass `adminApi={api.admin}` wherever admin operations are used, and
-  call other functions through your own `api`.
+  call other functions through your own `api`. To route a public operation to
+  another function, pass a plain-object `publicApi` that lists the required
+  operations; a generated `api.public` cannot be spread.
 - `Booking.status` is a `string`, like the stored field, so component and host
   booking documents fit `Booking` without a status guard. An exhaustive
   `switch` over the old union needs a default branch.
@@ -289,6 +302,16 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   component threw plain errors, for which the Booker showed its generic
   message. To keep other wording, catch the error in your host function and
   rethrow your own `ConvexError`.
+- `BookingProvider`'s new `availabilityContext` is off by default; without it
+  nothing changes. Before you set it, add
+  `eventTypeId: v.optional(v.string())` and
+  `rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`
+  to your public `getDaySlots` and `getMonthAvailability`, pass
+  `rescheduleContext` on unchanged to the component's queries, and deploy
+  them before the page: until then their validators reject the new
+  arguments. `BookingProvider` rejects a `publicApi` without them at compile
+  time. If these functions accept `excludeBookingUid` from the browser,
+  remove it: any caller could make any booking's time show as free.
 
 ### Fixed
 
@@ -339,11 +362,23 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
 - `BookingValidationError`, `BookingValidationResult` and the `"rescheduled"`
   status stay deprecated. `"rescheduled"` is documented on `Booking.status`
   but is no longer part of its type; it was never stored.
+- `ValidationError.recoveryPath` and `useConvexSlots().fetchSlots` and
+  `fetchMonthSlots` stay deprecated and available (see 0.4.3).
+
+### Removed
+
+- `BookingProvider` no longer resolves admin operations from `publicApi`
+  (deprecated in 0.4.3), lets a plain-object `adminApi` override public
+  operations, or passes other names through; see Upgrading.
 
 ### Maintenance and documentation
 
 - `npm run lint` rejects `any` and the `no-unsafe-*` flows in the React sources
   (tests excepted). No exception is needed today.
+- The README lists the host contract per operation (required and optional,
+  the arguments the components send and the fields they read), shows the
+  `satisfies PublicBookingAPI` check, and describes the admin gateway and the
+  availability context opt-in.
 
 ## 0.4.3 — Unreleased
 
