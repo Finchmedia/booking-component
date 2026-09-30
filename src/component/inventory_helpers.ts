@@ -104,10 +104,7 @@ export async function reserveResourceSlots(
             q.eq("resourceId", request.resourceId).eq("date", date),
           )
           .unique();
-        const quantities = { ...(row?.slotQuantities ?? {}) } as Record<
-          string,
-          number
-        >;
+        const quantities: Record<string, number> = { ...row?.slotQuantities };
         for (const slot of slots) {
           const booked = quantities[slot] ?? 0;
           if (booked + quantity > capacity) {

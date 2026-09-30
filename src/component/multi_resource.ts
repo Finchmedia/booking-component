@@ -89,10 +89,7 @@ export const checkMultiResourceAvailability = query({
             )
             .unique();
 
-          const bookedQuantities = (quantityDoc?.slotQuantities ?? {}) as Record<
-            string,
-            number
-          >;
+          const bookedQuantities = quantityDoc?.slotQuantities ?? {};
 
           for (const slot of slots) {
             const booked = bookedQuantities[slot.toString()] ?? 0;
@@ -238,10 +235,7 @@ export const createMultiResourceBooking = mutation({
             )
             .unique();
 
-          const bookedQuantities = (quantityDoc?.slotQuantities ?? {}) as Record<
-            string,
-            number
-          >;
+          const bookedQuantities = quantityDoc?.slotQuantities ?? {};
 
           for (const slot of slots) {
             const booked = bookedQuantities[slot.toString()] ?? 0;

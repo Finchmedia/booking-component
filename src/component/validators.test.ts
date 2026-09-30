@@ -26,6 +26,7 @@ import type { Doc, Id, TableNames } from "./_generated/dataModel.js";
 import type { MutationCtx } from "./_generated/server.js";
 import { BOOKER, FIXED_NOW, ORG, TUESDAY, TZ, setup, utc } from "./setup.test.js";
 import { BOOKING_STATUSES } from "../shared/booking-status.js";
+import type { ComponentApi } from "./_generated/component.js";
 import {
   bookingDoc,
   bookingHistoryDoc,
@@ -46,6 +47,9 @@ import {
   successResult,
   successWithAffectedUsers,
 } from "./validators.js";
+
+/** The host-facing result type of resources.getQuantityAvailability. */
+type QuantityAvailability = ComponentApi["resources"]["getQuantityAvailability"]["_returnType"];
 
 // ============================================
 // TABLE -> VALIDATOR MAP
@@ -396,6 +400,25 @@ describe("document validators are exact", () => {
       expect(validate(bookingDoc, null)).toBe(false);
       expect(validate(bookingDoc, "bk_1")).toBe(false);
     });
+  });
+
+  test("slotQuantities is a record of numbers in the schema and the validators (0.5.0; 0.4.x kept v.any())", async () => {
+    // convex-test 0.0.59 does not check record validators on writes (Convex
+    // does), so the schema's table validator is checked directly.
+    const { t } = setup();
+    const stored = await t.run(async (ctx) => (await seedMinimalRows(ctx)).quantity_availability);
+    const table = schema.tables.quantity_availability.validator;
+    const row = { resourceId: "res-1", date: TUESDAY };
+    for (const slotQuantities of [{ "36": "2" }, { "36": null }, { "36": true }, 2, "36"]) {
+      expect(validate(table, { ...row, slotQuantities }), JSON.stringify(slotQuantities)).toBe(false);
+      expect(validate(quantityAvailabilityDoc, { ...stored, slotQuantities })).toBe(false);
+    }
+    // CONTROLS: numeric counters, an empty map and the stored row validate.
+    expect(validate(table, { ...row, slotQuantities: { "36": 2, "37": 0 } })).toBe(true);
+    expect(validate(table, { ...row, slotQuantities: {} })).toBe(true);
+    expect(validate(quantityAvailabilityDoc, stored)).toBe(true);
+    expectTypeOf<Doc<"quantity_availability">["slotQuantities"]>().toEqualTypeOf<Record<string, number>>();
+    expectTypeOf<QuantityAvailability["bookedQuantities"]>().toEqualTypeOf<Record<string, number>>();
   });
 
   test("a status outside BOOKING_STATUSES fails, as in the schema (0.5.0; 0.4.x kept v.string())", async () => {

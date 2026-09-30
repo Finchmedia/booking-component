@@ -239,7 +239,7 @@ export const updateResource = mutation({
       const quantityRows = await ctx.db.query("quantity_availability")
         .withIndex("by_resource_date", q => q.eq("resourceId", args.id).gte("date", today)).collect();
       for (const row of quantityRows) {
-        const reserved = Object.entries(row.slotQuantities as Record<string, number>)
+        const reserved = Object.entries(row.slotQuantities)
           .filter(([slot]) => slotIsCurrentOrFuture(row.date, Number(slot), now))
           .map(([, count]) => count);
         if (changesInventoryMode && reserved.some(count => count > 0)) {
@@ -385,7 +385,7 @@ export const getResourceAvailability = query({
     if (usesQuantityInventory(resource)) {
       const quantityDoc = await ctx.db.query("quantity_availability")
         .withIndex("by_resource_date", q => q.eq("resourceId", args.resourceId).eq("date", args.date)).unique();
-      const counts = (quantityDoc?.slotQuantities ?? {}) as Record<string, number>;
+      const counts = quantityDoc?.slotQuantities ?? {};
       return Object.entries(counts)
         .filter(([, count]) => count >= (resource?.quantity ?? 1))
         .map(([slot]) => Number(slot)).sort((a, b) => a - b);
@@ -408,8 +408,8 @@ export const getQuantityAvailability = query({
     resourceId: v.string(),
     date: v.string(),
   },
-  // `slotQuantities` is `v.any()` in schema.ts; do not tighten it here.
-  returns: v.object({ totalQuantity: v.number(), bookedQuantities: v.any() }),
+  // bookedQuantities: booked units per slot index ("36" = 09:00 UTC).
+  returns: v.object({ totalQuantity: v.number(), bookedQuantities: v.record(v.string(), v.number()) }),
   handler: async (ctx, args) => {
     const resource = await ctx.db
       .query("resources")

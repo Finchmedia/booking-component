@@ -164,6 +164,11 @@
   again. The new `booking_status_invalid` audit check lists such rows,
   history included (`status`, `historyStatus`); it ships with the narrowed
   schema, so on a deployed 0.5.0 it confirms what the deploy already checked.
+- Pool counters are typed (PR-66): `getQuantityAvailability` returns
+  `bookedQuantities` as `Record<string, number>` instead of `any`, and the
+  schema stores `quantity_availability.slotQuantities` as that record. The
+  component only ever wrote numbers, so the deploy check above only fails on
+  rows changed outside it; host code that cast the result can drop the cast.
 
 ### Added
 

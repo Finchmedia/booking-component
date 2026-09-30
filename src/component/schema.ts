@@ -148,7 +148,7 @@ export default defineSchema({
   quantity_availability: defineTable({
     resourceId: v.string(),
     date: v.string(),
-    slotQuantities: v.any(), // { "36": 2, "37": 1 } = booked count per slot
+    slotQuantities: v.record(v.string(), v.number()), // { "36": 2, "37": 1 } = booked count per slot
   }).index("by_resource_date", ["resourceId", "date"]),
 
   // ============================================

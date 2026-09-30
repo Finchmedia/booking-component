@@ -60,9 +60,7 @@ export async function releaseQuantitySlots(
 
     if (!quantityDoc) continue;
 
-    const bookedQuantities = {
-      ...(quantityDoc.slotQuantities as Record<string, number>),
-    };
+    const bookedQuantities = { ...quantityDoc.slotQuantities };
     for (const slot of slots) {
       bookedQuantities[slot.toString()] = Math.max(
         0,

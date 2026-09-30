@@ -1326,7 +1326,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "query",
         "internal",
         { date: string; resourceId: string },
-        { bookedQuantities: any; totalQuantity: number },
+        { bookedQuantities: Record<string, number>; totalQuantity: number },
         Name
       >;
       getResource: FunctionReference<
