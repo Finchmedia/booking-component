@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
+import type { WithoutSystemFields } from "convex/server";
 import { v } from "convex/values";
 import { parseCivilDate, weekdayOf, type CivilDate } from "../shared/time.js";
 import { assertDateOrder, assertTimeZone } from "./input_validation";
@@ -257,7 +258,7 @@ export const updateSchedule = mutation({
       }
     }
 
-    const updates: Record<string, unknown> = { updatedAt: Date.now() };
+    const updates: Partial<WithoutSystemFields<Doc<"schedules">>> = { updatedAt: Date.now() };
 
     if (args.name !== undefined) updates.name = args.name;
     if (args.timezone !== undefined) updates.timezone = args.timezone;
@@ -422,7 +423,7 @@ export const updateDateOverride = mutation({
       throw new Error("Date override not found");
     }
 
-    const updates: Record<string, unknown> = {};
+    const updates: Partial<WithoutSystemFields<Doc<"date_overrides">>> = {};
     if (args.type !== undefined) updates.type = args.type;
     if (args.customHours !== undefined) updates.customHours = args.customHours;
 

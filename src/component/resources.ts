@@ -1,4 +1,6 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import type { WithoutSystemFields } from "convex/server";
 import { v } from "convex/values";
 import { holdsActiveInventory, usesQuantityInventory, validateResourceCapacity } from "./inventory_helpers";
 import { assertTimeZone } from "./input_validation";
@@ -231,7 +233,7 @@ export const updateResource = mutation({
       }
     }
 
-    const updates: Record<string, unknown> = { updatedAt: Date.now() };
+    const updates: Partial<WithoutSystemFields<Doc<"resources">>> = { updatedAt: Date.now() };
 
     if (args.name !== undefined) updates.name = args.name;
     if (args.type !== undefined) updates.type = args.type;

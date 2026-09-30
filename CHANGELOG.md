@@ -296,6 +296,10 @@ The internal email mutations keep their names and arguments, so jobs queued by
   send no mail. It runs only as a scheduled job, which keeps no result, so
   nothing could read it; its arguments are unchanged and queued jobs still
   run.
+- `updateResource`, `updateSchedule`, `updateDateOverride`, `updateHook` and
+  `updateEventType` build their patches typed against their tables instead
+  of as `Record<string, unknown>`, so a misspelled or wrongly typed field
+  fails compilation. Behaviour is unchanged.
 
 ### Tests
 

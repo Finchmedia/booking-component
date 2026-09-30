@@ -24,6 +24,7 @@ import {
     assertTimeZone,
 } from "./input_validation";
 import type { Doc } from "./_generated/dataModel";
+import type { WithoutSystemFields } from "convex/server";
 import {
   assertSingleResourceSupported,
   holdsActiveInventory,
@@ -993,12 +994,15 @@ export const updateEventType = mutation({
       throw new Error(`Event type "${args.id}" not found`);
     }
 
-    const { id: _id, ...updates } = args;
-    const filteredUpdates: Record<string, unknown> = { updatedAt: Date.now() };
+    // The arguments besides `id` are event_types columns (their types are
+    // checked here); only the ones given are patched.
+    const { id: _id, ...fields } = args;
+    const updates: Partial<WithoutSystemFields<Doc<"event_types">>> = fields;
+    const filteredUpdates: Partial<WithoutSystemFields<Doc<"event_types">>> = { updatedAt: Date.now() };
 
     for (const [key, value] of Object.entries(updates)) {
       if (value !== undefined) {
-        filteredUpdates[key] = value;
+        Object.assign(filteredUpdates, { [key]: value });
       }
     }
 

@@ -3,7 +3,8 @@ import { createBookingEmailContext } from "./emails/context.js";
 import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import type { FunctionHandle } from "convex/server";
+import type { FunctionHandle, WithoutSystemFields } from "convex/server";
+import type { Doc } from "./_generated/dataModel";
 import { terminateBooking } from "./booking_lifecycle";
 import {
   bookingHistoryDoc,
@@ -147,7 +148,7 @@ export const updateHook = mutation({
       throw new Error("Hook not found");
     }
 
-    const updates: Record<string, unknown> = {};
+    const updates: Partial<WithoutSystemFields<Doc<"hooks">>> = {};
     if (args.enabled !== undefined) updates.enabled = args.enabled;
     if (args.functionHandle !== undefined)
       updates.functionHandle = args.functionHandle;
