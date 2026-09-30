@@ -111,6 +111,36 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       >;
     };
     maintenance: {
+      audit: FunctionReference<
+        "query",
+        "internal",
+        {
+          check: "f10_weekday" | "event_length_invalid";
+          cursor?: string | null;
+          limit: number;
+        },
+        {
+          continueCursor: string | null;
+          isDone: boolean;
+          issues: Array<
+            | {
+                check: "f10_weekday";
+                date: string;
+                scheduleId: string;
+                start: number;
+                uid: string;
+              }
+            | {
+                check: "event_length_invalid";
+                eventTypeId: string;
+                lengthInMinutes: number;
+                lengthInMinutesOptions?: Array<number>;
+              }
+          >;
+          scanned: number;
+        },
+        Name
+      >;
       getDailyAvailability: FunctionReference<
         "query",
         "internal",

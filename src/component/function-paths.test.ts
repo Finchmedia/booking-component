@@ -34,6 +34,7 @@ const REGISTERED_FUNCTIONS = [
   "hooks:triggerHooks (internal mutation)",
   "hooks:unregisterHook (public mutation)",
   "hooks:updateHook (public mutation)",
+  "maintenance:audit (public query)",
   "maintenance:getDailyAvailability (public query)",
   "maintenance:wipeAllBookingData (public mutation)",
   "maintenance:wipeAllData (public mutation)",

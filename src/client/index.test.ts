@@ -17,6 +17,7 @@ export const {
   getDailyAvailability,
   heartbeat,
   sweepOrphanedHolds,
+  audit,
 } = makeInternalBookingAPI(components.booking);
 
 const testApi = (
@@ -33,6 +34,7 @@ const testApi = (
       getDailyAvailability: typeof getDailyAvailability;
       heartbeat: typeof heartbeat;
       sweepOrphanedHolds: typeof sweepOrphanedHolds;
+      audit: typeof audit;
     };
   }>
 )["index.test"];
@@ -167,6 +169,19 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     });
     expect(byId.map((slot) => slot.time)).toEqual(await daySlots(t));
     expect(byId).toHaveLength(8);
+  });
+
+  test("audit via the maintenance wrapper", async () => {
+    await seedThroughWrappers(t);
+    expect(await t.query(testApi.audit, { check: "event_length_invalid", limit: 10 })).toEqual({
+      issues: [],
+      scanned: 1,
+      continueCursor: expect.any(String),
+      isDone: true,
+    });
+    await expect(t.query(testApi.audit, { check: "f10_weekday", limit: 0 })).rejects.toThrow(
+      "limit must be an integer from 1 to 500"
+    );
   });
 
   test("getDailyAvailability via the maintenance wrapper", async () => {

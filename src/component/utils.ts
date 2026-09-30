@@ -85,6 +85,19 @@ function getOffsetMs(instantMs: number, timezone: string): number {
     return wallClockAsUtc - (instantMs - (instantMs % 1000));
 }
 
+/** The local calendar date ("YYYY-MM-DD") and 15-minute slot index (0–95) of an instant in a timezone. */
+export function getLocalDateAndSlot(
+    instantMs: number,
+    timezone: string
+): { date: string; slot: number } {
+    const p = getWallClockParts(instantMs, timezone);
+    const pad = (value: number, length: number) => String(value).padStart(length, "0");
+    return {
+        date: `${pad(p.year, 4)}-${pad(p.month, 2)}-${pad(p.day, 2)}`,
+        slot: p.hour * 4 + Math.floor(p.minute / 15),
+    };
+}
+
 /**
  * True when `instantMs` reads as exactly `dateStr time` on the wall clock of
  * `timezone` — i.e. the wall-clock time exists on that date. In the DST

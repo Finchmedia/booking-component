@@ -18,7 +18,20 @@
 // decides who may call them (wrap them in an admin-only mutation).
 
 import { v } from "convex/values";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import type { IndexRange } from "convex/server";
+import {
+  mutation,
+  query,
+  type DatabaseReader,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { parseCivilDate } from "../shared/time.js";
+import { holdsActiveInventory } from "./inventory_helpers";
+import { isValidTimeZone } from "./input_validation";
+import { getScheduleByExternalId, getWeeklySlots } from "./schedules";
+import { getLocalDateAndSlot } from "./utils";
 
 // Resets run on modest data sets; the batch keeps per-iteration memory small.
 // Convex transaction limits remain the hard upper bound for a single call.
@@ -151,5 +164,261 @@ export const getDailyAvailability = query({
       )
       .unique();
     return row?.busySlots ?? null;
+  },
+});
+
+// ============================================
+// UPGRADE AUDIT (read-only)
+// ============================================
+//
+// Component tables are private to the component, so hosts cannot check stored
+// rows themselves. `audit` reports one check per call, one page at a time.
+
+/**
+ * Largest `limit` of one audit call. A booking costs one override read, plus
+ * its event type and schedule once per page; an event type costs nothing more.
+ */
+const MAX_AUDIT_LIMIT = 500;
+
+type AuditTable = "bookings" | "event_types";
+
+/**
+ * A row's complete by_creation_time index key. Creation times can tie
+ * (imported rows), so the time alone would skip or repeat rows at a page
+ * boundary.
+ */
+type AuditCursor<T extends AuditTable> = { creationTime: number; id: Id<T> };
+
+function encodeAuditCursor(row: { _creationTime: number; _id: string }): string {
+  return JSON.stringify([row._creationTime, row._id]);
+}
+
+function parseAuditCursor<T extends AuditTable>(
+  db: DatabaseReader,
+  table: T,
+  cursor: string
+): AuditCursor<T> {
+  let key: unknown;
+  try {
+    key = JSON.parse(cursor);
+  } catch {
+    key = null;
+  }
+  if (Array.isArray(key) && key.length === 2 && Number.isFinite(key[0]) && typeof key[1] === "string") {
+    const id = db.normalizeId(table, key[1]);
+    if (id) return { creationTime: key[0], id };
+  }
+  throw new Error("Invalid audit cursor");
+}
+
+/**
+ * The by_creation_time index every table has, typed for a table parameter
+ * (the generated builder cannot resolve index fields for a generic table) and
+ * with the _id tie-breaker that ends every index.
+ */
+type CreationTimeIndex<T extends AuditTable> = {
+  withIndex(
+    index: "by_creation_time",
+    range?: (q: {
+      eq(field: "_creationTime", value: number): { gt(field: "_id", value: Id<T>): IndexRange };
+      gt(field: "_creationTime", value: number): IndexRange;
+    }) => IndexRange
+  ): { take(n: number): Promise<Doc<T>[]> };
+};
+
+/**
+ * Up to `limit` rows after `cursor`, in by_creation_time order: the rest of
+ * the cursor's tie group first, then the later creation times (the split
+ * presence.sweepOrphanedHolds uses). The key is compared by value, so a
+ * cursor row deleted in the meantime is fine.
+ */
+async function rowsAfter<T extends AuditTable>(
+  db: DatabaseReader,
+  table: T,
+  cursor: AuditCursor<T> | null,
+  limit: number
+): Promise<Doc<T>[]> {
+  const rows = () => db.query(table) as unknown as CreationTimeIndex<T>;
+  if (!cursor) {
+    return await rows().withIndex("by_creation_time").take(limit);
+  }
+  const tieGroup = await rows()
+    .withIndex("by_creation_time", (q) =>
+      q.eq("_creationTime", cursor.creationTime).gt("_id", cursor.id)
+    )
+    .take(limit);
+  if (tieGroup.length === limit) return tieGroup;
+  const later = await rows()
+    .withIndex("by_creation_time", (q) => q.gt("_creationTime", cursor.creationTime))
+    .take(limit - tieGroup.length);
+  return [...tieGroup, ...later];
+}
+
+const auditIssue = v.union(
+  v.object({
+    check: v.literal("f10_weekday"),
+    uid: v.string(),
+    start: v.number(),
+    scheduleId: v.string(),
+    date: v.string(),
+  }),
+  v.object({
+    check: v.literal("event_length_invalid"),
+    eventTypeId: v.string(),
+    lengthInMinutes: v.number(),
+    lengthInMinutesOptions: v.optional(v.array(v.number())),
+  })
+);
+type AuditIssue = typeof auditIssue.type;
+
+/**
+ * The schedule a host would resolve for a booking, as the reference host
+ * does: the event type's schedule, else the organization's default schedule
+ * (the one marked default, else the first).
+ */
+async function scheduleForBooking(
+  ctx: QueryCtx,
+  booking: Doc<"bookings">,
+  cache: Map<string, Promise<Doc<"schedules"> | null>>
+): Promise<Doc<"schedules"> | null> {
+  const key = `${booking.eventTypeId}\u0000${booking.organizationId ?? ""}`;
+  let schedule = cache.get(key);
+  if (!schedule) {
+    schedule = (async () => {
+      const eventType = await ctx.db
+        .query("event_types")
+        .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
+        .unique();
+      const own = eventType?.scheduleId
+        ? await getScheduleByExternalId(ctx, eventType.scheduleId)
+        : null;
+      const organizationId = booking.organizationId;
+      if (own || !organizationId) return own;
+      const schedules = await ctx.db
+        .query("schedules")
+        .withIndex("by_org", (q) => q.eq("organizationId", organizationId))
+        .collect();
+      return schedules.find((s) => s.isDefault) ?? schedules[0] ?? null;
+    })();
+    cache.set(key, schedule);
+  }
+  return await schedule;
+}
+
+/**
+ * f10_weekday: an upcoming active booking on a date whose weekly hours 0.4.2
+ * took from the NEXT weekday (schedule zone at UTC+12 or beyond), and whose
+ * start lies outside the hours of its own weekday. Dates with an override are
+ * skipped; both rules used the override.
+ */
+async function f10WeekdayIssue(
+  ctx: QueryCtx,
+  booking: Doc<"bookings">,
+  now: number,
+  cache: Map<string, Promise<Doc<"schedules"> | null>>
+): Promise<AuditIssue | null> {
+  if (!holdsActiveInventory(booking.status) || booking.start < now) return null;
+  const schedule = await scheduleForBooking(ctx, booking, cache);
+  if (!schedule || !isValidTimeZone(schedule.timezone)) return null;
+
+  const local = getLocalDateAndSlot(booking.start, schedule.timezone);
+  // 0.4.2 read the weekday of `${date}T12:00Z` in the zone.
+  const readAs = getLocalDateAndSlot(Date.parse(`${local.date}T12:00:00.000Z`), schedule.timezone);
+  if (readAs.date === local.date) return null;
+
+  const override = await ctx.db
+    .query("date_overrides")
+    .withIndex("by_schedule_date", (q) =>
+      q.eq("scheduleId", schedule._id).eq("date", local.date)
+    )
+    .first();
+  if (override) return null;
+
+  if (getWeeklySlots(schedule, parseCivilDate(local.date)).includes(local.slot)) return null;
+  return {
+    check: "f10_weekday",
+    uid: booking.uid,
+    start: booking.start,
+    scheduleId: schedule.id,
+    date: local.date,
+  };
+}
+
+/** event_length_invalid: a length (or length option) that is not a positive number. */
+function eventLengthIssue(eventType: Doc<"event_types">): AuditIssue | null {
+  const invalid = (length: number) => !Number.isFinite(length) || length <= 0;
+  if (!invalid(eventType.lengthInMinutes) && !(eventType.lengthInMinutesOptions ?? []).some(invalid)) {
+    return null;
+  }
+  return {
+    check: "event_length_invalid",
+    eventTypeId: eventType.id,
+    lengthInMinutes: eventType.lengthInMinutes,
+    lengthInMinutesOptions: eventType.lengthInMinutesOptions,
+  };
+}
+
+/**
+ * Read-only upgrade audit, one check and one page of rows per call:
+ * - "f10_weekday": upcoming pending, confirmed or provisional bookings that
+ *   0.4.2 admitted on a weekday without opening hours (schedules at UTC+12
+ *   or beyond used the next weekday's hours). The schedule is the booking's
+ *   event type's, else its organization's default, as in the reference host.
+ * - "event_length_invalid": event types whose lengthInMinutes or
+ *   lengthInMinutesOptions hold a value that is not a positive number. The
+ *   availability queries reject such lengths since 0.4.3.
+ *
+ * Start without a cursor and pass `continueCursor` back until `isDone`.
+ * `scanned` counts the rows read; `issues` lists the ones that failed the
+ * check. Call it from a host internal function.
+ */
+export const audit = query({
+  args: {
+    check: v.union(v.literal("f10_weekday"), v.literal("event_length_invalid")),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.number(),
+  },
+  returns: v.object({
+    issues: v.array(auditIssue),
+    scanned: v.number(),
+    continueCursor: v.union(v.string(), v.null()),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_AUDIT_LIMIT) {
+      throw new Error(`limit must be an integer from 1 to ${MAX_AUDIT_LIMIT}`);
+    }
+    const issues: AuditIssue[] = [];
+    let rows: Array<Doc<"bookings"> | Doc<"event_types">>;
+
+    if (args.check === "f10_weekday") {
+      const cursor =
+        typeof args.cursor === "string" ? parseAuditCursor(ctx.db, "bookings", args.cursor) : null;
+      const bookings = await rowsAfter(ctx.db, "bookings", cursor, args.limit);
+      const now = Date.now();
+      const schedules = new Map<string, Promise<Doc<"schedules"> | null>>();
+      for (const booking of bookings) {
+        const issue = await f10WeekdayIssue(ctx, booking, now, schedules);
+        if (issue) issues.push(issue);
+      }
+      rows = bookings;
+    } else {
+      const cursor =
+        typeof args.cursor === "string" ? parseAuditCursor(ctx.db, "event_types", args.cursor) : null;
+      const eventTypes = await rowsAfter(ctx.db, "event_types", cursor, args.limit);
+      for (const eventType of eventTypes) {
+        const issue = eventLengthIssue(eventType);
+        if (issue) issues.push(issue);
+      }
+      rows = eventTypes;
+    }
+
+    const last = rows[rows.length - 1];
+    return {
+      issues,
+      scanned: rows.length,
+      continueCursor: last ? encodeAuditCursor(last) : (args.cursor ?? null),
+      isDone: rows.length < args.limit,
+    };
   },
 });

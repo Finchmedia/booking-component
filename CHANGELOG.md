@@ -24,12 +24,15 @@
   before upgrading, for example in a host query:
   `(await ctx.runQuery(components.booking.public.listEventTypes, {})).filter((et) => ![et.lengthInMinutes, ...(et.lengthInMinutesOptions ?? [])].every((n) => Number.isFinite(n) && n > 0))`.
   Slot queries for such event types throw after the upgrade instead of
-  offering slots on booked days.
+  offering slots on booked days. After upgrading, the new `maintenance.audit`
+  query with `check: "event_length_invalid"` lists them.
 - Schedules in zones at UTC+12 or beyond (New Zealand, Fiji, Tonga, Samoa,
   Kiribati, Kamchatka; Norfolk Island in summer) now use each day's own
   weekly hours; until 0.4.2 every day used the next weekday's. If you shifted
   `weeklyHours` by a day to compensate, shift them back when you upgrade.
-  Existing bookings are not moved.
+  Existing bookings are not moved. `maintenance.audit` with
+  `check: "f10_weekday"` lists upcoming bookings that lie outside the hours of
+  their own weekday on such dates, so you can review them.
 - Schedule, resource and event-type writes reject a time zone that `Intl`
   does not accept. Rows stored with one stay readable and can still be
   edited; a patch that sets a valid zone repairs them.
@@ -150,6 +153,12 @@ The internal email mutations keep their names and arguments, so jobs queued by
   effective hours when `availableSlots` is omitted and the schedule's zone when
   `resourceTimezone` is omitted, so `{ resourceId, date, eventLength,
   scheduleId }` replaces the `getEffectiveAvailability` + `getDaySlots` pair.
+- `maintenance.audit({ check, cursor?, limit })`, a read-only component query,
+  and the matching `makeInternalBookingAPI` wrapper: the upgrade checks
+  described under Upgrading, one check and one page (`limit` 1–500) per call.
+  It returns `issues`, `scanned`, `continueCursor` and `isDone`. For
+  `f10_weekday` the schedule is the booking's event type's, else the
+  organization's default schedule, as in the reference host.
 
 ### Maintenance and documentation
 
@@ -170,9 +179,9 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - Time-sensitive tests can run under a chosen process time zone
   (`src/testing/process-time-zone.ts`).
 - Regression suites for weekdays in 14 zones, DST days (including a sweep
-  against an `Intl`-only oracle), input validation, zone validation and the
-  new schedule arguments. The time-dependent ones run under several process
-  time zones.
+  against an `Intl`-only oracle), input validation, zone validation, the new
+  schedule arguments and the audit. The time-dependent ones run under several
+  process time zones.
 
 ## 0.4.2 — 23 September 2026
 

@@ -793,5 +793,17 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         return await ctx.runQuery(component.maintenance.getDailyAvailability, args);
       },
     }),
+
+    // Read-only upgrade audit of stored rows; see CHANGELOG.
+    audit: internalQueryGeneric({
+      args: {
+        check: v.union(v.literal("f10_weekday"), v.literal("event_length_invalid")),
+        cursor: v.optional(v.union(v.string(), v.null())),
+        limit: v.number(),
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runQuery(component.maintenance.audit, args);
+      },
+    }),
   };
 }

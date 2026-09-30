@@ -512,7 +512,11 @@ export async function getScheduleDaySlots(
     }
   }
 
-  // Find weekly hours for this day
+  return getWeeklySlots(schedule, date);
+}
+
+/** Local slot indices of a schedule's weekly hours on the weekday of `date` (overrides ignored). */
+export function getWeeklySlots(schedule: Doc<"schedules">, date: CivilDate): number[] {
   const dayOfWeek = weekdayOf(date);
   const dayEntries = schedule.weeklyHours.filter(
     (h) => h.dayOfWeek === dayOfWeek

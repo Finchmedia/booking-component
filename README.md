@@ -102,7 +102,12 @@ endpoints to authorized host wrappers.
 ## Supported behavior
 
 - **Schedules:** weekly hours, date overrides and IANA timezones. Booking timestamps
-  use Unix milliseconds; inventory uses a 15-minute grid.
+  use Unix milliseconds; inventory uses a 15-minute grid. Weekly hours apply to
+  each calendar day's own weekday. On DST changes a skipped time is not
+  offered, a repeated one means its first occurrence, and bookings end by the
+  time their window closes. Before upgrading from 0.4.2 or earlier, check your
+  event-type lengths, and afterwards run the `maintenance.audit` checks; see
+  the CHANGELOG.
 - **Bundles and pools:** reserve several resources atomically through the
   [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).
   Pool quantities use this API; ordinary single-resource flows reject pools.
