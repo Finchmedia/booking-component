@@ -1,6 +1,9 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import type { WithoutSystemFields } from "convex/server";
 import { v } from "convex/values";
 import { holdsActiveInventory, usesQuantityInventory, validateResourceCapacity } from "./inventory_helpers";
+import { assertTimeZone } from "./input_validation";
 import {
   resourceDoc,
   successResult,
@@ -123,6 +126,7 @@ export const createResource = mutation({
   },
   returns: v.id("resources"),
   handler: async (ctx, args) => {
+    assertTimeZone(args.timezone);
     validateResourceCapacity(args);
     // Check for existing ID
     const existing = await ctx.db
@@ -184,6 +188,9 @@ export const updateResource = mutation({
   },
   returns: v.id("resources"),
   handler: async (ctx, args) => {
+    if (args.timezone !== undefined) {
+      assertTimeZone(args.timezone);
+    }
     const resource = await ctx.db
       .query("resources")
       .withIndex("by_external_id", (q) => q.eq("id", args.id))
@@ -226,7 +233,7 @@ export const updateResource = mutation({
       }
     }
 
-    const updates: Record<string, unknown> = { updatedAt: Date.now() };
+    const updates: Partial<WithoutSystemFields<Doc<"resources">>> = { updatedAt: Date.now() };
 
     if (args.name !== undefined) updates.name = args.name;
     if (args.type !== undefined) updates.type = args.type;

@@ -2,23 +2,38 @@
 // EMAIL HELPER FUNCTIONS
 // ============================================
 
-export function formatDate(timestamp: number, timezone: string): string {
+import { MAX_BOOKING_EMAIL_SUBJECT_LENGTH } from "../../emails.js";
+
+/**
+ * Stored zones are not validated on every write path. An invalid, empty or
+ * missing zone must not fail the notification, so it renders in UTC instead;
+ * formats with a zone name then label the times "UTC".
+ */
+function formatInZone(timestamp: number, timezone: string | undefined, options: Intl.DateTimeFormatOptions): string {
     const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    if (timezone) {
+        try {
+            return date.toLocaleString("en-US", { ...options, timeZone: timezone });
+        } catch (error) {
+            if (!(error instanceof RangeError)) throw error;
+        }
+    }
+    return date.toLocaleString("en-US", { ...options, timeZone: "UTC" });
+}
+
+export function formatDate(timestamp: number, timezone: string): string {
+    return formatInZone(timestamp, timezone, {
         weekday: "long",
         year: "numeric",
         month: "long",
         day: "numeric",
-        timeZone: timezone,
     });
 }
 
 export function formatTime(timestamp: number, timezone: string): string {
-    const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    return formatInZone(timestamp, timezone, {
         hour: "2-digit",
         minute: "2-digit",
-        timeZone: timezone,
         timeZoneName: "short",
     });
 }
@@ -38,25 +53,30 @@ export function formatDuration(milliseconds: number): string {
 }
 
 export function formatDateTimeFull(timestamp: number, timezone: string): string {
-    const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    return formatInZone(timestamp, timezone, {
         weekday: "long",
         year: "numeric",
         month: "long",
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
-        timeZone: timezone,
         timeZoneName: "short",
     });
 }
 
 export function formatTimeShort(timestamp: number, timezone: string): string {
-    const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+    return formatInZone(timestamp, timezone, {
         hour: "2-digit",
         minute: "2-digit",
-        timeZone: timezone,
         timeZoneName: "short",
     });
+}
+
+/** Built-in subjects follow the renderer rules: one line, at most 200 UTF-16 code units. */
+export function defaultSubject(subject: string): string {
+    const line = subject.replace(/[\r\n\0]+/g, " ").trim();
+    if (line.length <= MAX_BOOKING_EMAIL_SUBJECT_LENGTH) return line;
+    const cut = line.slice(0, MAX_BOOKING_EMAIL_SUBJECT_LENGTH);
+    // Do not end on half of a surrogate pair.
+    return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
 }

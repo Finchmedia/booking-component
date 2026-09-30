@@ -14,7 +14,13 @@ export const {
   getEffectiveAvailability,
   getDaySlots,
   createBooking,
+  cancelReservation,
+  getBookingHistory,
   getDailyAvailability,
+  heartbeat,
+  sweepOrphanedHolds,
+  audit,
+  backfillBookingOrganizations,
 } = makeInternalBookingAPI(components.booking);
 
 const testApi = (
@@ -28,7 +34,13 @@ const testApi = (
       getEffectiveAvailability: typeof getEffectiveAvailability;
       getDaySlots: typeof getDaySlots;
       createBooking: typeof createBooking;
+      cancelReservation: typeof cancelReservation;
+      getBookingHistory: typeof getBookingHistory;
       getDailyAvailability: typeof getDailyAvailability;
+      heartbeat: typeof heartbeat;
+      sweepOrphanedHolds: typeof sweepOrphanedHolds;
+      audit: typeof audit;
+      backfillBookingOrganizations: typeof backfillBookingOrganizations;
     };
   }>
 )["index.test"];
@@ -152,6 +164,71 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     expect(after).toEqual(before.filter((time) => time !== "2027-03-09T09:00:00.000Z"));
   });
 
+  test("getDaySlots({ scheduleId }) through the wrapper equals the complete-argument flow", async () => {
+    await seedThroughWrappers(t);
+    const byId: Array<{ time: string }> = await t.query(testApi.getDaySlots, {
+      resourceId: RESOURCE,
+      date: DATE,
+      eventLength: 60,
+      slotInterval: 60,
+      scheduleId: SCHEDULE,
+    });
+    expect(byId.map((slot) => slot.time)).toEqual(await daySlots(t));
+    expect(byId).toHaveLength(8);
+  });
+
+  test("cancelReservation via the booking wrapper forwards reason and cancelledBy", async () => {
+    await seedThroughWrappers(t);
+    const booking = await bookTenToEleven(t);
+
+    expect(
+      await t.mutation(testApi.cancelReservation, {
+        reservationId: booking._id,
+        reason: "Double booked",
+        cancelledBy: "admin-1",
+      })
+    ).toEqual({ success: true, alreadyCancelled: false });
+    const history: Array<{ toStatus: string; changedBy?: string; reason?: string }> = await t.query(
+      testApi.getBookingHistory,
+      { bookingId: booking._id }
+    );
+    expect(history[history.length - 1]).toMatchObject({
+      toStatus: "cancelled",
+      changedBy: "admin-1",
+      reason: "Double booked",
+    });
+  });
+
+  test("audit via the maintenance wrapper", async () => {
+    await seedThroughWrappers(t);
+    expect(await t.query(testApi.audit, { check: "event_length_invalid", limit: 10 })).toEqual({
+      issues: [],
+      scanned: 1,
+      continueCursor: expect.any(String),
+      isDone: true,
+    });
+    await expect(t.query(testApi.audit, { check: "f10_weekday", limit: 0 })).rejects.toThrow(
+      "limit must be an integer from 1 to 500"
+    );
+  });
+
+  test("backfillBookingOrganizations via the maintenance wrapper", async () => {
+    await seedThroughWrappers(t);
+    await bookTenToEleven(t); // stores org-1 already
+    expect(await t.mutation(testApi.backfillBookingOrganizations, { limit: 10, dryRun: false })).toEqual({
+      scanned: 1,
+      updated: 0,
+      skipped: 0,
+      mismatches: [],
+      needsReview: [],
+      continueCursor: expect.any(String),
+      isDone: true,
+    });
+    await expect(
+      t.mutation(testApi.backfillBookingOrganizations, { limit: 0, dryRun: true })
+    ).rejects.toThrow("limit must be an integer from 1 to 500");
+  });
+
   test("getDailyAvailability via the maintenance wrapper", async () => {
     await seedThroughWrappers(t);
     expect(await t.query(testApi.getDailyAvailability, { resourceId: RESOURCE, date: DATE })).toBeNull();
@@ -161,5 +238,23 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     expect(await t.query(testApi.getDailyAvailability, { resourceId: RESOURCE, date: DATE })).toEqual([
       36, 37, 38, 39,
     ]);
+  });
+
+  test("sweepOrphanedHolds via the presence wrapper", async () => {
+    await t.mutation(testApi.heartbeat, {
+      resourceId: RESOURCE,
+      slots: ["2027-03-09T09:00:00.000Z"],
+      user: "ada",
+    });
+    // A healthy hold: scanned, left alone.
+    expect(await t.mutation(testApi.sweepOrphanedHolds, { limit: 10, dryRun: true })).toMatchObject({
+      scanned: 1,
+      deleted: 0,
+      rescheduled: 0,
+      isDone: true,
+    });
+    await expect(
+      t.mutation(testApi.sweepOrphanedHolds, { limit: 0, dryRun: true })
+    ).rejects.toThrow("limit must be an integer from 1 to 500");
   });
 });

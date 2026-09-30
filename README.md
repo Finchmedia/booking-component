@@ -94,6 +94,25 @@ with ownership checks or management tokens. Keep resets and seed functions
 internal. The [authorization guide](https://convexbooking.dev/docs/authentication)
 includes a complete administrator example.
 
+**Management tokens are bearer secrets.** Whoever holds a booking's UID and
+`managementToken` can read, cancel and reschedule it through
+`getBookingByToken`, `cancelBookingByToken` and `rescheduleBookingByToken`.
+Every booking document the component returns contains the token and the
+booker's contact details: `createBooking`, `createProvisionalBooking`,
+`createMultiResourceBooking`, `rescheduleBooking` and
+`rescheduleBookingByToken` (a move keeps the token), `getBooking`,
+`getBookingByUid`, `getBookingByToken`, `listBookings` and
+`multi_resource.getBookingWithItems`. Give the token to the booker only. Host
+functions that serve these results to other callers must remove it, because a
+UID alone must never be enough to obtain it.
+
+**Registering a hook is an administrator action.** A hook's function handle
+runs for every matching event, and its payload carries the booker's contact
+details and, for most events, the management token. Keep `registerHook`,
+`updateHook` and `unregisterHook` behind server-side administrator checks.
+Payloads differ per emitting function; handlers with argument validators must
+accept the [version 1 payload shapes](https://github.com/Finchmedia/booking-component/blob/main/docs/hook-payloads-v1.md).
+
 The optional `makeInternalBookingAPI(components.booking)` factory creates only
 internal queries and mutations. Its exports are accessed through `internal.*`.
 The old public `makeBookingAPI` factory was removed in 0.4.0; migrate public
@@ -102,21 +121,98 @@ endpoints to authorized host wrappers.
 ## Supported behavior
 
 - **Schedules:** weekly hours, date overrides and IANA timezones. Booking timestamps
-  use Unix milliseconds; inventory uses a 15-minute grid.
+  use Unix milliseconds; inventory uses a 15-minute grid. Calendar dates in the
+  availability queries are days in the timezone of the resource's schedule
+  (UTC days in the legacy fallback), and weekly hours apply to each day's own
+  weekday. Slot times are
+  instants, which the Booker shows in the visitor's timezone. On DST changes a
+  local time that does not exist is not offered, a repeated one means its first
+  occurrence, and a window closes when its last existing quarter hour ends, so
+  bookings end by then. Before upgrading from 0.4.2 or earlier, check your
+  event-type lengths, and afterwards run the `maintenance.audit` checks; see
+  the CHANGELOG.
 - **Bundles and pools:** reserve several resources atomically through the
   [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).
   Pool quantities use this API; ordinary single-resource flows reject pools.
+  A bundle created without `organizationId` belongs to its event type's
+  organization. After upgrading from 0.4.2 or earlier, run
+  `maintenance.backfillBookingOrganizations` once to fill that organization on
+  older bundles whose resources all belong to it; it lists the others in
+  `needsReview` and leaves them without one. See the CHANGELOG.
 - **Lifecycle:** confirmation, decline, cancellation and atomic rescheduling.
   Your host controls the expiry of provisional bookings.
 - **Presence:** temporary selection indicators. The final booking mutation checks
-  inventory; presence does not guarantee a reservation.
+  inventory; presence does not guarantee a reservation. An explicit leave
+  releases a selection immediately. An abandoned one (closed tab, lost
+  connection) is released 10–20 s after its last heartbeat, plus scheduler
+  latency. After upgrading from 0.4.2 or earlier, run
+  `presence.sweepOrphanedHolds` once; see the CHANGELOG.
 - **Email:** optional Resend notifications and token-based management links.
   Follow the [email guide](https://convexbooking.dev/docs/integrations/email).
   To use your app's own design, add an optional [email renderer](https://github.com/Finchmedia/booking-component/blob/main/docs/custom-emails.md).
+  One component instance sends through one Resend account: queued mail goes
+  out in batches with the most recent API key. Rotating the key is fine; keys
+  of different accounts are not supported, because a key Resend rejects fails
+  every mail in its batch. Built-in mail goes to the booker's address as
+  entered, unverified. The
+  [renderer guide](https://github.com/Finchmedia/booking-component/blob/main/docs/custom-emails.md#one-resend-account)
+  covers key rotation and several accounts.
 
-Your host enforces resource visibility, opening-hours policy, notice periods and
-abuse limits. The quickstart gateway implements common defaults. Buffer fields
-are stored settings; enforce any required gaps in your host's reads and writes.
+## Details to rely on
+
+- **Schedule arguments:** pass `scheduleId` to `getMonthAvailability` and
+  `getDaySlots` and omit `resourceTimezone` and `availableSlots`. The
+  component then reads the schedule's hours, date overrides included, in the
+  schedule's timezone. The older shapes keep their 0.4.2 answers: `getDaySlots`
+  uses `availableSlots` only together with `resourceTimezone`; otherwise, and
+  for `scheduleId: ""`, the legacy 09:00–17:00 UTC window applies. An unknown
+  `scheduleId` means 09:00–17:00 in `resourceTimezone`, or UTC without one.
+  These fallbacks can open days the schedule keeps closed. A
+  `resourceTimezone` that differs from the schedule's timezone is used and
+  logged. Without `resourceTimezone`, a schedule stored before 0.4.3 with a
+  timezone `Intl` rejects is read as if no timezone were given (its hours as
+  UTC in the month view, the legacy window in the day view), and that is
+  logged; set a valid zone with `updateSchedule`.
+- **Booking lists:** `listBookings({ resourceId })` lists the bookings whose
+  primary resource is `resourceId`. A bundle's primary resource is its first
+  item; its other resources, pools included, do not list it, although their
+  availability counts it.
+- **Updates:** update mutations change the fields you pass and keep every
+  omitted one, so a field cannot be removed once set. Descriptions and an
+  event type's `lengthInMinutesOptions` can be emptied with `""` and `[]`; an
+  event type's `scheduleId` and numeric settings cannot be cleared.
+- **Deletes:** `deleteResource` and `deleteEventType` keep the rows that link
+  resources and event types. Also call
+  `resource_event_types.deleteAllLinksForResource` or
+  `deleteAllLinksForEventType`: otherwise a resource or event type created
+  later with the same ID is linked, and bookable, as before.
+  `makeInternalBookingAPI` does not wrap these two mutations.
+- **Concurrency:** all bookings of one resource on one UTC day share an
+  availability document, which keeps overlap checks atomic. Convex serializes
+  and retries concurrent writes to it; a busy pool is the likely hotspot.
+  `npx convex insights` reports `occRetried` and `occFailedPermanently` for
+  `daily_availability` and `quantity_availability`.
+
+## Host responsibilities
+
+- **Booking eligibility:** `createBooking` and `createProvisionalBooking`
+  check that the event type and resource exist, are active and are linked.
+  `createMultiResourceBooking` checks only that the event type exists and
+  counts an unknown resource ID as a one-unit standalone resource.
+  `rescheduleBooking`, `rescheduleBookingByToken` and confirmations through
+  `transitionBookingState` check none of this again, and no function compares
+  the organizations of event type and resource. If your host offers bundles,
+  moves or approvals, check these rules before calling the component.
+- **Policy:** resource visibility, opening-hours policy, notice periods and
+  abuse limits. The quickstart gateway implements common defaults. Buffer
+  fields are stored settings; enforce any required gaps in your host's reads
+  and writes.
+- **Email recipients:** anyone who can create a booking through your host can
+  have your sender mail any address. Decide the recipient policy, such as
+  address verification, rate limits or a CAPTCHA, before enabling email for
+  public booking.
+- **Secrets:** management tokens and hook registration, as described under
+  Backend integration.
 
 ## Testing
 

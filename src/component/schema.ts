@@ -53,7 +53,9 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_external_id", ["id"])
-    .index("by_org", ["organizationId"]),
+    .index("by_org", ["organizationId"])
+    // An organization's default schedule without reading its other schedules.
+    .index("by_organizationId_and_isDefault", ["organizationId", "isDefault"]),
 
   // Date overrides (holidays, custom hours)
   date_overrides: defineTable({
@@ -189,16 +191,18 @@ export default defineSchema({
     cancelledAt: v.optional(v.number()),
 
     // Relationships
-    rescheduleUid: v.optional(v.string()),
+    rescheduleUid: v.optional(v.string()), // Successor of a move: the original's uid
+    rescheduledToUid: v.optional(v.string()), // Moved original (status "cancelled"): the successor's uid
     cancellationReason: v.optional(v.string()),
   })
     // listBookings ranges on `start` (dateFrom/dateTo) and reads newest-first
-    // straight out of these two compound indexes; by_resource_start also
-    // serves the deleteResource existence probe as a prefix query.
+    // straight out of these three compound indexes; by_resource_start and
+    // by_eventTypeId_and_start also serve the deleteResource / deleteEventType
+    // existence probes as prefix queries.
     .index("by_org_start", ["organizationId", "start"])
     .index("by_resource_start", ["resourceId", "start"])
-    .index("by_uid", ["uid"])
-    .index("by_event_type", ["eventTypeId"]),
+    .index("by_eventTypeId_and_start", ["eventTypeId", "start"])
+    .index("by_uid", ["uid"]),
 
   // Booking items (for multi-resource bookings)
   booking_items: defineTable({

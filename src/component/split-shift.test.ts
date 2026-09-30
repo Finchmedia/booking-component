@@ -262,7 +262,7 @@ describe("generateDaySlotsWithTimezone: DST transition days (Europe/Berlin)", ()
     }
   });
 
-  test("the offset in force AFTER the change is used on both days", () => {
+  test("daytime windows on transition days use the offset in force at that time", () => {
     // 2026-03-29 is CEST (UTC+2) from 03:00 local on; 2026-10-25 is CET (UTC+1).
     expect(
       generateDaySlotsWithTimezone(SPRING_FORWARD, 60, 60, slotWindow("09:00", "10:00"), TZ)
@@ -275,12 +275,13 @@ describe("generateDaySlotsWithTimezone: DST transition days (Europe/Berlin)", ()
     expect(new Set(startsOf(allDay)).size).toBe(allDay.length);
   });
 
-  // wallClockToUTC() re-reads the zone offset at the guessed instant (two-pass,
-  // like date-fns-tz). Reading it at the NAIVE instant only — the previous
-  // behaviour — converted the hour before a DST change with the post-change
-  // offset: 01:00 CET on the spring day came back as 2026-03-28T23:00Z (the
-  // instant of 00:00 CET), 01:00 CEST on the fall day as 2026-10-25T00:00Z
-  // (= 02:00 local).
+  // wallClockToUTC() computes one candidate instant from each offset in force a
+  // day before and a day after the naive instant, keeps the candidates that
+  // read as the wall clock and returns the earlier. Reading the offset at the
+  // NAIVE instant only — an earlier behaviour — converted the hour before a
+  // DST change with the post-change offset: 01:00 CET on the spring day came
+  // back as 2026-03-28T23:00Z (the instant of 00:00 CET), 01:00 CEST on the
+  // fall day as 2026-10-25T00:00Z (= 02:00 local).
   test("the hour before a DST change maps to the right UTC instant", () => {
     // Spring forward: 01:00 CET is 2026-03-29T00:00Z.
     expect(wallClockToUTC(SPRING_FORWARD, "01:00", TZ)).toBe(zoned(SPRING_FORWARD, "01:00", TZ));
@@ -300,23 +301,26 @@ describe("generateDaySlotsWithTimezone: DST transition days (Europe/Berlin)", ()
     expect(spring[1]).toBe(iso(zoned(SPRING_FORWARD, "01:00", TZ)));
 
     // Fall back: 01:00 CEST is 2026-10-24T23:00Z. The ambiguous 02:00 (it occurs
-    // twice) resolves to its LATER occurrence (02:00 CET = 01:00Z), as in
-    // date-fns-tz; the first occurrence (00:00Z) is never offered.
+    // twice) resolves to its EARLIER occurrence (02:00 CEST = 00:00Z), as in
+    // every other zone; the second occurrence (01:00Z) is never offered.
+    // date-fns-tz is no oracle for the repeated hour: its pick depends on the
+    // process time zone.
     expect(wallClockToUTC(FALL_BACK, "01:00", TZ)).toBe(zoned(FALL_BACK, "01:00", TZ));
-    expect(wallClockToUTC(FALL_BACK, "02:00", TZ)).toBe(zoned(FALL_BACK, "02:00", TZ));
+    expect(wallClockToUTC(FALL_BACK, "02:00", TZ)).toBe(Date.parse("2026-10-25T00:00:00.000Z"));
     const fall = startsOf(
       generateDaySlotsWithTimezone(FALL_BACK, 60, 60, slotWindow("00:00", "06:00"), TZ)
     );
     expect(fall).toEqual([
       "2026-10-24T22:00:00.000Z", // 00:00 CEST
       "2026-10-24T23:00:00.000Z", // 01:00 CEST
-      "2026-10-25T01:00:00.000Z", // 02:00 CET (second occurrence)
+      "2026-10-25T00:00:00.000Z", // 02:00 CEST (first occurrence)
       "2026-10-25T02:00:00.000Z", // 03:00 CET
       "2026-10-25T03:00:00.000Z", // 04:00 CET
       "2026-10-25T04:00:00.000Z", // 05:00 CET
     ]);
-    expect(fall).toEqual(
-      ["00:00", "01:00", "02:00", "03:00", "04:00", "05:00"].map((time) =>
+    // The unambiguous hours still match the oracle.
+    expect(fall.filter((_, index) => index !== 2)).toEqual(
+      ["00:00", "01:00", "03:00", "04:00", "05:00"].map((time) =>
         iso(zoned(FALL_BACK, time, TZ))
       )
     );
@@ -484,13 +488,23 @@ describe("isDayAvailable", () => {
     expect(candidates.some((c) => areSlotsAvailable(c.slots, bookedAllDay))).toBe(false);
   });
 
-  test("a zero-length event is unguarded and always fits", () => {
-    expect(isDayAvailable(0, range(0, SLOTS_PER_DAY))).toBe(true);
+  // A zero-length event used to fit everywhere, even on a fully booked day
+  // (isDayAvailable(0, all busy) was true and each candidate held no slot).
+  test("an event length that is not a positive number is rejected", () => {
+    for (const length of [0, -15, NaN, Infinity, -Infinity]) {
+      expect(() => isDayAvailable(length, range(0, SLOTS_PER_DAY))).toThrow("Invalid eventLength");
+      expect(() => generateDaySlots(TUESDAY, length, 60)).toThrow("Invalid eventLength");
+      expect(() =>
+        generateDaySlotsWithTimezone(TUESDAY, length, 60, slotWindow("09:00", "10:00"), "UTC")
+      ).toThrow("Invalid eventLength");
+    }
+    // Control: the smallest positive lengths still occupy one slot each.
+    expect(isDayAvailable(1, range(0, SLOTS_PER_DAY))).toBe(false);
     expect(
-      generateDaySlotsWithTimezone(TUESDAY, 0, 60, slotWindow("09:00", "10:00"), "UTC").map(
+      generateDaySlotsWithTimezone(TUESDAY, 1, 60, slotWindow("09:00", "10:00"), "UTC").map(
         (c) => c.slots
       )
-    ).toEqual([[], []]);
+    ).toEqual([[36]]);
   });
 
   // The step is clamped to >= 1 slot: intervalMinutes <= 0 (or NaN) would make

@@ -111,6 +111,66 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       >;
     };
     maintenance: {
+      audit: FunctionReference<
+        "query",
+        "internal",
+        {
+          check: "f10_weekday" | "event_length_invalid";
+          cursor?: string | null;
+          limit: number;
+        },
+        {
+          continueCursor: string | null;
+          isDone: boolean;
+          issues: Array<
+            | {
+                check: "f10_weekday";
+                date: string;
+                scheduleId: string;
+                start: number;
+                uid: string;
+              }
+            | {
+                check: "event_length_invalid";
+                eventTypeId: string;
+                lengthInMinutes: number;
+                lengthInMinutesOptions?: Array<number>;
+              }
+          >;
+          scanned: number;
+        },
+        Name
+      >;
+      backfillBookingOrganizations: FunctionReference<
+        "mutation",
+        "internal",
+        { cursor?: string | null; dryRun: boolean; limit: number },
+        {
+          continueCursor: string | null;
+          isDone: boolean;
+          mismatches: Array<{
+            eventTypeOrganizationId: string;
+            organizationId: string;
+            uid: string;
+          }>;
+          needsReview: Array<{
+            eventTypeId: string;
+            eventTypeOrganizationId?: string;
+            reason:
+              | "event_type_missing"
+              | "event_type_without_organization"
+              | "resource_missing"
+              | "resource_organization_differs";
+            resourceId?: string;
+            resourceOrganizationId?: string;
+            uid: string;
+          }>;
+          scanned: number;
+          skipped: number;
+          updated: number;
+        },
+        Name
+      >;
       getDailyAvailability: FunctionReference<
         "query",
         "internal",
@@ -232,6 +292,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -288,6 +349,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -349,6 +411,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }>,
         Name
       >;
+      sweepOrphanedHolds: FunctionReference<
+        "mutation",
+        "internal",
+        { cursor?: string | null; dryRun: boolean; limit: number },
+        {
+          continueCursor: string | null;
+          deleted: number;
+          isDone: boolean;
+          rescheduled: number;
+          scanned: number;
+        },
+        Name
+      >;
     };
     public: {
       cancelBookingByToken: FunctionReference<
@@ -372,6 +447,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {
+          cancelledBy?: string;
+          reason?: string;
           resendOptions?: {
             apiKey: string;
             baseUrl?: string;
@@ -425,6 +502,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -500,6 +578,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -571,6 +650,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -603,6 +683,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -635,6 +716,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -654,6 +736,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           excludeBookingUid?: string;
           resourceId: string;
           resourceTimezone?: string;
+          scheduleId?: string;
           slotInterval?: number;
         },
         Array<{ time: string }>,
@@ -774,6 +857,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -822,6 +906,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         {
           bookingId: string;
+          changedBy?: string;
           newEnd: number;
           newStart: number;
           reason?: string;
@@ -851,6 +936,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;
@@ -894,6 +980,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           managementToken?: string;
           organizationId?: string;
           rescheduleUid?: string;
+          rescheduledToUid?: string;
           resourceId: string;
           start: number;
           status: string;

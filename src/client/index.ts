@@ -27,7 +27,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
     }),
 
     getEventTypeBySlug: internalQueryGeneric({
-      args: { slug: v.string() },
+      args: { slug: v.string(), organizationId: v.optional(v.string()) },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getEventTypeBySlug, args);
       },
@@ -161,6 +161,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         resourceTimezone: v.optional(v.string()),
         availableSlots: v.optional(v.array(v.number())),
         excludeBookingUid: v.optional(v.string()),
+        scheduleId: v.optional(v.string()),
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getDaySlots, args);
@@ -264,11 +265,15 @@ export function makeInternalBookingAPI(component: ComponentApi) {
     cancelReservation: internalMutationGeneric({
       args: {
         reservationId: v.string(),
+        reason: v.optional(v.string()),
+        cancelledBy: v.optional(v.string()),
         resendOptions: v.optional(bookingEmailOptionsValidator),
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.public.cancelReservation, {
           reservationId: args.reservationId,
+          reason: args.reason,
+          cancelledBy: args.cancelledBy,
           resendOptions: args.resendOptions,
         });
       },
@@ -753,6 +758,18 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       },
     }),
 
+    // One-time repair after upgrading from 0.4.2 or earlier; see CHANGELOG.
+    sweepOrphanedHolds: internalMutationGeneric({
+      args: {
+        cursor: v.optional(v.union(v.string(), v.null())),
+        limit: v.number(),
+        dryRun: v.boolean(),
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runMutation(component.presence.sweepOrphanedHolds, args);
+      },
+    }),
+
     // ============================================
     // MAINTENANCE (Sandbox resets / debugging)
     // Internal only. Keep resets inaccessible to browser clients.
@@ -778,6 +795,30 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.maintenance.getDailyAvailability, args);
+      },
+    }),
+
+    // Read-only upgrade audit of stored rows; see CHANGELOG.
+    audit: internalQueryGeneric({
+      args: {
+        check: v.union(v.literal("f10_weekday"), v.literal("event_length_invalid")),
+        cursor: v.optional(v.union(v.string(), v.null())),
+        limit: v.number(),
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runQuery(component.maintenance.audit, args);
+      },
+    }),
+
+    // One-time repair after upgrading from 0.4.2 or earlier; see CHANGELOG.
+    backfillBookingOrganizations: internalMutationGeneric({
+      args: {
+        cursor: v.optional(v.union(v.string(), v.null())),
+        limit: v.number(),
+        dryRun: v.boolean(),
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runMutation(component.maintenance.backfillBookingOrganizations, args);
       },
     }),
   };

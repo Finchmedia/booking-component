@@ -1,9 +1,37 @@
 import { v } from "convex/values";
-import { mutation, query, internalMutation } from "./_generated/server";
+import type { IndexRange } from "convex/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  type DatabaseReader,
+  type MutationCtx,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Doc, Id } from "./_generated/dataModel";
 import { presenceDoc } from "./validators";
 
 const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
+
+type HoldKey = { resourceId: string; slot: string; user: string };
+
+function scheduleCleanup(ctx: MutationCtx, key: HoldKey) {
+  return ctx.scheduler.runAfter(TIMEOUT_MS, internal.presence.cleanup, {
+    resourceId: key.resourceId,
+    slot: key.slot,
+    user: key.user,
+  });
+}
+
+/**
+ * Whether the cleanup job a marker names can still run. `inProgress` counts as
+ * live: production never reports it for a mutation, convex-test does while
+ * the job runs.
+ */
+async function isCleanupJobLive(ctx: MutationCtx, jobId: Id<"_scheduled_functions">) {
+  const job = await ctx.db.system.get(jobId);
+  return job?.state.kind === "pending" || job?.state.kind === "inProgress";
+}
 
 /**
  * signals that a user is present in one or more slots (time slots).
@@ -61,24 +89,20 @@ export const heartbeat = mutation({
         )
         .first();
 
-      // If we don't have a cleanup job, or (edge case) the previous one might have failed/finished
-      // without cleaning up, we schedule one.
+      // A new hold gets its cleanup job here. An existing marker keeps its job
+      // while that job can still run; a marker whose job was cancelled, failed
+      // or is gone gets exactly one replacement, or the hold would never expire.
       if (!existingHeartbeat) {
-        const scheduledId = await ctx.scheduler.runAfter(
-          TIMEOUT_MS,
-          internal.presence.cleanup,
-          {
-            resourceId: args.resourceId,
-            slot: slot,
-            user: args.user,
-          }
-        );
+        const scheduledId = await scheduleCleanup(ctx, { ...args, slot });
         await ctx.db.insert("presence_heartbeats", {
           resourceId: args.resourceId,
           user: args.user,
           slot: slot,
           markAsGone: scheduledId,
         });
+      } else if (!(await isCleanupJobLive(ctx, existingHeartbeat.markAsGone))) {
+        const scheduledId = await scheduleCleanup(ctx, { ...args, slot });
+        await ctx.db.patch(existingHeartbeat._id, { markAsGone: scheduledId });
       }
     }
 
@@ -117,12 +141,13 @@ export const leave = mutation({
 
       if (presence) await ctx.db.delete(presence._id);
 
-      // We can also delete the heartbeat doc immediately, but we might want to
-      // cancel the scheduled job if possible. For now, deleting the doc is enough
-      // because the cleanup job checks for the doc before doing anything.
+      // Cancel the marker's cleanup job with it. cleanup looks the marker up
+      // by key, so a job left queued would adopt the marker of a rejoin on the
+      // same key and keep a second chain alive. Only a pending job can be
+      // cancelled; a finished, failed or cancelled one is left alone.
       if (heartbeatDoc) {
-        // Optional: cancel the scheduled job if we had the ID available easily
-        // await ctx.scheduler.cancel(heartbeatDoc.markAsGone);
+        const job = await ctx.db.system.get(heartbeatDoc.markAsGone);
+        if (job?.state.kind === "pending") await ctx.scheduler.cancel(job._id);
         await ctx.db.delete(heartbeatDoc._id);
       }
     }
@@ -321,5 +346,145 @@ export const cleanup = internalMutation({
     }
 
     return null;
+  },
+});
+
+// ============================================
+// ORPHAN SWEEP (one-time repair after upgrading)
+// ============================================
+
+/**
+ * Largest `limit` of one sweep call. Each marker costs at most one job read,
+ * one presence read and either two deletes or one scheduled job plus a patch,
+ * so a full page stays well inside the transaction limits.
+ */
+const MAX_SWEEP_LIMIT = 500;
+
+/**
+ * A marker's complete by_creation_time index key. Creation times can tie
+ * (imported rows), so the time alone would skip or repeat rows at a page
+ * boundary.
+ */
+type SweepCursor = { creationTime: number; id: Id<"presence_heartbeats"> };
+
+function encodeSweepCursor(marker: Doc<"presence_heartbeats">): string {
+  return JSON.stringify([marker._creationTime, marker._id]);
+}
+
+function parseSweepCursor(db: DatabaseReader, cursor: string): SweepCursor {
+  let key: unknown;
+  try {
+    key = JSON.parse(cursor);
+  } catch {
+    key = null;
+  }
+  if (Array.isArray(key) && key.length === 2 && Number.isFinite(key[0]) && typeof key[1] === "string") {
+    const id = db.normalizeId("presence_heartbeats", key[1]);
+    if (id) return { creationTime: key[0], id };
+  }
+  throw new Error("Invalid sweep cursor");
+}
+
+/**
+ * Up to `limit` markers after `cursor`, in by_creation_time order: the rest of
+ * the cursor's tie group first, then the later creation times — the same split
+ * the convex-helpers paginator uses. The key is compared by value, so a
+ * cursor row deleted in the meantime is fine.
+ */
+async function markersAfter(
+  db: DatabaseReader,
+  cursor: SweepCursor | null,
+  limit: number
+): Promise<Doc<"presence_heartbeats">[]> {
+  if (!cursor) {
+    return await db.query("presence_heartbeats").withIndex("by_creation_time").take(limit);
+  }
+  const tieGroup = await db
+    .query("presence_heartbeats")
+    .withIndex("by_creation_time", (q) =>
+      // Every index ends with _id; the typed builder stops at _creationTime.
+      (
+        q.eq("_creationTime", cursor.creationTime) as unknown as {
+          gt(field: "_id", value: Id<"presence_heartbeats">): IndexRange;
+        }
+      ).gt("_id", cursor.id)
+    )
+    .take(limit);
+  if (tieGroup.length === limit) return tieGroup;
+  const later = await db
+    .query("presence_heartbeats")
+    .withIndex("by_creation_time", (q) => q.gt("_creationTime", cursor.creationTime))
+    .take(limit - tieGroup.length);
+  return [...tieGroup, ...later];
+}
+
+/**
+ * Repairs presence holds whose cleanup job can no longer run (cancelled,
+ * failed or gone), one page of markers per call. A stale orphan loses its
+ * presence row and marker; a fresh one gets one replacement cleanup job.
+ * Markers with a live job are left alone. Only presence tables are touched.
+ *
+ * Steady-state operation creates no orphans; they need an external failure
+ * such as a cancelled job. Run it once after upgrading from 0.4.2 or earlier,
+ * from a host internalMutation: start without a cursor and pass
+ * `continueCursor` back until `isDone`. `dryRun` counts without writing.
+ * Markers created during a sweep sort after the cursor and are visited too;
+ * they come with a live job, so they are left alone.
+ */
+export const sweepOrphanedHolds = mutation({
+  args: {
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.number(),
+    dryRun: v.boolean(),
+  },
+  returns: v.object({
+    scanned: v.number(),
+    deleted: v.number(),
+    rescheduled: v.number(),
+    continueCursor: v.union(v.string(), v.null()),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_SWEEP_LIMIT) {
+      throw new Error(`limit must be an integer from 1 to ${MAX_SWEEP_LIMIT}`);
+    }
+    const cursor =
+      typeof args.cursor === "string" ? parseSweepCursor(ctx.db, args.cursor) : null;
+    const markers = await markersAfter(ctx.db, cursor, args.limit);
+
+    const now = Date.now();
+    let deleted = 0;
+    let rescheduled = 0;
+    for (const marker of markers) {
+      if (await isCleanupJobLive(ctx, marker.markAsGone)) continue;
+
+      const presence = await ctx.db
+        .query("presence")
+        .withIndex("by_user_slot_resource", (q) =>
+          q.eq("user", marker.user).eq("slot", marker.slot).eq("resourceId", marker.resourceId)
+        )
+        .first();
+
+      if (!presence || now - presence.updated > TIMEOUT_MS) {
+        deleted++;
+        if (args.dryRun) continue;
+        if (presence) await ctx.db.delete(presence._id);
+        await ctx.db.delete(marker._id);
+      } else {
+        rescheduled++;
+        if (args.dryRun) continue;
+        const scheduledId = await scheduleCleanup(ctx, marker);
+        await ctx.db.patch(marker._id, { markAsGone: scheduledId });
+      }
+    }
+
+    const last = markers[markers.length - 1];
+    return {
+      scanned: markers.length,
+      deleted,
+      rescheduled,
+      continueCursor: last ? encodeSweepCursor(last) : (args.cursor ?? null),
+      isDone: markers.length < args.limit,
+    };
   },
 });

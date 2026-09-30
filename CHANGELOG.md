@@ -1,5 +1,120 @@
 # Changelog
 
+## 0.4.3 — Unreleased
+
+### Upgrading
+
+- After upgrading from 0.4.2 or earlier, run two one-time repairs from a host internal
+  mutation or `makeInternalBookingAPI`, passing `continueCursor` back until `isDone`
+  (`limit` 1–500, `dryRun: true` only counts): `presence.sweepOrphanedHolds` for holds
+  whose cleanup job was cancelled or failed, `maintenance.backfillBookingOrganizations`
+  to give bookings without an organization (bundles created without `organizationId`,
+  pre-0.3.0 ones) their event type's when every resource they occupy belongs to it too.
+  It writes nothing else: bookings it cannot corroborate (event type gone or without
+  organization, a resource missing or in another organization) stay without one and
+  are listed in `needsReview` with the reason; it only lists mismatches.
+- Presence runs fewer background jobs: `leave` cancels the hold's pending cleanup job,
+  and a heartbeat replaces a cancelled or failed one. Surplus jobs from earlier
+  leave/rejoin cycles are not merged; they no longer grow and end 10–20 s after their
+  session's last heartbeat. Do not mass-cancel `presence:cleanup` jobs: that orphans
+  live holds until their next heartbeat or the sweep.
+- Inputs without a valid meaning now throw an `Invalid …` error; existing error texts
+  are unchanged. The availability queries reject an `eventLength` that is not a
+  positive finite number and slot indices outside the integers 0–95; the availability
+  and date-override functions reject dates that do not exist (`2027-02-30`) and
+  `dateFrom` after `dateTo`; booking writes and `getAvailability` reject instants a
+  `Date` cannot hold; schedule, resource and event-type writes reject a time zone `Intl`
+  does not accept (patches only when they set one); `registerHook` and `updateHook`
+  reject anything but a `function://` handle from `createFunctionHandle`.
+- Event types whose `lengthInMinutes` or `lengthInMinutesOptions` hold a non-positive or
+  non-finite value make the Booker's slot queries throw. Check them before upgrading, or
+  list them with `maintenance.audit` and `check: "event_length_invalid"`.
+- Rows stored with an invalid zone stay readable and editable; a patch with a valid zone
+  repairs them. Stored hooks that are not function handles (they never reached the
+  host) are skipped with `Skipped hook <id>: …`; remove them with `unregisterHook`.
+- At UTC+12 and beyond, weekly hours apply to the day's own weekday, not the next one's
+  (F10). Undo any `weeklyHours` shift made to compensate. Bookings are not moved;
+  `maintenance.audit` with `check: "f10_weekday"` lists upcoming ones on closed days.
+- On fall-back days a repeated wall-clock time means its first occurrence in every zone
+  (zones east of UTC used the second; F11). Bookings made at the second one are kept.
+- Unpadded dates such as `2027-3-9` now mean the padded day, which `createDateOverride`
+  stores, so overrides stored unpadded are no longer found by date: list them with
+  `listDateOverrides` without bounds, recreate them padded and delete the old rows.
+- The built-in email HTML changes (escaped text, validated buttons; see Security), so
+  host snapshot tests of it may need updating. Email jobs queued by 0.4.2 still run.
+- The `bookings` index `by_event_type` becomes `by_eventTypeId_and_start`, which Convex
+  builds during the deploy (allow time on a large table); `schedules` gains
+  `by_organizationId_and_isDefault`, so `getDefaultSchedule` and the audit read one
+  schedule, not all of an organization's. Booking documents can carry the new optional
+  `rescheduledToUid`; host validators of booking fields must accept it.
+
+### Security
+
+- The six built-in templates escape booking text (F2); markup in guest names, titles or
+  reasons became live HTML in the host's mail. Renderers still get unescaped values.
+- Built-in buttons use the validated `email.links` (trailing slash, query and hash
+  dropped from `baseUrl`, uid URL-encoded); a `baseUrl` that is not an absolute
+  `http(s)` URL or contains credentials yields no buttons and logs a warning. Built-in
+  subjects turn CR, LF and NUL runs into a space and stop at 200 characters.
+- Hooks run only function handles; other strings were component function paths, so a
+  hook named `maintenance:wipeAllBookingData` scheduled that component mutation.
+
+### Fixed
+
+- On spring-forward days, windows reaching into or across the skipped hour no longer
+  offer bookings that end after they close.
+- `getMonthAvailability` with `scheduleId` but no `resourceTimezone` uses the
+  schedule's zone instead of UTC, where closed or full days read as open, and reads its
+  overrides once per call. A differing `resourceTimezone` is still used and logs a
+  warning; a schedule with an invalid zone keeps the legacy UTC path and logs one.
+- `getAvailability` stops at the first busy UTC date. Windows stored before 0.3.0 that
+  end past 24:00 end with the day (indices 0–95, no offered booking past midnight).
+- Mail to a syntactically malformed address is skipped (`INVALID_RECIPIENT`) instead of
+  failing its shared Resend batch; an unusable stored booking zone renders in UTC.
+- Repeated ids in `setResourcesForEventType`/`setEventTypesForResource` link once;
+  existing duplicate rows, which made bookings and link operations of the pair throw,
+  are tolerated and collapsed by the next link, unlink or replace.
+- `cancelReservation` records history, `cancelledAt`, `updatedAt` and
+  `cancellationReason` like the other cancel paths; earlier ones are not backfilled.
+- `createMultiResourceBooking` without `organizationId` stores the event type's, so
+  bundles reach organization lists and scoped hooks; no hook payload gains a key.
+- New management tokens are 64 lowercase hex characters; old ones keep working, so
+  host checks must accept both formats.
+- `listBookings` with a `limit` stops reading once enough rows match, with unchanged
+  results. `makeInternalBookingAPI`'s `getEventTypeBySlug` accepts `organizationId`.
+
+### Added
+
+- `presence.sweepOrphanedHolds`, `maintenance.backfillBookingOrganizations` and the
+  read-only `maintenance.audit`, each with a `makeInternalBookingAPI` wrapper.
+- `getDaySlots` takes an optional `scheduleId` that fills in omitted hours and zone.
+- `rescheduledToUid`, set on a moved original to the new booking's uid (from 0.4.3 on).
+- `cancelReservation` takes optional `reason` and `cancelledBy`, `rescheduleBooking` an
+  optional `changedBy`; `isSendableAddress` is exported from `@mrfinch/booking/emails`.
+
+### Documentation
+
+- The [README](README.md) documents the host contract; the new
+  [hook payload reference](docs/hook-payloads-v1.md) lists the v1 payloads and the
+  [custom email guide](docs/custom-emails.md) covers key rotation and Resend accounts.
+  The 0.3.1 entry no longer misstates `cancelReservation`'s result.
+
+### Still the host's job
+
+- Check eligibility (active, linked, same organization) before bundles, moves and
+  confirmations; keep booking documents, which hold the management token, from callers
+  who know only an id or uid; register hooks only from administrator code.
+- Decide who may receive mail (addresses are not verified); use one Resend account per
+  instance; pass `scheduleId` to the availability queries; delete links when deleting;
+  bound the date ranges forwarded to `getAvailability`.
+
+### Tests and maintenance
+
+- Characterization tests pin function paths, v1 hook payloads, error texts and the
+  documented host duties; time-dependent suites run under several process time zones.
+- The npm package omits test files and `src/testing/`. Internal refactors (shared cancel
+  path, typed patches, `hooks:triggerHooks` returning `null`) change no behaviour.
+
 ## 0.4.2 — 23 September 2026
 
 ### Added
@@ -102,7 +217,8 @@ before bumping.
   to `string` (or narrow at the boundary with a type guard), and delete mirror
   types that only existed to compensate for `any`.
 - **`cancelReservation` returns `{ success: boolean, alreadyCancelled: boolean }`**
-  instead of `null`, matching `cancelBooking` and `cancelMultiResourceBooking`.
+  instead of `null`. (`cancelBookingByToken` and `cancelMultiResourceBooking`
+  return `{ success }` only.)
   Cancelling an already-cancelled reservation reports
   `{ success: true, alreadyCancelled: true }` without releasing slots again; a
   missing reservation still throws.
@@ -141,8 +257,7 @@ before bumping.
 ### Changed
 
 - `cancelReservation` returns `{ success: boolean, alreadyCancelled: boolean }`
-  instead of `null`, matching `cancelBooking` and `cancelMultiResourceBooking`
-  (see _Upgrading_).
+  instead of `null` (see _Upgrading_).
 - `createBooking`, `createProvisionalBooking`, `rescheduleBooking`,
   `rescheduleBookingByToken` and `createMultiResourceBooking` return the booking
   document, never `null`.

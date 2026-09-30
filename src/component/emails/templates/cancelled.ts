@@ -2,6 +2,8 @@
 // BOOKING CANCELLATION EMAIL TEMPLATE
 // ============================================
 
+import { formatDateTimeFull } from "../helpers.js";
+import { html, raw } from "../html.js";
 import { EMAIL_BASE_STYLES, EMAIL_LIGHT_MODE_STYLES, ICON_STYLES } from "../styles.js";
 
 export interface BookingCancellationDetails {
@@ -16,24 +18,11 @@ export interface BookingCancellationDetails {
 }
 
 export function generateBookingCancellationHTML(details: BookingCancellationDetails): string {
-    const startDate = new Date(details.start);
-
-    const formatOptions: Intl.DateTimeFormatOptions = {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: details.timezone,
-        timeZoneName: "short",
-    };
-
-    const formattedStart = startDate.toLocaleString("en-US", formatOptions);
+    const formattedStart = formatDateTimeFull(details.start, details.timezone);
 
     const iconStyles = ICON_STYLES.error;
 
-    return `
+    return html`
 <!DOCTYPE html>
 <html>
 <head>
@@ -42,20 +31,20 @@ export function generateBookingCancellationHTML(details: BookingCancellationDeta
     <meta name="color-scheme" content="dark light">
     <title>Booking Cancelled</title>
     <style>
-        ${EMAIL_BASE_STYLES}
+        ${raw(EMAIL_BASE_STYLES)}
         .icon-circle {
-            background-color: ${iconStyles.dark.circleBackground};
+            background-color: ${raw(iconStyles.dark.circleBackground)};
         }
         .icon {
-            color: ${iconStyles.dark.iconColor};
+            color: ${raw(iconStyles.dark.iconColor)};
         }
-        ${EMAIL_LIGHT_MODE_STYLES}
+        ${raw(EMAIL_LIGHT_MODE_STYLES)}
         @media (prefers-color-scheme: light) {
             .icon-circle {
-                background-color: ${iconStyles.light.circleBackground};
+                background-color: ${raw(iconStyles.light.circleBackground)};
             }
             .icon {
-                color: ${iconStyles.light.iconColor};
+                color: ${raw(iconStyles.light.iconColor)};
             }
         }
     </style>
@@ -77,7 +66,7 @@ export function generateBookingCancellationHTML(details: BookingCancellationDeta
             <div class="details-card">
                 <h2 class="event-title">${details.eventTitle}</h2>
                 <p class="event-time">Was scheduled for: ${formattedStart}</p>
-                ${details.reason ? `<p class="reason">Reason: ${details.reason}</p>` : ""}
+                ${details.reason ? html`<p class="reason">Reason: ${details.reason}</p>` : ""}
             </div>
 
             <p class="help-text">If you'd like to book again, please visit our booking page.</p>
@@ -89,5 +78,5 @@ export function generateBookingCancellationHTML(details: BookingCancellationDeta
     </div>
 </body>
 </html>
-    `.trim();
+    `.toString().trim();
 }
