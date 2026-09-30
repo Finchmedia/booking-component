@@ -206,22 +206,23 @@ describe("Booker location (O4)", () => {
   }
 
   it.each([
-    ["an address (CONTROL)", [{ type: "address", address: "Main St 1", public: true }], { type: "address", value: "Main St 1" }],
-    ["an in-person place with an address", [{ type: "in_person", address: "Studio" }], { type: "in_person", value: "Studio" }],
-    ["a link", [{ type: "link", address: "https://meet.example/abc" }], { type: "link", value: "https://meet.example/abc" }],
-    ["several locations", [{ type: "address", address: "Branch North" }, { type: "address", address: "Branch South" }], { type: "address", value: "Branch North" }],
-  ])("submits %s with its configured type and value", async (_name, locations, expected) => {
-    expect(await bookWith(locations)).toStrictEqual(expected);
-    expect(screen.getByText(expected.value)).toBeTruthy();
+    ["an address (CONTROL)", [{ type: "address", address: "Main St 1", public: true }], "Main St 1"],
+    ["several locations", [{ type: "address", address: "Branch North" }, { type: "address", address: "Branch South" }], "Branch North"],
+    // The type stays "address" as in 0.4.2; the configured type is a 0.5.0 change
+    ["another type with an address", [{ type: "in_person", address: "Studio" }], "Studio"],
+  ])("submits %s as its first configured address", async (_name, locations, value) => {
+    expect(await bookWith(locations)).toStrictEqual({ type: "address", value });
+    expect(screen.getByText(value)).toBeTruthy();
+    expect(document.querySelector(".lucide-map-pin")).toBeTruthy();
   });
 
   it.each([
-    ["no location", [], { type: "unknown" }],
-    ["an in-person place without an address", [{ type: "in_person" }], { type: "in_person" }],
-    ["a phone location", [{ type: "phone" }], { type: "phone" }],
-  ])("submits %s without inventing a value", async (_name, locations, expected) => {
+    ["no location", []],
+    ["a phone location", [{ type: "phone" }]],
+    ["a link location", [{ type: "link" }]],
+  ])("submits %s without inventing a value", async (_name, locations) => {
     const location = await bookWith(locations);
-    expect(location).toStrictEqual(expected);
+    expect(location).toStrictEqual({ type: "address" });
     expect(Object.keys(location)).toEqual(["type"]);
     expect(document.body.textContent).not.toContain("Studio A");
     expect(document.querySelector(".lucide-map-pin")).toBeNull();

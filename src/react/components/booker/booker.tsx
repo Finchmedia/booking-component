@@ -90,14 +90,12 @@ export interface BookerProps {
 }
 
 /**
- * The event's first configured location, never an invented one. The value is
- * the location's address when it has one; without a configured location the
- * type is "unknown" and there is no value.
+ * The first configured location's address, never an invented one. The type is
+ * "address" as before; without a configured address there is no value.
  */
 function bookingLocation(locations: EventType["locations"]): { type: string; value?: string } {
-  const first = locations?.[0];
-  if (!first) return { type: "unknown" };
-  return first.address ? { type: first.type, value: first.address } : { type: first.type };
+  const address = locations?.[0]?.address;
+  return address ? { type: "address", value: address } : { type: "address" };
 }
 
 /**

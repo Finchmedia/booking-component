@@ -158,12 +158,11 @@
   contact details read-only. Its editable fields were never applied.
 - The confirmation and success steps follow the calendar's 12h/24h choice and the
   browser locale.
-- The Booker never invents a location. It submits the event's first configured
-  location with its configured type, and its address as the value when it has
-  one. Without a configured location it submits `{ type: "unknown" }` with no
-  value. "Studio A" is gone, and phone, link and in-person locations are no
-  longer relabelled `"address"`. The success screen shows a location only when
-  it has a value, with a map pin only for `"address"` and `"in_person"`.
+- The Booker never invents a location. It submits the first configured
+  location's address as `{ type: "address", value }`, and `{ type: "address" }`
+  without a value when the event has no configured address. "Studio A" is gone.
+  The type stays `"address"` for every Booker booking, as before. The success
+  screen shows a location only when it has a value.
 - Keyboard and screen-reader use: the duration choice is a native radio group
   ("Duration"). Form fields are named by their labels, expose required and
   invalid state and reference their error message. Reserved slots keep their
@@ -269,11 +268,10 @@
   show two messages. Remove the wrapper or move it to `onBookingError`. Throw
   `ConvexError({ code, message })` from host functions to show a specific message.
 - `BookingSuccess` no longer renders "Book Another" when `isRescheduling` is set.
-- Booker bookings store the configured location type (for example `"phone"`,
-  `"in_person"` or `"link"`) instead of always `"address"`, `{ type: "unknown" }`
-  for events without locations, and no value for locations without an address.
-  Render a location by `location.value`, not by `booking.location &&`. Existing
-  bookings keep what they stored, including "Studio A".
+- Booker bookings for events without a configured address store
+  `{ type: "address" }` with no value instead of the value "Studio A". Render a
+  location by `location.value`, not by `booking.location &&`. Existing bookings
+  keep what they stored, including "Studio A".
 - Pass `onEventTypeReset` and `onNavigate` to offer a way back from
   configuration errors; without them the Booker shows an inline notice. The
   callbacks now receive the recovery kind as an extra argument, so wrap

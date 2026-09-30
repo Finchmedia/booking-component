@@ -152,19 +152,10 @@ describe("BookingForm labels and error state (O3)", () => {
 describe("BookingSuccess location (O4)", () => {
   const mapPin = () => document.querySelector(".lucide-map-pin");
 
-  it("shows a place with a map pin", () => {
-    for (const location of [{ type: "address", value: "Main St 1" }, { type: "in_person", value: "Studio B" }]) {
+  it("shows a location value with a map pin", () => {
+    for (const location of [{ type: "address", value: "Main St 1" }, { type: "phone", value: "+49 30 123" }]) {
       renderSuccess({ booking: { ...booking, location } });
       expect(screen.getByText(location.value).parentElement!.contains(mapPin())).toBe(true);
-      cleanup();
-    }
-  });
-
-  it("shows other location values without a map pin", () => {
-    for (const location of [{ type: "phone", value: "+49 30 123" }, { type: "link", value: "https://meet.example/abc" }]) {
-      renderSuccess({ booking: { ...booking, location } });
-      expect(screen.getByText(location.value)).toBeTruthy();
-      expect(mapPin()).toBeNull();
       cleanup();
     }
   });

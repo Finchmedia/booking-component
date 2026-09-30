@@ -35,9 +35,6 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
   locale,
 }) => {
   const isPending = booking.status === "pending";
-  // A location is shown only with a value; the map pin only for places
-  const location = booking.location?.value ? booking.location : undefined;
-  const isPlace = location?.type === "address" || location?.type === "in_person";
 
   return (
     <div className="max-w-2xl mx-auto p-8">
@@ -102,14 +99,10 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
           </div>
         </div>
 
-        {location && (
+        {booking.location?.value && (
           <div className="flex items-start gap-3">
-            {isPlace ? (
-              <MapPin className="h-5 w-5 text-muted-foreground mt-0.5" />
-            ) : (
-              <span className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-            )}
-            <p className="text-sm text-foreground">{location.value}</p>
+            <MapPin className="h-5 w-5 text-muted-foreground mt-0.5" />
+            <p className="text-sm text-foreground">{booking.location?.value}</p>
           </div>
         )}
 
