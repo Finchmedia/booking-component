@@ -15,6 +15,7 @@ import {
 import { isAvailable } from "./availability";
 import { getScheduleByExternalId, getScheduleDaySlots } from "./schedules";
 import { assertSingleBookable, terminateBooking } from "./booking_lifecycle";
+import { generateManagementToken } from "./tokens";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import {
     assertDateOrder,
@@ -36,15 +37,6 @@ import {
     successResult,
     successWithAffectedUsers,
 } from "./validators";
-
-// Generate a secure random token (64 hex chars = 256 bits)
-function generateSecureToken(): string {
-  const segments: string[] = [];
-  for (let i = 0; i < 8; i++) {
-    segments.push(Math.random().toString(36).substring(2));
-  }
-  return segments.join('') + Date.now().toString(36);
-}
 
 /**
  * Resolves the busy slots currently held by ONE specific booking so that the
@@ -580,7 +572,7 @@ export const createBooking = mutation({
     const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // 6. Generate secure management token
-    const managementToken = generateSecureToken();
+    const managementToken = generateManagementToken();
 
     // 7. Determine initial status based on requiresConfirmation flag
     const initialStatus = eventType.requiresConfirmation ? "pending" : "confirmed";
@@ -698,7 +690,7 @@ export const createProvisionalBooking = mutation({
     const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
 
     const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const managementToken = generateSecureToken();
+    const managementToken = generateManagementToken();
     const now = Date.now();
 
     const bookingId = await ctx.db.insert("bookings", {

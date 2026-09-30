@@ -36,6 +36,7 @@ import type * as resource_event_types from "../resource_event_types.js";
 import type * as resources from "../resources.js";
 import type * as schedules from "../schedules.js";
 import type * as slot_helpers from "../slot_helpers.js";
+import type * as tokens from "../tokens.js";
 import type * as utils from "../utils.js";
 import type * as validators from "../validators.js";
 
@@ -75,6 +76,7 @@ const fullApi: ApiFromModules<{
   resources: typeof resources;
   schedules: typeof schedules;
   slot_helpers: typeof slot_helpers;
+  tokens: typeof tokens;
   utils: typeof utils;
   validators: typeof validators;
 }> = anyApi as any;

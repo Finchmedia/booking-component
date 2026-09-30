@@ -198,6 +198,15 @@ The internal email mutations keep their names and arguments, so jobs queued by
   `organizationId` is still stored as given, also when it differs from the
   event type's, and an event type without an organization keeps using the
   argument.
+- New management tokens are 64 lowercase hex characters from
+  `crypto.getRandomValues`, made by one helper for `createBooking`,
+  `createProvisionalBooking` and `createMultiResourceBooking`. The code
+  comment promised this format, but tokens were 91–97 base-36 characters
+  ending in a readable timestamp. This fixes the format; it does not claim
+  more entropy, since Convex seeds randomness per function run. Existing
+  tokens keep working (they are compared exactly, never parsed) and a move
+  still keeps its token, so hosts that check tokens before forwarding them
+  must accept both formats.
 
 ### Added
 
