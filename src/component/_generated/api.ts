@@ -25,6 +25,7 @@ import type * as emails_templates_index from "../emails/templates/index.js";
 import type * as emails_templates_pending from "../emails/templates/pending.js";
 import type * as emails_templates_rescheduled from "../emails/templates/rescheduled.js";
 import type * as hooks from "../hooks.js";
+import type * as input_validation from "../input_validation.js";
 import type * as inventory_helpers from "../inventory_helpers.js";
 import type * as maintenance from "../maintenance.js";
 import type * as multi_resource from "../multi_resource.js";
@@ -62,6 +63,7 @@ const fullApi: ApiFromModules<{
   "emails/templates/pending": typeof emails_templates_pending;
   "emails/templates/rescheduled": typeof emails_templates_rescheduled;
   hooks: typeof hooks;
+  input_validation: typeof input_validation;
   inventory_helpers: typeof inventory_helpers;
   maintenance: typeof maintenance;
   multi_resource: typeof multi_resource;

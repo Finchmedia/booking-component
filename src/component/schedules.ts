@@ -1,6 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { parseCivilDate } from "../shared/time.js";
+import { assertDateOrder } from "./input_validation";
 import { getDayOfWeekInTimezone } from "./utils";
 import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 
@@ -305,8 +307,12 @@ export const listDateOverrides = query({
   handler: async (ctx, args) => {
     // The index is [scheduleId, date] and ISO dates sort lexicographically ==
     // chronologically, so both the range and the ascending date order come
-    // straight from the index.
-    const { dateFrom, dateTo } = args;
+    // straight from the index. Bounds are compared in canonical form.
+    const dateFrom = args.dateFrom !== undefined ? parseCivilDate(args.dateFrom) : undefined;
+    const dateTo = args.dateTo !== undefined ? parseCivilDate(args.dateTo) : undefined;
+    if (dateFrom !== undefined && dateTo !== undefined) {
+      assertDateOrder(dateFrom, dateTo);
+    }
     return await ctx.db
       .query("date_overrides")
       .withIndex("by_schedule_date", (q) => {
@@ -325,12 +331,13 @@ export const getDateOverride = query({
   },
   returns: v.union(dateOverrideDoc, v.null()),
   handler: async (ctx, args) => {
+    const date = parseCivilDate(args.date);
     // Full-depth lookup. .first() keeps first-match semantics should a legacy
     // duplicate (scheduleId, date) row exist; .unique() would throw on it.
     return await ctx.db
       .query("date_overrides")
       .withIndex("by_schedule_date", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("date", args.date)
+        q.eq("scheduleId", args.scheduleId).eq("date", date)
       )
       .first();
   },
@@ -356,6 +363,8 @@ export const createDateOverride = mutation({
   },
   returns: v.id("date_overrides"),
   handler: async (ctx, args) => {
+    // Stored in canonical form, the form every availability lookup uses.
+    const date = parseCivilDate(args.date);
     if (args.customHours !== undefined) {
       assertValidCustomHours(args.customHours);
     }
@@ -364,7 +373,7 @@ export const createDateOverride = mutation({
     const existing = await ctx.db
       .query("date_overrides")
       .withIndex("by_schedule_date", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("date", args.date)
+        q.eq("scheduleId", args.scheduleId).eq("date", date)
       )
       .first();
     if (existing) {
@@ -378,7 +387,7 @@ export const createDateOverride = mutation({
 
     return await ctx.db.insert("date_overrides", {
       scheduleId: args.scheduleId,
-      date: args.date,
+      date,
       type: args.type,
       customHours: args.customHours,
     });
@@ -527,5 +536,5 @@ export const getEffectiveAvailability = query({
   },
   returns: v.object({ availableSlots: v.array(v.number()) }),
   handler: async (ctx, args) =>
-    computeAvailabilityForDate(ctx, args.scheduleId, args.date),
+    computeAvailabilityForDate(ctx, args.scheduleId, parseCivilDate(args.date)),
 });

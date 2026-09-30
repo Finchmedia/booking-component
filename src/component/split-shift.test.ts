@@ -484,13 +484,23 @@ describe("isDayAvailable", () => {
     expect(candidates.some((c) => areSlotsAvailable(c.slots, bookedAllDay))).toBe(false);
   });
 
-  test("a zero-length event is unguarded and always fits", () => {
-    expect(isDayAvailable(0, range(0, SLOTS_PER_DAY))).toBe(true);
+  // A zero-length event used to fit everywhere, even on a fully booked day
+  // (isDayAvailable(0, all busy) was true and each candidate held no slot).
+  test("an event length that is not a positive number is rejected", () => {
+    for (const length of [0, -15, NaN, Infinity, -Infinity]) {
+      expect(() => isDayAvailable(length, range(0, SLOTS_PER_DAY))).toThrow("Invalid eventLength");
+      expect(() => generateDaySlots(TUESDAY, length, 60)).toThrow("Invalid eventLength");
+      expect(() =>
+        generateDaySlotsWithTimezone(TUESDAY, length, 60, slotWindow("09:00", "10:00"), "UTC")
+      ).toThrow("Invalid eventLength");
+    }
+    // Control: the smallest positive lengths still occupy one slot each.
+    expect(isDayAvailable(1, range(0, SLOTS_PER_DAY))).toBe(false);
     expect(
-      generateDaySlotsWithTimezone(TUESDAY, 0, 60, slotWindow("09:00", "10:00"), "UTC").map(
+      generateDaySlotsWithTimezone(TUESDAY, 1, 60, slotWindow("09:00", "10:00"), "UTC").map(
         (c) => c.slots
       )
-    ).toEqual([[], []]);
+    ).toEqual([[36]]);
   });
 
   // The step is clamped to >= 1 slot: intervalMinutes <= 0 (or NaN) would make

@@ -19,6 +19,12 @@
   before release.
 - Do not mass-cancel `presence:cleanup` jobs to tidy up. That orphans live
   holds until their next heartbeat or the sweep.
+- The availability queries now reject an `eventLength` that is not a positive
+  number. The Booker takes it from the event type, so check stored event types
+  before upgrading, for example in a host query:
+  `(await ctx.runQuery(components.booking.public.listEventTypes, {})).filter((et) => ![et.lengthInMinutes, ...(et.lengthInMinutesOptions ?? [])].every((n) => Number.isFinite(n) && n > 0))`.
+  Slot queries for such event types throw after the upgrade instead of
+  offering slots on booked days.
 
 ### Security
 
@@ -44,6 +50,29 @@ The internal email mutations keep their names and arguments, so jobs queued by
 
 ### Fixed
 
+- The availability queries reject inputs that have no meaning instead of
+  answering them with silent nonsense: an `eventLength` of zero, below zero,
+  `NaN` or infinite (-900 offered 60 starts on a fully booked day), slot
+  indices outside the integers 0–95, dates that do not exist (`2027-02-30`
+  answered with March 2) and `dateFrom` after `dateTo`. The errors read
+  `Invalid eventLength …`, `Invalid availableSlots index …`,
+  `Invalid date "…"` and `Invalid date range: …`. `getDaySlots`,
+  `getMonthAvailability`, `getEffectiveAvailability`, `getDateOverride`,
+  `listDateOverrides` and `createDateOverride` check their dates. Lengths are
+  still rounded up to the 15-minute grid, and a non-positive `slotInterval`
+  still counts as 15 minutes.
+- Unpadded dates such as `2027-3-9` mean the same day as `2027-03-09` at every
+  entry point. `createDateOverride` stores the padded form, which is the one
+  the availability queries look up.
+- `getAvailability` checks one UTC date at a time and stops at the first busy
+  one, so a range whose start is taken returns after two reads however long it
+  is. It used to build the whole range's slot list first (about a second for
+  30 years). A free range still reads every date: about 4,095 dates fit
+  Convex's index-range limit per call. There is no range cap in the component;
+  bound the ranges your host forwards.
+- Booking writes and `getAvailability` reject instants beyond what a `Date`
+  can hold with `Invalid time range: start and end must be representable
+  dates` instead of failing later with a `RangeError`.
 - One malformed recipient address no longer takes other bookers' mail down
   with it. Built-in email to an address that fails a conservative syntax check
   (for example `x@`) is skipped before it is queued: the job returns
@@ -95,6 +124,7 @@ The internal email mutations keep their names and arguments, so jobs queued by
   that hosts match. Changing any of them fails the suite and must be deliberate.
 - Time-sensitive tests can run under a chosen process time zone
   (`src/testing/process-time-zone.ts`).
+- Regression suites for input validation.
 
 ## 0.4.2 — 23 September 2026
 

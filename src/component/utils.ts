@@ -1,3 +1,5 @@
+import { assertEventLength, assertSlotIndices } from "./input_validation";
+
 export const SLOT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 export const SLOTS_PER_DAY = 24 * 4; // 96
 
@@ -242,32 +244,40 @@ export function getRequiredSlots(
     start: number,
     end: number
 ): Map<string, number[]> {
-    const slots = new Map<string, number[]>();
+    return new Map(requiredSlotsByDate(start, end));
+}
 
+/**
+ * getRequiredSlots one UTC date at a time: yields `[date, slots]` in date
+ * order and computes a date only when the caller asks for it, so a reader can
+ * stop at the first busy date without walking the rest of a long range.
+ */
+export function* requiredSlotsByDate(
+    start: number,
+    end: number
+): Generator<[string, number[]]> {
     // A non-finite bound requires nothing — the write paths reject it up
     // front (assertValidRange); here it only keeps `end = Infinity` from
     // looping forever in a read path.
     if (!Number.isFinite(start) || !Number.isFinite(end)) {
-        return slots;
+        return;
     }
 
+    // An unaligned start occupies its containing slot (14:05 → the
+    // 14:00–14:15 slot); the walk then continues on slot boundaries.
     let current = start;
-
-    // Normalize start to the beginning of the slot?
-    // For now, let's assume inputs are already aligned or we just take the containing slot.
-    // Actually, if start is 14:05, it occupies the 14:00-14:15 slot.
+    let date: string | null = null;
+    let daySlots: number[] = [];
 
     while (current < end) {
-        const { date, slot } = timestampToSlot(current);
+        const slot = timestampToSlot(current);
 
-        if (!slots.has(date)) {
-            slots.set(date, []);
+        if (slot.date !== date) {
+            if (date !== null) yield [date, daySlots];
+            date = slot.date;
+            daySlots = [];
         }
-
-        const daySlots = slots.get(date)!;
-        if (!daySlots.includes(slot)) {
-            daySlots.push(slot);
-        }
+        daySlots.push(slot.slot);
 
         // Move to next slot
         current += SLOT_DURATION_MS;
@@ -279,7 +289,7 @@ export function getRequiredSlots(
         }
     }
 
-    return slots;
+    if (date !== null) yield [date, daySlots];
 }
 
 /**
@@ -346,6 +356,7 @@ export function generateDaySlots(
     eventLengthMinutes: number,
     intervalMinutes: number = 15
 ): SlotCandidate[] {
+    assertEventLength(eventLengthMinutes);
     const slotsNeeded = Math.ceil(eventLengthMinutes / 15);
     const step = intervalToStep(intervalMinutes);
     const possibleSlots: SlotCandidate[] = [];
@@ -387,6 +398,8 @@ export function generateDaySlotsWithTimezone(
     availableSlots: number[],
     timezone: string
 ): SlotCandidate[] {
+    assertEventLength(eventLengthMinutes);
+    assertSlotIndices(availableSlots);
     if (availableSlots.length === 0) {
         return [];
     }
@@ -465,15 +478,23 @@ export function isCandidateAvailable(
     return true;
 }
 
+/** The largest instant a Date can hold (±8.64e15 ms, about ±275,000 years). */
+const MAX_INSTANT_MS = 8.64e15;
+
 /**
  * Shared range guard for every write path that reserves slots: NaN/Infinity
  * and `end <= start` are rejected, because getRequiredSlots maps such a range
  * to ZERO slots and the booking would be created without holding anything.
- * Past-/notice-window checks stay the caller's responsibility by design.
+ * Instants beyond what a Date can hold are rejected too; they used to fail
+ * later with a RangeError. Past-/notice-window checks stay the caller's
+ * responsibility by design.
  */
 export function assertValidRange(start: number, end: number): void {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
         throw new Error("Invalid time range: end must be after start");
+    }
+    if (Math.abs(start) > MAX_INSTANT_MS || Math.abs(end) > MAX_INSTANT_MS) {
+        throw new Error("Invalid time range: start and end must be representable dates");
     }
 }
 
@@ -502,6 +523,7 @@ export function isDayAvailable(
     intervalMinutes: number = 15,
     availableSlots?: number[]
 ): boolean {
+    assertEventLength(eventLengthMinutes);
     const slotsNeeded = Math.ceil(eventLengthMinutes / 15);
     const step = intervalToStep(intervalMinutes);
 

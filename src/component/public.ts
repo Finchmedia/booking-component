@@ -14,6 +14,8 @@ import {
 } from "./utils";
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
+import { parseCivilDate } from "../shared/time.js";
+import { assertDateOrder, assertEventLength, assertSlotIndices } from "./input_validation";
 import type { Doc } from "./_generated/dataModel";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
 import {
@@ -169,9 +171,13 @@ export const getAvailability = query({
  * Optimized for month view: Returns boolean map, no slot objects
  *
  * TIMEZONE HANDLING:
- * - dateFrom/dateTo are expected to be ISO date strings (e.g., "2025-06-17")
+ * - dateFrom/dateTo are calendar dates ("2025-06-17"; "2025-6-17" is read as
+ *   the same day)
  * - These are interpreted as UTC dates for consistency
  * - The resourceTimezone parameter (optional) can be used for timezone-aware availability
+ *
+ * Rejects an eventLength that is not a positive number, impossible dates and
+ * dateFrom after dateTo.
  */
 export const getMonthAvailability = query({
     args: {
@@ -186,7 +192,11 @@ export const getMonthAvailability = query({
     },
     returns: v.record(v.string(), v.boolean()),
     handler: async (ctx, args) => {
-        const { resourceId, dateFrom, dateTo, eventLength } = args;
+        const { resourceId, eventLength } = args;
+        const dateFrom = parseCivilDate(args.dateFrom);
+        const dateTo = parseCivilDate(args.dateTo);
+        assertDateOrder(dateFrom, dateTo);
+        assertEventLength(eventLength);
         const pooledResource = await isFungibleResource(ctx, resourceId);
 
         // Parse dates with explicit UTC context to avoid timezone bugs
@@ -302,9 +312,12 @@ export const getMonthAvailability = query({
  * Used for day view / slot picker
  *
  * TIMEZONE HANDLING:
- * - date is expected to be an ISO date string (e.g., "2025-06-17")
+ * - date is a calendar date ("2025-06-17"; "2025-6-17" is read as the same day)
  * - If resourceTimezone is provided, slots are generated in that timezone context
  * - If availableSlots are provided (from schedule), those are used instead of hardcoded business hours
+ *
+ * Rejects an eventLength that is not a positive number, impossible dates and
+ * availableSlots outside 0–95.
  */
 export const getDaySlots = query({
     args: {
@@ -318,7 +331,10 @@ export const getDaySlots = query({
     },
     returns: v.array(v.object({ time: v.string() })),
     handler: async (ctx, args) => {
-        const { resourceId, date, eventLength, slotInterval, resourceTimezone, availableSlots } = args;
+        const { resourceId, eventLength, slotInterval, resourceTimezone, availableSlots } = args;
+        const date = parseCivilDate(args.date);
+        assertEventLength(eventLength);
+        if (availableSlots) assertSlotIndices(availableSlots);
 
         if (await isFungibleResource(ctx, resourceId)) return [];
 

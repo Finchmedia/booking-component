@@ -1,5 +1,5 @@
 import type { QueryCtx } from "./_generated/server";
-import { assertValidRange, getRequiredSlots } from "./utils";
+import { assertValidRange, requiredSlotsByDate } from "./utils";
 import { isFungibleResource } from "./inventory_helpers";
 
 /**
@@ -22,9 +22,11 @@ export async function isAvailable(
     assertValidRange(start, end);
     // This API describes ordinary, single-resource bookings only.
     if (await isFungibleResource(ctx, resourceId)) return false;
-    const requiredSlots = getRequiredSlots(start, end);
 
-    for (const [date, slots] of requiredSlots.entries()) {
+    // One UTC date at a time, stopping at the first busy one: a range whose
+    // start is taken costs one read however long it is. A free range still
+    // reads every date; the host bounds ranges it forwards.
+    for (const [date, slots] of requiredSlotsByDate(start, end)) {
         const availability = await ctx.db
             .query("daily_availability")
             .withIndex("by_resource_date", (q) =>
