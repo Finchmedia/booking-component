@@ -28,6 +28,24 @@ export const HOOK_EVENTS = [
 
 export type HookEventType = (typeof HOOK_EVENTS)[number];
 
+/**
+ * Whether `value` is a Convex function handle (`createFunctionHandle` output).
+ * The scheduler runs any other string as a function path of THIS component,
+ * so a hook could name the component's own functions. Mirrors Convex's
+ * internal `isFunctionHandle`; a test pins real `createFunctionHandle` output.
+ */
+function isFunctionHandle(value: string): boolean {
+  return value.startsWith("function://");
+}
+
+function assertFunctionHandle(value: string): void {
+  if (!isFunctionHandle(value)) {
+    throw new Error(
+      `Invalid hook functionHandle "${value}": expected a function handle from createFunctionHandle`
+    );
+  }
+}
+
 // ============================================
 // HOOK QUERIES
 // ============================================
@@ -81,6 +99,12 @@ export const getHook = query({
 // HOOK MUTATIONS
 // ============================================
 
+/**
+ * Registers a host function, given as a handle from `createFunctionHandle`,
+ * for one lifecycle event (organization-scoped or global). The handle runs
+ * with every matching payload, management token and booker details included,
+ * so keep registration server-side and administrator-only.
+ */
 export const registerHook = mutation({
   args: {
     eventType: v.string(),
@@ -95,6 +119,7 @@ export const registerHook = mutation({
         `Invalid hook event type: ${args.eventType}. Valid types: ${HOOK_EVENTS.join(", ")}`
       );
     }
+    assertFunctionHandle(args.functionHandle);
 
     return await ctx.db.insert("hooks", {
       eventType: args.eventType,
@@ -114,6 +139,9 @@ export const updateHook = mutation({
   },
   returns: v.id("hooks"),
   handler: async (ctx, args) => {
+    if (args.functionHandle !== undefined) {
+      assertFunctionHandle(args.functionHandle);
+    }
     const hook = await ctx.db.get(args.hookId);
     if (!hook) {
       throw new Error("Hook not found");
@@ -156,7 +184,8 @@ export const triggerHooks = internalMutation({
     // Resend config passed from main app (components can't access process.env)
     resendOptions: v.optional(bookingEmailOptionsValidator),
   },
-  returns: v.object({ triggeredCount: v.number(), emailsSent: v.boolean() }),
+  // Only ever scheduled, and scheduled jobs keep no result: nothing to report.
+  returns: v.null(),
   handler: async (ctx, args) => {
     const payload = args.payload as Record<string, unknown>;
 
@@ -325,6 +354,12 @@ export const triggerHooks = internalMutation({
 
     // Trigger each hook
     for (const hook of hooks) {
+      // Rows registered before handles were checked may hold any string, which
+      // would run a function of this component by name. unregisterHook removes them.
+      if (!isFunctionHandle(hook.functionHandle)) {
+        console.error(`Skipped hook ${hook._id}: functionHandle is not a function handle`);
+        continue;
+      }
       try {
         const handle = hook.functionHandle as FunctionHandle<"mutation">;
         await ctx.scheduler.runAfter(0, handle, args.payload);
@@ -334,7 +369,7 @@ export const triggerHooks = internalMutation({
       }
     }
 
-    return { triggeredCount: hooks.length, emailsSent: true };
+    return null;
   },
 });
 

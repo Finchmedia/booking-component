@@ -44,6 +44,12 @@
   deleted or has none, and lists rows whose organization differs from their
   event type's without changing them. From then on those bundles appear in
   organization lists and reach organization-scoped hooks.
+- `registerHook` and `updateHook` accept only function handles from
+  `createFunctionHandle` (strings starting with `function://`) and reject
+  anything else with `Invalid hook functionHandle "…"`. Hook rows stored
+  earlier with another string are skipped when their event fires and log
+  `Skipped hook <id>: …`; find them with `listHooks` and remove them with
+  `unregisterHook`. They never reached the host (see Security).
 
 ### Security
 
@@ -63,6 +69,14 @@
   in the path.
 - Built-in subjects follow the renderer rules: runs of CR, LF and NUL become a
   space, and subjects are capped at 200 characters.
+- Hooks run only function handles. The scheduler treats any other string as
+  a function path inside the booking component, so a hook registered as
+  `maintenance:wipeAllBookingData` scheduled that component mutation on the
+  next booking, and only its argument validator stopped it: whoever could
+  register hooks could name the component's own functions. Registration now
+  rejects such strings and stored ones are skipped (see Upgrading). Hook
+  payloads carry the management token and booker details, so keep
+  registration server-side and administrator-only.
 
 The internal email mutations keep their names and arguments, so jobs queued by
 0.4.2 still run and render with the escaped templates.
@@ -242,6 +256,12 @@ The internal email mutations keep their names and arguments, so jobs queued by
   implementation for inventory release, history and the cancellation fields.
   Each keeps its checks, error texts, default actor and reason, idempotency
   and hook payload.
+- The internal `hooks:triggerHooks` returns `null`. Its
+  `{ triggeredCount, emailsSent }` counted matching hooks rather than
+  scheduled ones and always said `emailsSent: true`, also for events that
+  send no mail. It runs only as a scheduled job, which keeps no result, so
+  nothing could read it; its arguments are unchanged and queued jobs still
+  run.
 
 ### Tests
 

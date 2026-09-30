@@ -36,6 +36,20 @@ async function hookJob(t: T, bookingId: Id<"bookings">, eventType: string) {
   return matches[0];
 }
 
+/** Runs a triggerHooks job again; returns the names of the hook jobs it scheduled. */
+async function replayHooks(t: T, job: Record<string, any>) {
+  const jobs = async () =>
+    (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())) as unknown as Array<
+      Job & { _id: string }
+    >;
+  const before = new Set((await jobs()).map((row) => row._id));
+  expect(await t.mutation(internal.hooks.triggerHooks, job as any)).toBeNull();
+  return (await jobs())
+    .filter((row) => !before.has(row._id) && !row.name?.startsWith("emails"))
+    .map((row) => row.name)
+    .sort();
+}
+
 function bundle(t: T, eventTypeId: string, h: number, organizationId?: string) {
   return t.mutation(api.multi_resource.createMultiResourceBooking, {
     eventTypeId,
@@ -56,7 +70,7 @@ describe("createMultiResourceBooking organization", () => {
     for (const organizationId of [undefined, "org-1", "org-2"]) {
       await t.mutation(api.hooks.registerHook, {
         eventType: "booking.created",
-        functionHandle: `function://probe-${organizationId ?? "global"}`,
+        functionHandle: `function://;probe:${organizationId ?? "global"}`,
         organizationId,
       });
     }
@@ -72,8 +86,8 @@ describe("createMultiResourceBooking organization", () => {
     expect([job.organizationId, job.emailContext.organizationId]).toEqual(["org-1", "org-1"]);
     // Replaying the job matches the global and the org-1 hook, like the single booking's.
     const singleJob = await hookJob(t, single._id, "booking.created");
-    expect((await t.mutation(internal.hooks.triggerHooks, job as any)).triggeredCount).toBe(2);
-    expect((await t.mutation(internal.hooks.triggerHooks, singleJob as any)).triggeredCount).toBe(2);
+    expect(await replayHooks(t, job)).toEqual(["probe:global", "probe:org-1"]);
+    expect(await replayHooks(t, singleJob)).toEqual(["probe:global", "probe:org-1"]);
   });
 
   test("the organization carries through a move and a cancellation", async () => {
