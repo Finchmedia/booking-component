@@ -232,16 +232,21 @@ endpoints to authorized host wrappers.
 - **Schedule arguments:** pass `scheduleId` to `getMonthAvailability` and
   `getDaySlots` and omit `resourceTimezone` and `availableSlots`. The
   component then reads the schedule's hours, date overrides included, in the
-  schedule's timezone. The older shapes keep their 0.4.2 answers: `getDaySlots`
-  uses `availableSlots` only together with `resourceTimezone`; otherwise, and
-  for `scheduleId: ""`, the legacy 09:00–17:00 UTC window applies. An unknown
-  `scheduleId` means 09:00–17:00 in `resourceTimezone`, or UTC without one.
-  These fallbacks can open days the schedule keeps closed. A
-  `resourceTimezone` that differs from the schedule's timezone is used and
-  logged. Without `resourceTimezone`, a schedule stored before 0.4.3 with a
-  timezone `Intl` rejects is read as if no timezone were given (its hours as
-  UTC in the month view, the legacy window in the day view), and that is
-  logged; set a valid zone with `updateSchedule`.
+  schedule's timezone. `getDaySlots` also takes `availableSlots` with
+  `scheduleId`, or together with `resourceTimezone`. Without any of these
+  arguments (`""` counts as omitted) the legacy 09:00–17:00 UTC window
+  applies. Other shapes throw instead of opening days the schedule keeps
+  closed: `resourceTimezone` alone, `availableSlots` without a zone and a
+  `resourceTimezone` that differs from the schedule's timezone
+  (`INVALID_INPUT`), and an unknown `scheduleId` (`SCHEDULE_NOT_FOUND`, also
+  from `getEffectiveAvailability`). A schedule stored before 0.4.3 with a
+  timezone `Intl` rejects has its hours read as UTC, or in a given
+  `resourceTimezone`, and that is logged; set a valid zone with
+  `updateSchedule`.
+- **Schedule references:** an event type's `scheduleId` names an existing
+  schedule (or is `""`); `createEventType` and `updateEventType` reject
+  others, and `deleteSchedule` refuses while an event type uses the schedule
+  (`SCHEDULE_IN_USE`).
 - **Booking lists:** `listBookings({ resourceId })` lists the bookings whose
   primary resource is `resourceId`. A bundle's primary resource is its first
   item; its other resources, pools included, do not list it, although their

@@ -455,37 +455,20 @@ describe("isDayAvailable", () => {
     expect(isDayAvailable(60, [36, 52], 60)).toBe(true); // 10:00 works on an hourly grid
   });
 
-  test("an explicit window is honoured, gaps between shifts included", () => {
-    const split = [...slotWindow("08:00", "10:00"), ...slotWindow("14:00", "16:00")]; // 32…39, 56…63
-
-    expect(isDayAvailable(120, [], 60, split)).toBe(true);
-    expect(isDayAvailable(120, range(32, 40), 60, split)).toBe(true); // afternoon still free
-    expect(isDayAvailable(120, [35, 60], 60, split)).toBe(false); // one blocker per shift
-    // min…max spans 8 hours but no single shift can hold a 4-hour event.
-    expect(isDayAvailable(240, [], 60, split)).toBe(false);
-  });
-
-  test("an EMPTY window falls through to the legacy business hours", () => {
-    // `availableSlots && availableSlots.length > 0` reads [] as "no schedule",
-    // which is exactly why getMonthAvailability guards `scheduleSlots.length === 0`
-    // before it ever reaches this function.
-    expect(isDayAvailable(60, [], 15, [])).toBe(true);
-    expect(isDayAvailable(60, range(36, 68), 15, [])).toBe(false); // …legacy window, fully booked
-  });
-
-  test("it does NO timezone conversion — local window vs UTC busy slots reads free", () => {
+  // 0.5.0 (F12, plan PR-53): isDayAvailable is the legacy window only. It
+  // no longer takes a schedule's slots: 0.4.x read an EMPTY window as "no
+  // schedule" and fell back to 09:00–17:00 UTC (reopening closed days), and a
+  // local window compared with UTC busy slots read free (no zone
+  // conversion). Schedule hours always go through
+  // generateDaySlotsWithTimezone, which the month and day views share.
+  test("schedule hours go through the zone-aware generator, not isDayAvailable", () => {
     // Europe/Berlin 09:00–17:00 local is UTC slots 32…63 on 2027-03-09.
     const localWindow = slotWindow("09:00", "17:00"); // 36…67, wall clock
     const bookedAllDay = range(32, 64); // UTC — the whole shift is gone
-
-    // Documented false positive (see the WARNING on isDayAvailable): slot 64…67
-    // is inside the LOCAL window and free in UTC coordinates, so the day reads
-    // as bookable.
-    expect(isDayAvailable(60, bookedAllDay, 60, localWindow)).toBe(true);
-
-    // The path getMonthAvailability/getDaySlots actually take gets it right.
     const candidates = generateDaySlotsWithTimezone(TUESDAY, 60, 60, localWindow, TZ);
     expect(candidates.some((c) => areSlotsAvailable(c.slots, bookedAllDay))).toBe(false);
+    // An empty window has no candidates, so a closed day stays closed.
+    expect(generateDaySlotsWithTimezone(TUESDAY, 60, 60, [], TZ)).toEqual([]);
   });
 
   // A zero-length event used to fit everywhere, even on a fully booked day
@@ -517,7 +500,6 @@ describe("isDayAvailable", () => {
       );
       expect(generateDaySlots(TUESDAY, 60, interval)).toEqual(generateDaySlots(TUESDAY, 60, 15));
       expect(isDayAvailable(60, [], interval)).toBe(true);
-      expect(isDayAvailable(60, [36], interval, slotWindow("09:00", "17:00"))).toBe(true);
       expect(isDayAvailable(60, range(36, 68), interval)).toBe(false);
     }
   });

@@ -115,7 +115,10 @@ export default defineSchema({
   })
     .index("by_external_id", ["id"])
     .index("by_slug", ["slug"])
-    .index("by_org", ["organizationId"]),
+    .index("by_org", ["organizationId"])
+    // deleteSchedule's reference check; event types may have no organization,
+    // so by_org cannot serve it.
+    .index("by_schedule", ["scheduleId"]),
 
   // ============================================
   // RESOURCE ↔ EVENT TYPE MAPPING (Many-to-Many)

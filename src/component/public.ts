@@ -15,7 +15,7 @@ import {
 import { isAvailable } from "./availability";
 import {
     getDateOverridesByDate,
-    getScheduleByExternalId,
+    getExistingSchedule,
     getScheduleDaySlots,
 } from "./schedules";
 import { assertSingleBookable, assertStillBookable, terminateBooking } from "./booking_lifecycle";
@@ -141,35 +141,63 @@ function candidateDates(candidates: SlotCandidate[]): Set<string> {
 }
 
 /**
- * The zone that interprets a schedule's local hours in the availability
- * queries. A caller-supplied resourceTimezone wins, as before; when it differs
- * from the schedule's own zone that is logged, since the hours then shift by
- * the difference. Without one, the schedule's zone applies — until 0.4.2 the
- * schedule's local hours were then read as UTC (month view) or ignored (day
- * view). Undefined for an unknown schedule without resourceTimezone, which
- * keeps the legacy path. Also undefined, with a warning, for a schedule stored
- * before 0.4.3 with a zone Intl rejects: reads stay tolerant and take the
- * legacy path, the month view's 0.4.2 answer, instead of throwing.
+ * The schedule arguments of getMonthAvailability and getDaySlots, checked
+ * (0.5.0). Valid shapes:
+ * - none of them: the legacy 09:00–17:00 UTC window;
+ * - `scheduleId`, optionally with `availableSlots` (getDaySlots), and with a
+ *   `resourceTimezone` only if it equals the schedule's zone;
+ * - `availableSlots` together with `resourceTimezone` (getDaySlots).
+ * A partial shape (`resourceTimezone` alone; `availableSlots` without a
+ * zone) and a zone that differs from the schedule's throw INVALID_INPUT
+ * instead of reading closed days as open; an unknown `scheduleId` throws
+ * SCHEDULE_NOT_FOUND. `""` counts as omitted for `scheduleId` and
+ * `resourceTimezone`, as before.
+ *
+ * Returns the schedule (null without one) and the zone its hours are read
+ * in, always defined for a schedule. For a schedule stored before 0.4.3 with
+ * a zone Intl rejects, reads stay tolerant and logged: its hours are read in
+ * a given resourceTimezone, else as UTC (0.4.3 took the legacy window, which
+ * opened its closed days).
  */
-function resolveScheduleZone(
-  functionName: string,
-  schedule: Doc<"schedules"> | null,
-  resourceTimezone: string | undefined,
-): string | undefined {
-  if (!schedule) return resourceTimezone;
-  if (resourceTimezone === undefined || resourceTimezone === "") {
-    if (isValidTimeZone(schedule.timezone)) return schedule.timezone;
-    console.warn(
-      `[booking] ${functionName}: schedule "${schedule.id}" has the invalid time zone "${schedule.timezone}"; using the legacy path. Set a valid zone with updateSchedule.`
-    );
-    return undefined;
+async function resolveScheduleArgs(
+  ctx: QueryCtx,
+  functionName: "getMonthAvailability" | "getDaySlots",
+  args: { scheduleId?: string; resourceTimezone?: string; availableSlots?: number[] },
+): Promise<{ schedule: Doc<"schedules"> | null; timezone: string | undefined }> {
+  const resourceTimezone = args.resourceTimezone || undefined;
+  if (!args.scheduleId) {
+    if (resourceTimezone !== undefined && args.availableSlots === undefined) {
+      throwBookingError(
+        "INVALID_INPUT",
+        functionName === "getDaySlots"
+          ? "Incomplete schedule arguments: resourceTimezone needs availableSlots or scheduleId (pass none of them for the legacy 09:00–17:00 UTC hours)"
+          : "Incomplete schedule arguments: resourceTimezone needs scheduleId (pass neither for the legacy 09:00–17:00 UTC hours)"
+      );
+    }
+    if (args.availableSlots !== undefined && resourceTimezone === undefined) {
+      throwBookingError(
+        "INVALID_INPUT",
+        "Incomplete schedule arguments: availableSlots needs resourceTimezone or scheduleId (pass none of them for the legacy 09:00–17:00 UTC hours)"
+      );
+    }
+    return { schedule: null, timezone: resourceTimezone };
   }
-  if (resourceTimezone !== schedule.timezone) {
+
+  const schedule = await getExistingSchedule(ctx, args.scheduleId);
+  if (!isValidTimeZone(schedule.timezone)) {
+    const timezone = resourceTimezone ?? "UTC";
     console.warn(
-      `[booking] ${functionName}: resourceTimezone "${resourceTimezone}" differs from the timezone "${schedule.timezone}" of schedule "${schedule.id}"; using resourceTimezone. Omit it to use the schedule's zone.`
+      `[booking] ${functionName}: schedule "${schedule.id}" has the invalid time zone "${schedule.timezone}"; reading its hours in ${timezone}. Set a valid zone with updateSchedule.`
+    );
+    return { schedule, timezone };
+  }
+  if (resourceTimezone !== undefined && resourceTimezone !== schedule.timezone) {
+    throwBookingError(
+      "INVALID_INPUT",
+      `Invalid resourceTimezone "${resourceTimezone}": schedule "${schedule.id}" uses "${schedule.timezone}". Omit resourceTimezone to use the schedule's zone.`
     );
   }
-  return resourceTimezone;
+  return { schedule, timezone: schedule.timezone };
 }
 
 export const getEventType = query({
@@ -211,14 +239,17 @@ export const getAvailability = query({
  * - dateFrom/dateTo are calendar dates ("2025-06-17"; "2025-6-17" is read as
  *   the same day). With a schedule they are the schedule's local days;
  *   without one, UTC days.
- * - With scheduleId, the schedule's hours are read in its own timezone, or in
- *   resourceTimezone when given (a mismatch is logged). A schedule stored
- *   with a zone Intl rejects is read as before 0.4.3, its hours as UTC
- *   (logged), unless resourceTimezone is given.
- * - Without scheduleId, the legacy 09:00–17:00 UTC window applies.
+ * - With scheduleId, the schedule's hours are read in its own timezone;
+ *   resourceTimezone may be omitted and must otherwise equal it. A schedule
+ *   stored with a zone Intl rejects has its hours read as UTC, or in a given
+ *   resourceTimezone (logged).
+ * - Without scheduleId and resourceTimezone, the legacy 09:00–17:00 UTC
+ *   window applies.
  *
- * Rejects an eventLength that is not a positive number, impossible dates and
- * dateFrom after dateTo.
+ * Rejects an eventLength that is not a positive number, impossible dates,
+ * dateFrom after dateTo, resourceTimezone without scheduleId, a
+ * resourceTimezone that differs from the schedule's and an unknown
+ * scheduleId (see resolveScheduleArgs).
  */
 export const getMonthAvailability = query({
     args: {
@@ -238,18 +269,12 @@ export const getMonthAvailability = query({
         const dateTo = parseCivilDate(args.dateTo);
         assertDateOrder(dateFrom, dateTo);
         assertEventLength(eventLength);
-        const pooledResource = await isFungibleResource(ctx, resourceId);
-
         // The schedule and its overrides are read once for the whole range.
-        const schedule = args.scheduleId
-            ? await getScheduleByExternalId(ctx, args.scheduleId)
-            : null;
+        const { schedule, timezone } = await resolveScheduleArgs(ctx, "getMonthAvailability", args);
+        const pooledResource = await isFungibleResource(ctx, resourceId);
         const overridesByDate = schedule && !pooledResource
             ? await getDateOverridesByDate(ctx, schedule, dateFrom, dateTo)
             : undefined;
-        const timezone = args.scheduleId
-            ? resolveScheduleZone("getMonthAvailability", schedule, args.resourceTimezone)
-            : args.resourceTimezone;
 
         // Parse dates with explicit UTC context to avoid timezone bugs
         // Adding T00:00:00.000Z ensures we get UTC midnight, not local midnight
@@ -285,12 +310,6 @@ export const getMonthAvailability = query({
                 continue;
             }
 
-            // If a scheduleId is provided, use it to determine the available slots window
-            let scheduleSlots: number[] | undefined;
-            if (args.scheduleId) {
-                scheduleSlots = await getScheduleDaySlots(ctx, schedule, dateStr, overridesByDate);
-            }
-
             // Decide availability via the SAME slot-generation path as
             // getDaySlots, so month- and day-view always agree.
             // Previously isDayAvailable() compared the schedule's LOCAL
@@ -304,9 +323,11 @@ export const getMonthAvailability = query({
             // NOT available — it must not fall through to the legacy
             // 9–17-UTC branch, which made weekends/vacation days read as
             // bookable in the month view. The legacy branch remains only for
-            // schedule-less setups.
+            // queries without any schedule argument (resolveScheduleArgs
+            // rejects partial ones and always gives a schedule a zone).
             let hasAvailability: boolean;
-            if (timezone && scheduleSlots) {
+            if (schedule && timezone) {
+                const scheduleSlots = await getScheduleDaySlots(ctx, schedule, dateStr, overridesByDate);
                 if (scheduleSlots.length === 0) {
                     hasAvailability = false;
                 } else {
@@ -332,8 +353,8 @@ export const getMonthAvailability = query({
                     );
                 }
             } else {
-                // Legacy / no-timezone path: hardcoded UTC business hours,
-                // all slots on `dateStr` itself.
+                // Legacy path (no schedule arguments): hardcoded UTC
+                // business hours, all slots on `dateStr` itself.
                 await loadBusySlotsForDates(
                     ctx,
                     resourceId,
@@ -344,8 +365,7 @@ export const getMonthAvailability = query({
                 hasAvailability = isDayAvailable(
                     eventLength,
                     busyByDate.get(dateStr) ?? [],
-                    args.slotInterval ?? 15,
-                    scheduleSlots
+                    args.slotInterval ?? 15
                 );
             }
 
@@ -369,14 +389,17 @@ export const getMonthAvailability = query({
  *   resourceTimezone generate the slots in that timezone
  * - scheduleId (optional) supplies what is missing: the schedule's effective
  *   hours for `date` when availableSlots is omitted, and the schedule's own
- *   timezone when resourceTimezone is omitted (a mismatch is logged).
+ *   timezone (a given resourceTimezone must equal it).
  *   `{ scheduleId }` alone equals getEffectiveAvailability followed by this
  *   query with availableSlots and the schedule's timezone. A schedule stored
- *   with a zone Intl rejects supplies no zone (logged).
- * - Otherwise the legacy 09:00–17:00 UTC window applies.
+ *   with a zone Intl rejects has its hours read as UTC, or in a given
+ *   resourceTimezone (logged).
+ * - Without any of the three, the legacy 09:00–17:00 UTC window applies.
  *
- * Rejects an eventLength that is not a positive number, impossible dates and
- * availableSlots outside 0–95.
+ * Rejects an eventLength that is not a positive number, impossible dates,
+ * availableSlots outside 0–95, a partial shape (resourceTimezone or
+ * availableSlots alone), a resourceTimezone that differs from the
+ * schedule's and an unknown scheduleId (see resolveScheduleArgs).
  */
 export const getDaySlots = query({
     args: {
@@ -396,12 +419,11 @@ export const getDaySlots = query({
         assertEventLength(eventLength);
         if (args.availableSlots) assertSlotIndices(args.availableSlots);
 
+        const { schedule, timezone: resourceTimezone } = await resolveScheduleArgs(ctx, "getDaySlots", args);
         if (await isFungibleResource(ctx, resourceId)) return [];
 
-        let { resourceTimezone, availableSlots } = args;
-        if (args.scheduleId) {
-            const schedule = await getScheduleByExternalId(ctx, args.scheduleId);
-            resourceTimezone = resolveScheduleZone("getDaySlots", schedule, resourceTimezone);
+        let { availableSlots } = args;
+        if (schedule) {
             availableSlots ??= await getScheduleDaySlots(ctx, schedule, date);
         }
 
@@ -875,6 +897,15 @@ export const expireProvisionalBooking = mutation({
   },
 });
 
+/**
+ * An event type's scheduleId names an existing schedule, or is "" (no
+ * schedule, as the availability queries read it). Availability reads reject
+ * an unknown id, and deleteSchedule refuses while event types use one.
+ */
+async function assertScheduleReference(ctx: QueryCtx, scheduleId: string | undefined): Promise<void> {
+  if (scheduleId) await getExistingSchedule(ctx, scheduleId);
+}
+
 export const createEventType = mutation({
   args: {
     id: v.string(),
@@ -906,6 +937,7 @@ export const createEventType = mutation({
   returns: v.id("event_types"),
   handler: async (ctx, args) => {
     assertTimeZone(args.timezone);
+    await assertScheduleReference(ctx, args.scheduleId);
     const existing = await ctx.db
       .query("event_types")
       .withIndex("by_external_id", (q) => q.eq("id", args.id))
@@ -1032,6 +1064,7 @@ export const updateEventType = mutation({
     if (!eventType) {
       throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
     }
+    await assertScheduleReference(ctx, args.scheduleId);
 
     // The arguments besides `id` are event_types columns (their types are
     // checked here); only the ones given are patched.

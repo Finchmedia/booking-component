@@ -535,53 +535,26 @@ export function assertValidRange(start: number, end: number): void {
 }
 
 /**
- * Checks if a day has any available slots for a given event length
- * Optimized to exit early and avoid object generation
- *
- * WARNING: `availableSlots` and `busySlots` MUST be in the SAME coordinate
- * system. This function does NO timezone conversion. If you pass a schedule's
- * LOCAL wall-clock slot indices (e.g. from getScheduleDaySlots or
- * getEffectiveAvailability) while `busySlots` are UTC indices, the
- * comparison is meaningless (e.g. Europe/Berlin days read as free regardless
- * of bookings). For any timezone-aware schedule,
- * use generateDaySlotsWithTimezone + areSlotsAvailable instead — that is how
- * getMonthAvailability / getDaySlots decide availability. This function is only
- * used by the legacy (schedule-less, hardcoded 9–17 UTC) path.
+ * Whether the legacy window (09:00–17:00 UTC, the answer for a query without
+ * any schedule argument) has a free start for an event length. Optimized to
+ * exit early and avoid object generation. Schedule hours go through
+ * generateDaySlotsWithTimezone + isCandidateAvailable instead; until 0.4.3
+ * this function also took a schedule's slots and read an empty window as the
+ * legacy one, which reopened closed days.
  *
  * @param eventLengthMinutes - Duration in minutes
- * @param busySlots - Array of busy slot indices
+ * @param busySlots - Busy UTC slot indices of the day
  * @param intervalMinutes - Step between slots in minutes (default: 15)
- * @param availableSlots - Optional available slot indices in the SAME coordinate system as busySlots; if provided, used instead of hardcoded 9–17
- * @returns boolean
  */
 export function isDayAvailable(
     eventLengthMinutes: number,
     busySlots: number[],
     intervalMinutes: number = 15,
-    availableSlots?: number[]
 ): boolean {
     assertEventLength(eventLengthMinutes);
     const slotsNeeded = Math.ceil(eventLengthMinutes / 15);
     const step = intervalToStep(intervalMinutes);
 
-    if (availableSlots && availableSlots.length > 0) {
-        const availableSet = new Set(availableSlots);
-        const minSlot = Math.min(...availableSlots);
-        const maxSlot = Math.max(...availableSlots);
-        for (let s = minSlot; s + slotsNeeded <= maxSlot + 1; s += step) {
-            let free = true;
-            for (let i = 0; i < slotsNeeded; i++) {
-                if (!availableSet.has(s + i) || busySlots.includes(s + i)) {
-                    free = false;
-                    break;
-                }
-            }
-            if (free) return true;
-        }
-        return false;
-    }
-
-    // Legacy: hardcoded 9–17
     for (let slotIndex = BUSINESS_HOURS_START; slotIndex + slotsNeeded <= BUSINESS_HOURS_END; slotIndex += step) {
         // Check if this specific block is free
         let isBlockFree = true;

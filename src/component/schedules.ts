@@ -289,6 +289,19 @@ export const deleteSchedule = mutation({
       throwBookingError("SCHEDULE_NOT_FOUND", `Schedule "${args.id}" not found`);
     }
 
+    // An event type that still names the schedule would lose its opening
+    // hours (availability reads reject an unknown scheduleId since 0.5.0).
+    const user = await ctx.db
+      .query("event_types")
+      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.id))
+      .first();
+    if (user) {
+      throwBookingError(
+        "SCHEDULE_IN_USE",
+        `Cannot delete schedule "${args.id}": event type "${user.id}" uses it. Give its event types another schedule first.`
+      );
+    }
+
     // Delete associated date overrides
     const overrides = await ctx.db
       .query("date_overrides")
@@ -491,27 +504,35 @@ export async function getScheduleByExternalId(
 }
 
 /**
+ * The schedule with this external id; SCHEDULE_NOT_FOUND otherwise. An
+ * unknown id used to mean 09:00–17:00 every day, which reopened weekends and
+ * closures after a schedule was deleted.
+ */
+export async function getExistingSchedule(
+  ctx: QueryCtx,
+  scheduleId: string
+): Promise<Doc<"schedules">> {
+  const schedule = await getScheduleByExternalId(ctx, scheduleId);
+  if (!schedule) throwBookingError("SCHEDULE_NOT_FOUND", `Schedule "${scheduleId}" not found`);
+  return schedule;
+}
+
+/**
  * Effective LOCAL slot indices (0–95, in the schedule's zone) of a schedule on
  * a calendar day: the date override when one exists, otherwise the weekly
  * hours of that day's own weekday. The weekday is the calendar day's, not the
  * weekday some instant of it has in the zone — reading `${date}T12:00Z` in the
  * zone used the NEXT day's hours in zones at UTC+12 and beyond (New Zealand,
  * Fiji, Tonga, Samoa, Kiribati; Norfolk Island in summer).
- * A missing schedule yields the default business hours 09:00–17:00.
  * `overridesByDate` (from getDateOverridesByDate) replaces the per-day
  * override read when a caller walks a range of days.
  */
 export async function getScheduleDaySlots(
   ctx: QueryCtx,
-  schedule: Doc<"schedules"> | null,
+  schedule: Doc<"schedules">,
   date: CivilDate,
   overridesByDate?: Map<string, Doc<"date_overrides">>
 ): Promise<number[]> {
-  if (!schedule) {
-    // No schedule = default business hours (9-17)
-    return Array.from({ length: 32 }, (_, i) => i + 36);
-  }
-
   // Check for date override
   const override = overridesByDate
     ? overridesByDate.get(date)
@@ -584,6 +605,8 @@ export function getWeeklySlots(schedule: Doc<"schedules">, date: CivilDate): num
 /**
  * Get the effective available slots for a resource on a specific date.
  * This considers the schedule's weekly hours and any date overrides.
+ * An unknown scheduleId throws SCHEDULE_NOT_FOUND (until 0.4.3 it returned
+ * 09:00–17:00).
  */
 export const getEffectiveAvailability = query({
   args: {
@@ -593,7 +616,7 @@ export const getEffectiveAvailability = query({
   returns: v.object({ availableSlots: v.array(v.number()) }),
   handler: async (ctx, args) => {
     const date = parseCivilDate(args.date);
-    const schedule = await getScheduleByExternalId(ctx, args.scheduleId);
+    const schedule = await getExistingSchedule(ctx, args.scheduleId);
     return { availableSlots: await getScheduleDaySlots(ctx, schedule, date) };
   },
 });

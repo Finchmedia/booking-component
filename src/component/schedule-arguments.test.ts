@@ -1,15 +1,17 @@
 /// <reference types="vite/client" />
 /**
- * Schedule arguments of the month and day queries (F12, additive part).
+ * Schedule arguments of the month and day queries (F12, N15).
  *
  * - `scheduleId` without `resourceTimezone` reads the hours in the schedule's
  *   own zone (until 0.4.2: as UTC in the month view, ignored in the day view).
  * - getDaySlots accepts `scheduleId` and resolves the day's hours and zone.
- * - A `resourceTimezone` that differs from the schedule's zone is still used,
- *   and logged.
- * - A schedule stored with a zone Intl rejects keeps the legacy answer instead
- *   of throwing, and that is logged.
- * - Every other partial shape keeps its 0.4.2 answer (pinned below).
+ * - 0.5.0 (plan PR-53, decision D8): a `resourceTimezone` that differs from
+ *   the schedule's zone, the partial shapes (`resourceTimezone` alone,
+ *   `availableSlots` without a zone) and an unknown `scheduleId` throw
+ *   instead of reading closed days as open. Only `{}` (no schedule
+ *   argument) keeps the legacy 09:00–17:00 UTC window.
+ * - A schedule stored with a zone Intl rejects is read without throwing, its
+ *   hours as UTC (0.4.3: the legacy window), and that is logged.
  * - The month view reads the schedule and its overrides once per call.
  */
 import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from "vitest";
@@ -164,44 +166,57 @@ describe("scheduleId without resourceTimezone uses the schedule's zone", () => {
 });
 
 describe("a resourceTimezone that differs from the schedule's zone", () => {
-  test("is still used, and logged", async () => {
+  test("is rejected (0.4.3 used it and logged); the matching zone is accepted silently", async () => {
     const { t, seed } = await fixture();
-    // 0.4.2 answer kept: the hours read as UTC, so WED 10:00Z is free.
-    expect(await month(t, seed, { scheduleId: seed.scheduleId, resourceTimezone: "UTC" })).toEqual({
-      TUE: true,
-      WED: true,
-      SAT: false,
-    });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toBe(
-      '[booking] getMonthAvailability: resourceTimezone "UTC" differs from the timezone "Europe/Berlin" of schedule "sch-1"; using resourceTimezone. Omit it to use the schedule\'s zone.'
-    );
-    expect(await day(t, seed, TUE, { scheduleId: seed.scheduleId, resourceTimezone: "UTC" })).toEqual(LEGACY_UTC);
-    expect(warn).toHaveBeenCalledTimes(2);
-    expect(warn.mock.calls[1][0]).toContain("[booking] getDaySlots:");
-    // CONTROL: the matching zone is silent.
-    await month(t, seed, { scheduleId: seed.scheduleId, resourceTimezone: TZ });
-    await day(t, seed, TUE, { scheduleId: seed.scheduleId, resourceTimezone: TZ });
-    expect(warn).toHaveBeenCalledTimes(2);
+    const mismatch = {
+      code: "INVALID_INPUT",
+      message: 'Invalid resourceTimezone "UTC": schedule "sch-1" uses "Europe/Berlin". Omit resourceTimezone to use the schedule\'s zone.',
+    };
+    await expect(month(t, seed, { scheduleId: seed.scheduleId, resourceTimezone: "UTC" })).rejects.toMatchObject({ data: mismatch });
+    await expect(day(t, seed, TUE, { scheduleId: seed.scheduleId, resourceTimezone: "UTC" })).rejects.toMatchObject({ data: mismatch });
+    await expect(
+      day(t, seed, WED, { scheduleId: seed.scheduleId, resourceTimezone: "UTC", availableSlots: range(36, 40) }),
+    ).rejects.toMatchObject({ data: mismatch });
+    // CONTROL: the matching zone.
+    expect(await month(t, seed, { scheduleId: seed.scheduleId, resourceTimezone: TZ })).toEqual({ TUE: true, WED: false, SAT: false });
+    expect(await day(t, seed, TUE, { scheduleId: seed.scheduleId, resourceTimezone: TZ })).toEqual(BERLIN_DAY);
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 
-describe("other shapes keep their 0.4.2 answers", () => {
+describe("partial shapes and unknown schedules are rejected; {} keeps the legacy window", () => {
+  const PARTIAL_DAY_ZONE = {
+    code: "INVALID_INPUT",
+    message:
+      "Incomplete schedule arguments: resourceTimezone needs availableSlots or scheduleId (pass none of them for the legacy 09:00–17:00 UTC hours)",
+  };
+  const PARTIAL_DAY_SLOTS = {
+    code: "INVALID_INPUT",
+    message:
+      "Incomplete schedule arguments: availableSlots needs resourceTimezone or scheduleId (pass none of them for the legacy 09:00–17:00 UTC hours)",
+  };
+  const PARTIAL_MONTH_ZONE = {
+    code: "INVALID_INPUT",
+    message: "Incomplete schedule arguments: resourceTimezone needs scheduleId (pass neither for the legacy 09:00–17:00 UTC hours)",
+  };
+  const UNKNOWN = { code: "SCHEDULE_NOT_FOUND", message: 'Schedule "no-such" not found' };
+
   test("month view", async () => {
     const { t, seed } = await fixture();
     expect({
       "{}": await month(t, seed, {}),
-      "{resourceTimezone}": await month(t, seed, { resourceTimezone: TZ }),
+      '{scheduleId: ""}': await month(t, seed, { scheduleId: "" }),
       "{scheduleId, resourceTimezone}": await month(t, seed, { scheduleId: seed.scheduleId, resourceTimezone: TZ }),
-      "{scheduleId: unknown, resourceTimezone}": await month(t, seed, { scheduleId: "no-such", resourceTimezone: TZ }),
-      "{scheduleId: unknown}": await month(t, seed, { scheduleId: "no-such" }),
     }).toEqual({
       "{}": { TUE: true, WED: true, SAT: true }, // legacy 09–17 UTC
-      "{resourceTimezone}": { TUE: true, WED: true, SAT: true },
+      '{scheduleId: ""}': { TUE: true, WED: true, SAT: true },
       "{scheduleId, resourceTimezone}": { TUE: true, WED: false, SAT: false },
-      "{scheduleId: unknown, resourceTimezone}": { TUE: true, WED: true, SAT: true }, // 09–17 local default
-      "{scheduleId: unknown}": { TUE: true, WED: true, SAT: true },
     });
+    // 0.4.3 answered { TUE: true, WED: true, SAT: true } for each of these.
+    await expect(month(t, seed, { resourceTimezone: TZ })).rejects.toMatchObject({ data: PARTIAL_MONTH_ZONE });
+    await expect(month(t, seed, { scheduleId: "", resourceTimezone: TZ })).rejects.toMatchObject({ data: PARTIAL_MONTH_ZONE });
+    await expect(month(t, seed, { scheduleId: "no-such", resourceTimezone: TZ })).rejects.toMatchObject({ data: UNKNOWN });
+    await expect(month(t, seed, { scheduleId: "no-such" })).rejects.toMatchObject({ data: UNKNOWN });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -209,52 +224,70 @@ describe("other shapes keep their 0.4.2 answers", () => {
     const { t, seed } = await fixture();
     expect({
       "SAT {}": await day(t, seed, SAT, {}),
-      "SAT {resourceTimezone}": await day(t, seed, SAT, { resourceTimezone: TZ }),
-      "SAT {availableSlots: []}": await day(t, seed, SAT, { availableSlots: [] }),
-      "WED {availableSlots: [36..39]}": await day(t, seed, WED, { availableSlots: range(36, 40) }),
+      "SAT {resourceTimezone: \"\"}": await day(t, seed, SAT, { resourceTimezone: "" }),
       "SAT {resourceTimezone, availableSlots: []}": await day(t, seed, SAT, { resourceTimezone: TZ, availableSlots: [] }),
       "WED {resourceTimezone, availableSlots: [36..39]}": await day(t, seed, WED, { resourceTimezone: TZ, availableSlots: range(36, 40) }),
       "TUE {resourceTimezone, availableSlots: [36..67]}": await day(t, seed, TUE, { resourceTimezone: TZ, availableSlots: range(36, 68) }),
-      "SAT {scheduleId: unknown}": await day(t, seed, SAT, { scheduleId: "no-such" }),
-      "SAT {scheduleId: unknown, resourceTimezone}": await day(t, seed, SAT, { scheduleId: "no-such", resourceTimezone: TZ }),
+      "SAT {scheduleId, availableSlots: [36..39]}": await day(t, seed, SAT, { scheduleId: seed.scheduleId, availableSlots: range(36, 40) }),
     }).toEqual({
       "SAT {}": LEGACY_UTC,
-      "SAT {resourceTimezone}": LEGACY_UTC,
-      "SAT {availableSlots: []}": LEGACY_UTC,
-      "WED {availableSlots: [36..39]}": LEGACY_UTC,
+      "SAT {resourceTimezone: \"\"}": LEGACY_UTC,
       "SAT {resourceTimezone, availableSlots: []}": [],
       "WED {resourceTimezone, availableSlots: [36..39]}": [],
       "TUE {resourceTimezone, availableSlots: [36..67]}": BERLIN_DAY,
-      "SAT {scheduleId: unknown}": LEGACY_UTC,
-      "SAT {scheduleId: unknown, resourceTimezone}": BERLIN_DAY, // 09–17 local default
+      "SAT {scheduleId, availableSlots: [36..39]}": ["08:00Z"], // caller hours, schedule zone
+    });
+    // 0.4.3 answered the legacy window (or 09–17 local for an unknown id).
+    await expect(day(t, seed, SAT, { resourceTimezone: TZ })).rejects.toMatchObject({ data: PARTIAL_DAY_ZONE });
+    await expect(day(t, seed, SAT, { availableSlots: [] })).rejects.toMatchObject({ data: PARTIAL_DAY_SLOTS });
+    await expect(day(t, seed, WED, { availableSlots: range(36, 40) })).rejects.toMatchObject({ data: PARTIAL_DAY_SLOTS });
+    await expect(day(t, seed, WED, { availableSlots: range(36, 40), resourceTimezone: "" })).rejects.toMatchObject({ data: PARTIAL_DAY_SLOTS });
+    await expect(day(t, seed, SAT, { scheduleId: "no-such" })).rejects.toMatchObject({ data: UNKNOWN });
+    await expect(day(t, seed, SAT, { scheduleId: "no-such", resourceTimezone: TZ })).rejects.toMatchObject({ data: UNKNOWN });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("a deleted schedule's id is rejected, also by getEffectiveAvailability", async () => {
+    const { t } = setup();
+    await t.mutation(api.schedules.createSchedule, {
+      id: "sch-gone", organizationId: "org-1", name: "Gone", timezone: TZ, weeklyHours: [],
+    });
+    await t.mutation(api.schedules.deleteSchedule, { id: "sch-gone" });
+    await expect(t.query(api.schedules.getEffectiveAvailability, { scheduleId: "sch-gone", date: SAT })).rejects.toMatchObject({
+      data: { code: "SCHEDULE_NOT_FOUND", message: 'Schedule "sch-gone" not found' },
+    });
+    // 0.4.3 returned 09:00–17:00 for any unknown id.
+    await expect(t.query(api.schedules.getEffectiveAvailability, { scheduleId: "no-such", date: SAT })).rejects.toMatchObject({
+      data: UNKNOWN,
     });
   });
 });
 
 describe("a schedule stored with a zone Intl rejects (before 0.4.3)", () => {
-  test("scheduleId alone keeps the legacy answer and logs instead of throwing", async () => {
+  test("its hours are read as UTC without throwing, and that is logged", async () => {
     const { t, seed } = await fixture();
     await t.run(async (ctx) => {
       await ctx.db.patch(seed.scheduleDocId, { timezone: "Mars/Olympus_Mons" });
     });
-    // The month view's 0.4.2 answer: the hours read as UTC, a closed day
-    // falls back to 09–17 UTC.
-    expect(await month(t, seed, { scheduleId: seed.scheduleId })).toEqual({ TUE: true, WED: true, SAT: true });
-    // The day view gets no zone for the hours: the legacy window.
+    // The hours as UTC: Saturday stays closed in both views (0.4.3 took the
+    // legacy window, so it read open), and WED's override hour 09:00Z is free.
+    expect(await month(t, seed, { scheduleId: seed.scheduleId })).toEqual({ TUE: true, WED: true, SAT: false });
     expect(await day(t, seed, TUE, { scheduleId: seed.scheduleId })).toEqual(LEGACY_UTC);
-    expect(await day(t, seed, SAT, { scheduleId: seed.scheduleId })).toEqual(LEGACY_UTC);
-    expect(warn).toHaveBeenCalledTimes(3);
+    expect(await day(t, seed, WED, { scheduleId: seed.scheduleId })).toEqual(["09:00Z"]);
+    expect(await day(t, seed, SAT, { scheduleId: seed.scheduleId })).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(4);
     expect(warn.mock.calls[0][0]).toBe(
-      '[booking] getMonthAvailability: schedule "sch-1" has the invalid time zone "Mars/Olympus_Mons"; using the legacy path. Set a valid zone with updateSchedule.'
+      '[booking] getMonthAvailability: schedule "sch-1" has the invalid time zone "Mars/Olympus_Mons"; reading its hours in UTC. Set a valid zone with updateSchedule.'
     );
     expect(warn.mock.calls[1][0]).toContain('[booking] getDaySlots: schedule "sch-1" has the invalid time zone');
 
-    // CONTROL: a caller's zone is still used.
+    // CONTROL: a caller's zone is used for such a schedule, and logged.
     expect(await month(t, seed, { scheduleId: seed.scheduleId, resourceTimezone: TZ })).toEqual({
       TUE: true,
       WED: false,
       SAT: false,
     });
+    expect(warn.mock.calls[4][0]).toContain("reading its hours in Europe/Berlin");
 
     // CONTROL: repaired, the schedule's zone applies again, silently.
     await t.mutation(api.schedules.updateSchedule, { id: seed.scheduleId, timezone: TZ });

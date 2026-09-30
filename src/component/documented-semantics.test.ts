@@ -184,6 +184,10 @@ test('scheduleId "" is no schedule: the legacy 09:00–17:00 UTC window', async 
 describe("updates: an omitted field is unchanged", () => {
   test("event types: \"\" and [] are stored; scheduleId and numbers cannot be removed", async () => {
     const { t } = setup();
+    // Since 0.5.0 an event type's scheduleId must name an existing schedule.
+    await t.mutation(api.schedules.createSchedule, {
+      id: "sch-1", organizationId: "org-1", name: "Hours", timezone: "UTC", weeklyHours: [],
+    });
     const seed = await seedResource(t, {
       scheduleId: "sch-1",
       eventType: { description: "Intro call", lengthInMinutesOptions: [30, 60], bufferBefore: 10 },

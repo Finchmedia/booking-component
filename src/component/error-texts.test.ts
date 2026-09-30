@@ -442,6 +442,8 @@ describe("configuration writes and arguments", () => {
     const weeklyHours = [{ dayOfWeek: 2, startTime: "09:00", endTime: "17:00" }];
     const schedule = { id: "sch-1", organizationId: ORG, name: "Hours", timezone: "UTC", weeklyHours };
     const scheduleDocId = await t.mutation(api.schedules.createSchedule, schedule);
+    await t.mutation(api.schedules.createSchedule, { ...schedule, id: "sch-used" });
+    await t.mutation(api.public.updateEventType, { id: "et-off", scheduleId: "sch-used" });
     const goneOverride = await t.mutation(api.schedules.createDateOverride, {
       scheduleId: scheduleDocId, date: TUESDAY, type: "unavailable",
     });
@@ -466,6 +468,23 @@ describe("configuration writes and arguments", () => {
       "createSchedule: duplicate id": () => t.mutation(api.schedules.createSchedule, schedule),
       "updateSchedule: missing schedule": () => t.mutation(api.schedules.updateSchedule, { id: "ghost", name: "x" }),
       "deleteSchedule: missing schedule": () => t.mutation(api.schedules.deleteSchedule, { id: "ghost" }),
+      "deleteSchedule: in use": () => t.mutation(api.schedules.deleteSchedule, { id: "sch-used" }),
+      "createEventType: missing schedule": () =>
+        t.mutation(api.public.createEventType, {
+          id: "et-new", slug: "et-new", title: "x", lengthInMinutes: 60, timezone: "UTC", lockTimeZoneToggle: false,
+          locations: [], scheduleId: "ghost",
+        }),
+      "updateEventType: missing schedule": () => t.mutation(api.public.updateEventType, { id: seed.eventTypeId, scheduleId: "ghost" }),
+      "getEffectiveAvailability: missing schedule": () =>
+        t.query(api.schedules.getEffectiveAvailability, { scheduleId: "ghost", date: TUESDAY }),
+      "getMonthAvailability: missing schedule": () =>
+        t.query(api.public.getMonthAvailability, { resourceId: seed.resourceId, dateFrom: TUESDAY, dateTo: TUESDAY, eventLength: 60, scheduleId: "ghost" }),
+      "getMonthAvailability: resourceTimezone alone": () =>
+        t.query(api.public.getMonthAvailability, { resourceId: seed.resourceId, dateFrom: TUESDAY, dateTo: TUESDAY, eventLength: 60, resourceTimezone: "UTC" }),
+      "getDaySlots: availableSlots without a zone": () =>
+        t.query(api.public.getDaySlots, { resourceId: seed.resourceId, date: TUESDAY, eventLength: 60, availableSlots: [36] }),
+      "getDaySlots: zone of another schedule": () =>
+        t.query(api.public.getDaySlots, { resourceId: seed.resourceId, date: TUESDAY, eventLength: 60, scheduleId: "sch-1", resourceTimezone: "Europe/Berlin" }),
       "updateDateOverride: missing override": () =>
         t.mutation(api.schedules.updateDateOverride, { overrideId: goneOverride, type: "unavailable" }),
       "deleteDateOverride: missing override": () => t.mutation(api.schedules.deleteDateOverride, { overrideId: goneOverride }),
@@ -503,6 +522,24 @@ describe("configuration writes and arguments", () => {
       "createSchedule: duplicate id": coded("SCHEDULE_ALREADY_EXISTS", 'Schedule with ID "sch-1" already exists'),
       "updateSchedule: missing schedule": coded("SCHEDULE_NOT_FOUND", 'Schedule "ghost" not found'),
       "deleteSchedule: missing schedule": coded("SCHEDULE_NOT_FOUND", 'Schedule "ghost" not found'),
+      "deleteSchedule: in use":
+        coded("SCHEDULE_IN_USE", 'Cannot delete schedule "sch-used": event type "et-off" uses it. Give its event types another schedule first.'),
+      "createEventType: missing schedule": coded("SCHEDULE_NOT_FOUND", 'Schedule "ghost" not found'),
+      "updateEventType: missing schedule": coded("SCHEDULE_NOT_FOUND", 'Schedule "ghost" not found'),
+      "getEffectiveAvailability: missing schedule": coded("SCHEDULE_NOT_FOUND", 'Schedule "ghost" not found'),
+      "getMonthAvailability: missing schedule": coded("SCHEDULE_NOT_FOUND", 'Schedule "ghost" not found'),
+      "getMonthAvailability: resourceTimezone alone": coded(
+        "INVALID_INPUT",
+        "Incomplete schedule arguments: resourceTimezone needs scheduleId (pass neither for the legacy 09:00–17:00 UTC hours)",
+      ),
+      "getDaySlots: availableSlots without a zone": coded(
+        "INVALID_INPUT",
+        "Incomplete schedule arguments: availableSlots needs resourceTimezone or scheduleId (pass none of them for the legacy 09:00–17:00 UTC hours)",
+      ),
+      "getDaySlots: zone of another schedule": coded(
+        "INVALID_INPUT",
+        'Invalid resourceTimezone "Europe/Berlin": schedule "sch-1" uses "UTC". Omit resourceTimezone to use the schedule\'s zone.',
+      ),
       "updateDateOverride: missing override": coded("DATE_OVERRIDE_NOT_FOUND", "Date override not found"),
       "deleteDateOverride: missing override": coded("DATE_OVERRIDE_NOT_FOUND", "Date override not found"),
       "updateHook: missing hook": coded("HOOK_NOT_FOUND", "Hook not found"),

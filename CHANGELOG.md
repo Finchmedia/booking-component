@@ -52,6 +52,26 @@
   `getResourcesForEventType`'s resources) and unlink them or move the
   resource; `backfillBookingOrganizations` reports stored bundles whose
   organization differs in `mismatches`.
+- Schedule arguments of `getMonthAvailability` and `getDaySlots` must be
+  complete (F12): `resourceTimezone` alone, `availableSlots` without
+  `resourceTimezone` or `scheduleId`, and a `resourceTimezone` that differs
+  from the schedule's timezone now throw `INVALID_INPUT`; 0.4.3 answered with
+  the legacy 09:00–17:00 UTC window or used the other zone, which opened
+  closed days. An unknown `scheduleId` throws `SCHEDULE_NOT_FOUND` in both
+  queries and in `getEffectiveAvailability` instead of meaning 09:00–17:00
+  every day (N15). Only a call without schedule arguments (`""` counts as
+  omitted) keeps the legacy window. A schedule stored before 0.4.3 with a
+  zone `Intl` rejects has its hours read as UTC (logged) instead of the
+  legacy window, so its closed days stay closed. Pass `{ scheduleId }` alone,
+  or `availableSlots` with `resourceTimezone`, and stop forwarding
+  `resourceTimezone` next to `scheduleId` unless it is the schedule's zone.
+- Schedule references stay valid (N15): `createEventType` and
+  `updateEventType` reject a `scheduleId` that names no schedule
+  (`SCHEDULE_NOT_FOUND`; `""` still means none), and `deleteSchedule` refuses
+  while an event type uses the schedule (new code `SCHEDULE_IN_USE`). Before
+  upgrading, find event types whose `scheduleId` names a deleted schedule
+  (`listEventTypes`, then `getSchedule` for each distinct ID) and point them
+  to an existing schedule or `""`; their slot queries throw otherwise.
 - `createEventType` on an existing ID (an upsert) keeps what it is not given
   (N14): an omitted `isActive` no longer reactivates a deactivated event type
   (a new one is still active by default), and an omitted `organizationId`
