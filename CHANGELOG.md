@@ -90,30 +90,30 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
 - `updateResource` refuses `isFungible: true` while active single-resource
   bookings (pending, confirmed or provisional, without bundle items; legacy
   reservations included) hold the resource (N16): `RESOURCE_IN_USE`, and so
-  does `createResource` on an ID that legacy reservations already hold
-  without a resource document. With capacity one the flag used to be
-  accepted and left them unmovable; bundles do not block it. End or move those bookings first. `booking_integrity`
-  lists bookings an earlier flag change stranded (`poolWithoutItems`):
-  cancel them, or set `isFungible: false` again.
+  does `createResource` on an ID that legacy reservations already hold without
+  a resource document. With capacity one the flag used to be accepted and left
+  them unmovable; bundles do not block it. End or move those bookings first.
+  `booking_integrity` lists bookings an earlier flag change stranded
+  (`poolWithoutItems`): cancel them, or set `isFungible: false` again.
 - One set of booking rules for every path (F6). `createBooking`,
   `createProvisionalBooking`, `createMultiResourceBooking` (per item), both
   reschedule mutations and `transitionBookingState` to `confirmed`, or from a
-  provisional hold to `pending`, require an existing, active event type and existing, active resources that are linked
-  to it and belong to its organization when it has one, one of them not an
-  add-on. For bundles the whole rule set is new, since 0.4.x checked only
-  that the event type existed: the event type must be active, and every item
-  must exist (unknown resource IDs are rejected with `RESOURCE_NOT_FOUND`
-  instead of reserving a one-unit row), be active, be linked to the event
-  type (pools included) and share its organization; only eligible items
-  satisfy the add-on rule, and the rules come before capacity (an add-on
-  alone on a taken slot reports `RESOURCE_NOT_STANDALONE`). New for moves,
-  by token and by ID alike (no administrator override), and for confirming a
-  provisional hold, submitting it as a request (`provisional` to `pending`,
-  which sends the booker the "awaiting confirmation" mail) or approving a
-  pending request: the same check over every item, before anything is
-  released or notified. Cancelling, declining and expiring are
-  never checked, and deactivating never ends a booking. Legacy
-  `createReservation` and its bookings stay exempt. The new
+  provisional hold to `pending`, require an existing, active event type and
+  existing, active resources that are linked to it and belong to its
+  organization when it has one, one of them not an add-on. For bundles the
+  whole rule set is new, since 0.4.x checked only that the event type existed:
+  the event type must be active, and every item must exist (unknown resource
+  IDs are rejected with `RESOURCE_NOT_FOUND` instead of reserving a one-unit
+  row), be active, be linked to the event type (pools included) and share its
+  organization; only eligible items satisfy the add-on rule, and the rules
+  come before capacity (an add-on alone on a taken slot reports
+  `RESOURCE_NOT_STANDALONE`). New for moves, by token and by ID alike (no
+  administrator override), and for confirming a provisional hold, submitting
+  it as a request (`provisional` to `pending`, which sends the booker the
+  "awaiting confirmation" mail) or approving a pending request: the same check
+  over every item, before anything is released or notified. Cancelling,
+  declining and expiring are never checked, and deactivating never ends a
+  booking. Legacy `createReservation` and its bookings stay exempt. The new
   `booking_eligibility` check lists the active bookings these rules reject,
   with their problems (`eventTypeMissing`, `eventTypeInactive`,
   `resourceMissing`, `resourceInactive`, `resourceNotLinked`,
@@ -122,8 +122,8 @@ read _Upgrading_ before bumping, and its last entry before rolling back.
   included) to the event type, create resources for IDs you booked without
   one, and resolve pending requests and provisional holds on deactivated or
   unlinked configuration; afterwards, reactivate or relink before moving or
-  confirming such a booking. [docs/errors.md](docs/errors.md) lists the
-  codes per function.
+  confirming such a booking. [docs/errors.md](docs/errors.md) lists the codes
+  per function.
 - No bookings across organizations (N13, F7): a booking belongs to its event
   type's organization. An event type with an `organizationId` links only
   resources of that organization: `linkResourceToEventType`,
