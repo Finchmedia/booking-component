@@ -148,15 +148,16 @@ describe("plain-object adminApi", () => {
     expect(nameOf(merged, "deleteResource")).toBe("public:deleteResource");
   });
 
-  it("no longer overrides public operations, which belong to publicApi", () => {
+  it("still overrides a public operation it defines itself, as before", () => {
     // Non-literal object, so the public name passes the Partial<AdminBookingAPI> type
     const adminLike = {
       createResource: makeFunctionReference<"mutation">("admin:createResource"),
       getEventType: makeFunctionReference<"query">("admin:getEventType"),
     };
     const merged = resolved({ publicApi: api.public, adminApi: adminLike });
-    expect(nameOf(merged, "getEventType")).toBe("public:getEventType");
-    // Control: the object's admin operation is used
+    expect(nameOf(merged, "getEventType")).toBe("admin:getEventType");
+    // Control: public names it does not define, and its admin operation
+    expect(nameOf(merged, "createBooking")).toBe("public:createBooking");
     expect(nameOf(merged, "createResource")).toBe("admin:createResource");
   });
 

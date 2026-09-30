@@ -213,7 +213,8 @@
 - `BookingProvider` resolves admin operations from `adminApi`. With the
   generated `adminApi={api.admin}`, every admin operation resolved to the public
   module (`public:createResource`), so calls failed as unknown functions or ran a
-  same-named public function. Public operations always resolve from `publicApi`.
+  same-named public function. Public operations resolve from `publicApi` as
+  before, unless a hand-built `adminApi` defines them itself.
 - The `BookingProvider` and `useBookingAPI` documentation no longer presents the
   choice of references as authorization or shows a conditional `useMutation`
   call. Host functions enforce access; booking reads must check the management
@@ -302,9 +303,6 @@
   throws `Event type not found`. Make your public wrapper return `null` for
   that error (see the README) and render the Booker inside an error boundary;
   otherwise the error reaches the boundary or the framework's error page.
-- A hand-built (plain-object) `adminApi` that carries a public operation name,
-  such as `getEventType`, no longer overrides `publicApi` for it. Names outside
-  both interfaces still come from `adminApi` when it has them.
 
 ### Maintenance and documentation
 

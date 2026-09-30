@@ -261,7 +261,8 @@ export interface BookingProviderProps {
   /**
    * References to your host's administration functions, usually the generated
    * `api.admin`. Optional - only needed for admin components. Admin operations
-   * resolve from here; public operations always resolve from publicApi.
+   * resolve from here; public operations resolve from publicApi unless a
+   * hand-built adminApi defines them itself.
    *
    * Without adminApi (or without a given operation in a hand-built adminApi),
    * admin operations resolve from publicApi. This fallback is deprecated and
@@ -290,7 +291,8 @@ export interface BookingProviderProps {
  *
  * Components access both through a single `useBookingAPI()` hook. Each
  * operation resolves from the gateway that owns it: PublicBookingAPI names
- * from publicApi, AdminBookingAPI names from adminApi.
+ * from publicApi, AdminBookingAPI names from adminApi. A hand-built adminApi
+ * that defines a public name itself still overrides it.
  *
  * The provider only chooses which function references the UI calls. It is not
  * access control: any client can call any exported Convex function directly.
@@ -343,7 +345,13 @@ export function BookingProvider({
       if (!adminApi) return publicApi;
       return new Proxy(publicApi as BookingAPI, {
         get(target, prop) {
-          if (PUBLIC_KEYS.has(prop)) return (target as any)[prop];
+          if (PUBLIC_KEYS.has(prop)) {
+            // A plain-object adminApi's own property still overrides, as before;
+            // generated proxies have none, so they never shadow publicApi
+            return Object.prototype.hasOwnProperty.call(adminApi, prop)
+              ? (adminApi as any)[prop]
+              : (target as any)[prop];
+          }
           if (ADMIN_KEYS.has(prop)) {
             // Deprecated fallback for a hand-built adminApi without this operation
             return (adminApi as any)[prop] ?? (target as any)[prop];
