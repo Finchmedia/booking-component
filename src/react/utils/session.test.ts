@@ -16,6 +16,8 @@ import { BookingProvider, type PublicBookingAPI } from "../context";
 // only the Convex client transport and the cached query hook are stubbed.
 
 const KEY = "convex-booking-session-id";
+// Faked now: the slots stay in the future, and it is 1 March in every zone
+const NOW = "2027-03-01T12:00:00.000Z";
 const SLOT = "2027-03-09T10:00:00.000Z";
 
 const mocks = vi.hoisted(() => ({
@@ -89,7 +91,8 @@ function StandaloneCalendar() {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  vi.setSystemTime(new Date(NOW));
   vi.stubGlobal("IntersectionObserver", VisibleObserver);
   mocks.heartbeat.mockClear();
   mocks.queries = {

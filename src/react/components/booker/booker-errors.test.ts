@@ -15,6 +15,8 @@ import type { Booking } from "../../types";
 // useSlotHold and useMutation. Only the Convex client transport and the
 // cached query hook are stubbed.
 
+// Faked now: the slots stay in the future, and it is 1 March in every zone
+const NOW = "2027-03-01T12:00:00.000Z";
 const SLOT_A = "2027-03-09T10:00:00.000Z";
 const SLOT_B = "2027-03-09T12:00:00.000Z";
 
@@ -131,7 +133,8 @@ function movedBooking(args: { newStart: number; newEnd: number }): Booking {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  vi.setSystemTime(new Date(NOW));
   vi.stubGlobal("IntersectionObserver", VisibleObserver);
   vi.spyOn(console, "error").mockImplementation(() => {});
   sessionStorage.clear();
