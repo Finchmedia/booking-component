@@ -15,7 +15,12 @@ import {
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
-import { assertDateOrder, assertEventLength, assertSlotIndices } from "./input_validation";
+import {
+    assertDateOrder,
+    assertEventLength,
+    assertSlotIndices,
+    assertTimeZone,
+} from "./input_validation";
 import type { Doc } from "./_generated/dataModel";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
 import {
@@ -969,6 +974,7 @@ export const createEventType = mutation({
   },
   returns: v.id("event_types"),
   handler: async (ctx, args) => {
+    assertTimeZone(args.timezone);
     const existing = await ctx.db
       .query("event_types")
       .withIndex("by_external_id", (q) => q.eq("id", args.id))
@@ -1071,6 +1077,9 @@ export const updateEventType = mutation({
   },
   returns: v.id("event_types"),
   handler: async (ctx, args) => {
+    if (args.timezone !== undefined) {
+      assertTimeZone(args.timezone);
+    }
     const eventType = await ctx.db
       .query("event_types")
       .withIndex("by_external_id", (q) => q.eq("id", args.id))

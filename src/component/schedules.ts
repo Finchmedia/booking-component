@@ -2,7 +2,7 @@ import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { parseCivilDate, weekdayOf, type CivilDate } from "../shared/time.js";
-import { assertDateOrder } from "./input_validation";
+import { assertDateOrder, assertTimeZone } from "./input_validation";
 import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 
 // ============================================
@@ -165,6 +165,7 @@ export const createSchedule = mutation({
   },
   returns: v.id("schedules"),
   handler: async (ctx, args) => {
+    assertTimeZone(args.timezone);
     assertValidWeeklyHours(args.weeklyHours);
 
     // Check for existing ID
@@ -223,6 +224,9 @@ export const updateSchedule = mutation({
   },
   returns: v.id("schedules"),
   handler: async (ctx, args) => {
+    if (args.timezone !== undefined) {
+      assertTimeZone(args.timezone);
+    }
     if (args.weeklyHours !== undefined) {
       assertValidWeeklyHours(args.weeklyHours);
     }

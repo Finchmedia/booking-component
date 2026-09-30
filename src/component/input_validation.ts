@@ -36,3 +36,27 @@ export function assertDateOrder(dateFrom: CivilDate, dateTo: CivilDate): void {
   }
 }
 
+// Only accepted zones are remembered, so rejected strings cannot grow the set.
+const acceptedTimeZones = new Set<string>();
+
+/** True when Intl accepts `timeZone` (IANA names such as "Europe/Berlin" or "UTC"). */
+export function isValidTimeZone(timeZone: string): boolean {
+  if (acceptedTimeZones.has(timeZone)) return true;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+  } catch {
+    return false;
+  }
+  acceptedTimeZones.add(timeZone);
+  return true;
+}
+
+/**
+ * Rejects a time zone that Intl does not accept. Every availability read for a
+ * schedule stored with such a zone would throw.
+ */
+export function assertTimeZone(timeZone: string): void {
+  if (!isValidTimeZone(timeZone)) {
+    throw new Error(`Invalid time zone "${timeZone}": expected an IANA time zone such as "Europe/Berlin"`);
+  }
+}

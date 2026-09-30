@@ -30,6 +30,9 @@
   weekly hours; until 0.4.2 every day used the next weekday's. If you shifted
   `weeklyHours` by a day to compensate, shift them back when you upgrade.
   Existing bookings are not moved.
+- Schedule, resource and event-type writes reject a time zone that `Intl`
+  does not accept. Rows stored with one stay readable and can still be
+  edited; a patch that sets a valid zone repairs them.
 
 ### Security
 
@@ -100,6 +103,11 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - Booking writes and `getAvailability` reject instants beyond what a `Date`
   can hold with `Invalid time range: start and end must be representable
   dates` instead of failing later with a `RangeError`.
+- Schedule, resource and event-type writes reject a time zone that `Intl`
+  does not accept, such as `Mars/Olympus_Mons`, `UTC+2` or `""`
+  (`Invalid time zone "…"`); patches check the zone only when they set one.
+  A schedule stored with such a zone made every availability read for it
+  throw.
 - One malformed recipient address no longer takes other bookers' mail down
   with it. Built-in email to an address that fails a conservative syntax check
   (for example `x@`) is skipped before it is queued: the job returns
@@ -152,8 +160,8 @@ The internal email mutations keep their names and arguments, so jobs queued by
 - Time-sensitive tests can run under a chosen process time zone
   (`src/testing/process-time-zone.ts`).
 - Regression suites for weekdays in 14 zones, DST days (including a sweep
-  against an `Intl`-only oracle) and input validation. The time-dependent ones
-  run under several process time zones.
+  against an `Intl`-only oracle), input validation and zone validation. The
+  time-dependent ones run under several process time zones.
 
 ## 0.4.2 — 23 September 2026
 
