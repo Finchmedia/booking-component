@@ -119,12 +119,12 @@ export declare const listDateOverrides: import("convex/server").RegisteredQuery<
         endTime: string;
     }[] | undefined;
     type: string;
-    date: string;
     scheduleId: import("convex/values").GenericId<"schedules">;
+    date: string;
 }[]>>;
 export declare const getDateOverride: import("convex/server").RegisteredQuery<"public", {
-    date: string;
     scheduleId: import("convex/values").GenericId<"schedules">;
+    date: string;
 }, Promise<{
     _id: import("convex/values").GenericId<"date_overrides">;
     _creationTime: number;
@@ -133,20 +133,32 @@ export declare const getDateOverride: import("convex/server").RegisteredQuery<"p
         endTime: string;
     }[] | undefined;
     type: string;
-    date: string;
     scheduleId: import("convex/values").GenericId<"schedules">;
+    date: string;
 } | null>>;
+/**
+ * Creates the override of a schedule's date, or replaces the one stored for
+ * that date. Rejects an impossible date, windows that are malformed or
+ * overlap, and "custom" without customHours (INVALID_INPUT); `type` accepts
+ * "unavailable" and "custom" only.
+ */
 export declare const createDateOverride: import("convex/server").RegisteredMutation<"public", {
     customHours?: {
         startTime: string;
         endTime: string;
     }[] | undefined;
-    type: string;
-    date: string;
+    type: "unavailable" | "custom";
     scheduleId: import("convex/values").GenericId<"schedules">;
+    date: string;
 }, Promise<import("convex/values").GenericId<"date_overrides">>>;
+/**
+ * Changes an override's type or hours, with the checks of
+ * createDateOverride. "custom" without hours is checked on the merged
+ * override: a change of either field must leave a "custom" override with at
+ * least one window.
+ */
 export declare const updateDateOverride: import("convex/server").RegisteredMutation<"public", {
-    type?: string | undefined;
+    type?: "unavailable" | "custom" | undefined;
     customHours?: {
         startTime: string;
         endTime: string;
@@ -161,17 +173,22 @@ export declare const deleteDateOverride: import("convex/server").RegisteredMutat
 /** The schedule with this external id, or null. */
 export declare function getScheduleByExternalId(ctx: QueryCtx, scheduleId: string): Promise<Doc<"schedules"> | null>;
 /**
+ * The schedule with this external id; SCHEDULE_NOT_FOUND otherwise. An
+ * unknown id used to mean 09:00–17:00 every day, which reopened weekends and
+ * closures after a schedule was deleted.
+ */
+export declare function getExistingSchedule(ctx: QueryCtx, scheduleId: string): Promise<Doc<"schedules">>;
+/**
  * Effective LOCAL slot indices (0–95, in the schedule's zone) of a schedule on
  * a calendar day: the date override when one exists, otherwise the weekly
  * hours of that day's own weekday. The weekday is the calendar day's, not the
  * weekday some instant of it has in the zone — reading `${date}T12:00Z` in the
  * zone used the NEXT day's hours in zones at UTC+12 and beyond (New Zealand,
  * Fiji, Tonga, Samoa, Kiribati; Norfolk Island in summer).
- * A missing schedule yields the default business hours 09:00–17:00.
  * `overridesByDate` (from getDateOverridesByDate) replaces the per-day
  * override read when a caller walks a range of days.
  */
-export declare function getScheduleDaySlots(ctx: QueryCtx, schedule: Doc<"schedules"> | null, date: CivilDate, overridesByDate?: Map<string, Doc<"date_overrides">>): Promise<number[]>;
+export declare function getScheduleDaySlots(ctx: QueryCtx, schedule: Doc<"schedules">, date: CivilDate, overridesByDate?: Map<string, Doc<"date_overrides">>): Promise<number[]>;
 /**
  * A schedule's date overrides from `dateFrom` to `dateTo`, by date, read with
  * one index range. Of several rows for one date the first stored wins, as in
@@ -183,10 +200,12 @@ export declare function getWeeklySlots(schedule: Doc<"schedules">, date: CivilDa
 /**
  * Get the effective available slots for a resource on a specific date.
  * This considers the schedule's weekly hours and any date overrides.
+ * An unknown scheduleId throws SCHEDULE_NOT_FOUND (until 0.4.3 it returned
+ * 09:00–17:00).
  */
 export declare const getEffectiveAvailability: import("convex/server").RegisteredQuery<"public", {
-    date: string;
     scheduleId: string;
+    date: string;
 }, Promise<{
     availableSlots: number[];
 }>>;

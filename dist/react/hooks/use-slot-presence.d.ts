@@ -10,9 +10,9 @@ export declare function useSlotPresence(resourceId: string, slotId: string): {
     isLoading: boolean;
     holderCount?: undefined;
 } | {
-    isLocked: any;
-    isHeldByMe: any;
-    holderCount: any;
+    isLocked: boolean;
+    isHeldByMe: boolean;
+    holderCount: number;
     isLoading: boolean;
 };
 //# sourceMappingURL=use-slot-presence.d.ts.map

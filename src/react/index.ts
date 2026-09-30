@@ -6,9 +6,29 @@ export {
   useBookingAPI,
   type BookingAPI,
   type PublicBookingAPI,
+  type PublicBookingAPIWithAvailabilityContext,
   type AdminBookingAPI,
   type BookingProviderProps,
+  type BookingProviderPropsWithAvailabilityContext,
 } from "./context.js";
+
+// Host contract: what the components send and read
+export type {
+  BookingUIOperations,
+  OptionalPublicOperations,
+  EventTypeView,
+  ResourceView,
+  BookingView,
+  DaySlotView,
+  PresenceView,
+  SlotHolderView,
+  AvailabilityContextArgs,
+  AvailabilityContextOperations,
+  MonthAvailabilityArgs,
+  DaySlotsArgs,
+  CreateBookingArgs,
+  RescheduleBookingByTokenArgs,
+} from "./contract.js";
 
 // Types
 export type {
@@ -25,6 +45,7 @@ export type {
   BookingValidationError,
   BookingValidationResult,
 } from "./types.js";
+export type { BookingStatus } from "../shared/booking-status.js";
 
 // Hooks
 export {

@@ -315,19 +315,15 @@ describe("legacy path (no resourceTimezone)", () => {
     expect(after).toEqual(before.filter((time) => time !== utcHour(TUESDAY, 10)));
     expect(after).toHaveLength(7);
 
-    // The schedule-aware path needs BOTH resourceTimezone and availableSlots:
-    // with only one of them the legacy UTC grid is used and a Berlin window
-    // (local slots 36..67 = 09:00–17:00 Berlin) is ignored.
-    expect(
-      (
-        await t.query(api.public.getDaySlots, { ...legacyArgs, availableSlots: range(36, 68) })
-      ).map((slot) => slot.time)
-    ).toEqual(after);
-    expect(
-      (await t.query(api.public.getDaySlots, { ...legacyArgs, resourceTimezone: TZ })).map(
-        (slot) => slot.time
-      )
-    ).toEqual(after);
+    // The schedule-aware path needs BOTH resourceTimezone and availableSlots
+    // (or scheduleId). Until 0.4.3 only one of them silently fell back to the
+    // legacy UTC grid and ignored the Berlin window; since 0.5.0 it throws.
+    await expect(
+      t.query(api.public.getDaySlots, { ...legacyArgs, availableSlots: range(36, 68) })
+    ).rejects.toMatchObject({ data: { code: "INVALID_INPUT" } });
+    await expect(
+      t.query(api.public.getDaySlots, { ...legacyArgs, resourceTimezone: TZ })
+    ).rejects.toMatchObject({ data: { code: "INVALID_INPUT" } });
 
     // Month view on the same legacy window agrees: 60 minutes still fit around
     // the booking, a full 8-hour event no longer does.

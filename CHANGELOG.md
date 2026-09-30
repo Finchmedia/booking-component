@@ -1,5 +1,487 @@
 # Changelog
 
+## 0.5.0 — 30 September 2026
+
+The contract release: coded errors, one set of booking rules, closed booking
+statuses and checked configuration writes in the component, and a host
+contract that `BookingProvider` checks at compile time. Function paths and
+the version 1 hook payloads are unchanged, and jobs queued by 0.4.x keep
+being accepted. Each breaking change below names what your host has to do;
+read _Upgrading_ before bumping, and its last entry before rolling back.
+
+### Upgrading
+
+- Eight new `maintenance.audit` checks list the stored rows 0.5.0 rejects on
+  write, reads differently, or will not move or confirm (PR-38):
+  `event_type_config`, `schedule_config`, `resource_config`,
+  `date_override_config`, `link_integrity`, `booking_integrity`,
+  `booking_eligibility` and `booking_status_invalid`, each issue with its
+  `problems`. They only read, and they ship with 0.5.0 (0.4.x has only
+  `f10_weekday` and `event_length_invalid`), so the steps "before upgrading"
+  below need 0.5.0 deployed against a copy of your data: import a snapshot of
+  production into a separate deployment, deploy your host with 0.5.0 there,
+  run every check (paging with `continueCursor` until `isDone`), repair what
+  they list in production with the 0.4.x functions the entries below and
+  [docs/maintenance.md](docs/maintenance.md) name, and run every check on
+  production again right after deploying. `booking_status_invalid` ships
+  with the narrowed schema, so it can only confirm what the deploy itself
+  checks (see the status entry). `makeInternalBookingAPI().audit` takes
+  every check.
+- Expected failures throw `ConvexError({ code, message })` instead of a plain
+  `Error` (N3). `message` is the 0.4.x text, unchanged; `code` is one of the
+  codes in [docs/errors.md](docs/errors.md); other failures stay plain
+  `Error`s. A host that passes every `ConvexError` through to its clients, as
+  the reference host's `translateComponentError` does, would now send the
+  component's codes and texts to browsers, and the Booker shows such an
+  error's `message` where it showed its generic text for a plain error.
+  Before upgrading, map the codes your clients see (for example
+  `SLOT_UNAVAILABLE` to your "slot taken" error) with `isBookingError(error)`
+  and `error.data.code` and rethrow your own `ConvexError`, fall back to a
+  generic error for the rest, and deploy that change with the upgrade.
+  Matching `error.data.message` still works; codes also catch the bundle and
+  move conflicts whose texts a needle table missed.
+- `getEventType` returns `null` for an unknown ID (N1, D12), like
+  `getResource` and the `getBooking*` queries; 0.4.x threw
+  `EVENT_TYPE_NOT_FOUND` "Event type not found: <id>". Handle `null` where
+  you read the result, and drop a wrapper's catch that mapped that error to
+  `null` (the 0.4.3 workaround): a wrapper that returns the result meets the
+  React contract (`EventTypeView | null`), and the Booker and Calendar show
+  `null` as a deleted event type. A wrapper that throws for a missing event
+  type sends the Booker to your error boundary.
+- New bookings (`createBooking`, `createProvisionalBooking`,
+  `createMultiResourceBooking`) reject a `timezone` `Intl` does not accept and
+  a booker email that fails the built-in mail's syntax screen (one `@`, a
+  domain of 1–63-character labels, no spaces) with `INVALID_INPUT`, before
+  any other check (N4, N5, D15); the text does not repeat the address. Check
+  both in your booking
+  form (`isSendableAddress` from `@mrfinch/booking/emails` is that screen).
+  Stored bookings keep working. Recipient verification stays host policy.
+- `createEventType` and `updateEventType` check the settings they are given
+  (F16, D29): lengths, length options and slot intervals are whole minutes
+  above 0, buffers and notice 0 or more, `maxFutureMinutes` above 0, and
+  `lengthInMinutes` is one of non-empty `lengthInMinutesOptions`
+  (`INVALID_INPUT`). The length rule counts the stored value of the field a
+  write omits, so changing only the length or only the options must leave a
+  valid pair; writes that touch neither still work on rows stored before
+  0.5.0. Lengths are still rounded up to the 15-minute grid. Repair what
+  `event_type_config` lists before provisioning scripts re-run
+  `createEventType`, which checks every setting it passes.
+- `createEventType` on an existing ID (an upsert) keeps what it is not given
+  (N14): an omitted `isActive` no longer reactivates a deactivated event type
+  (a new one is still active), and an omitted `organizationId` keeps the
+  stored one. An ID stored for another organization is rejected with
+  `ORGANIZATION_MISMATCH` instead of being moved, links included, to the
+  caller's organization. Adopting an event type without organization still
+  works while every resource linked to it belongs to the adopting
+  organization; otherwise `ORGANIZATION_MISMATCH` names the resource, since
+  the kept links would cross organizations: unlink it first. Scripts that
+  re-run `createEventType` to reactivate must pass `isActive: true` or call
+  `toggleEventTypeActive`.
+- `createDateOverride` and `updateDateOverride` take
+  `type: "unavailable" | "custom"` (other strings fail argument validation,
+  and the generated types narrow), and a `custom` override needs at least one
+  window, also after an update of either field (`INVALID_INPUT`). Stored rows
+  with other types or without hours still read as the weekly hours;
+  `date_override_config` lists them. Update them to `unavailable` or give
+  them hours.
+- Range caps (F16, D4): `getMonthAvailability` answers at most 93 days per
+  call (both ends included; `INVALID_INPUT`), `getAvailability` at most 366
+  days (`INVALID_RANGE`). Split longer ranges. Bookings have no length cap;
+  multi-day bookings stay possible.
+- `updateResource` refuses `isFungible: true` while active single-resource
+  bookings (pending, confirmed or provisional, without bundle items; legacy
+  reservations included) hold the resource (N16): `RESOURCE_IN_USE`, and so
+  does `createResource` on an ID that legacy reservations already hold without
+  a resource document. With capacity one the flag used to be accepted and left
+  them unmovable; bundles do not block it. End or move those bookings first.
+  `booking_integrity` lists bookings an earlier flag change stranded
+  (`poolWithoutItems`): cancel them, or set `isFungible: false` again.
+- One set of booking rules for every path (F6). `createBooking`,
+  `createProvisionalBooking`, `createMultiResourceBooking` (per item), both
+  reschedule mutations and `transitionBookingState` to `confirmed`, or from a
+  provisional hold to `pending`, require an existing, active event type and
+  existing, active resources that are linked to it and belong to its
+  organization when it has one, one of them not an add-on. For bundles the
+  whole rule set is new, since 0.4.x checked only that the event type existed:
+  the event type must be active, and every item must exist (unknown resource
+  IDs are rejected with `RESOURCE_NOT_FOUND` instead of reserving a one-unit
+  row), be active, be linked to the event type (pools included) and share its
+  organization; only eligible items satisfy the add-on rule, and the rules
+  come before capacity (an add-on alone on a taken slot reports
+  `RESOURCE_NOT_STANDALONE`). New for moves, by token and by ID alike (no
+  administrator override), and for confirming a provisional hold, submitting
+  it as a request (`provisional` to `pending`, which sends the booker the
+  "awaiting confirmation" mail) or approving a pending request: the same check
+  over every item, before anything is released or notified. Cancelling,
+  declining and expiring are never checked, and deactivating never ends a
+  booking. Legacy `createReservation` and its bookings stay exempt (see the
+  reserved ID `legacy` below). The new
+  `booking_eligibility` check lists the active bookings these rules reject,
+  with their problems (`eventTypeMissing`, `eventTypeInactive`,
+  `resourceMissing`, `resourceInactive`, `resourceNotLinked`,
+  `crossOrganization`, `noStandalone`). Before upgrading, run it on a copy
+  (see the audit entry), then link every resource your bundles use (pools
+  included) to the event type, create resources for IDs you booked without
+  one, and resolve pending requests and provisional holds on deactivated or
+  unlinked configuration; afterwards, reactivate or relink before moving or
+  confirming such a booking. [docs/errors.md](docs/errors.md) lists the codes
+  per function.
+- The event type ID `legacy` is reserved: `createEventType` rejects it with
+  `INVALID_INPUT`, also as an upsert of an event type stored with it.
+  `createReservation` stores `eventTypeId: "legacy"` on its bookings, and
+  they keep the legacy exemption from the booking rules only while no event
+  type has that ID. An event type created with it before 0.5.0 is treated
+  like any other: the booking rules above apply to its bookings, and to
+  `createReservation` rows while it exists. `event_type_config` lists it with
+  the problem `id`,
+  and `booking_eligibility` lists its bookings the rules reject. Keep such an
+  event type and manage it with `updateEventType`, `toggleEventTypeActive`
+  and the link functions; change provisioning scripts that re-run
+  `createEventType` for it, and create new event types under other IDs.
+- No bookings across organizations (N13, F7): a booking belongs to its event
+  type's organization. An event type with an `organizationId` links only
+  resources of that organization: `linkResourceToEventType`,
+  `setResourcesForEventType` and `setEventTypesForResource` reject another
+  organization's resource with the new code `ORGANIZATION_MISMATCH`, and the
+  two replace mutations then change nothing. The booking rules reject such a
+  resource too, also over links stored before 0.5.0.
+  `createMultiResourceBooking` rejects an `organizationId` that differs from
+  its event type's (0.4.3 stored it): omit it or pass the same one. Event
+  types without organization still link any resource, but one booking holds
+  resources of one organization only: a bundle that mixes organizations is
+  rejected, and its `organizationId`, when given, must be the organization of
+  its resources (0.4.3 stored any value; without it the bundle has none, like
+  a single booking of that event type). Moves and confirmations apply this
+  to stored bundles too. A move, every `transitionBookingState` call,
+  `cancelBookingByToken`, `cancelReservation`, `cancelMultiResourceBooking`
+  and `expireProvisionalBooking` give a booking stored without its event
+  type's organization or with another one that organization in the same
+  transaction, before anything is queued, when every resource the booking
+  occupies (its resource and every item) belongs to it, as
+  `backfillBookingOrganizations` requires (a move gives it to the original
+  and the new booking). Only that organization's hooks then receive the event
+  (version 1 payloads include the management token, and their `booking`
+  carries that `organizationId`), and the organization the booking named no
+  longer lists it. Otherwise the booking keeps the stored organization, and
+  its hooks and emails go there as in 0.4.x, so an event type's
+  organization never takes over a booking of another organization's
+  resources. Cancelling, declining, completing and expiring still never
+  fail. Legacy rows and event types without organization keep the stored
+  one. Unlink the pairs `link_integrity` lists as
+  `crossOrganization`, and link a resource of the event type's organization
+  instead; `booking_integrity` lists stored bookings of another
+  organization, and those without one that `backfillBookingOrganizations`
+  lists in `needsReview` for a missing or foreign resource, as
+  `organizationMismatch`.
+- `getMonthAvailability` and `getDaySlots` need complete schedule arguments
+  (F12): `resourceTimezone` alone, `availableSlots` without
+  `resourceTimezone` or `scheduleId`, and a `resourceTimezone` other than the
+  schedule's throw `INVALID_INPUT`; 0.4.3 used the legacy 09:00–17:00 UTC
+  window or the other zone, which opened closed days. An unknown `scheduleId`
+  throws `SCHEDULE_NOT_FOUND` there and in `getEffectiveAvailability` instead
+  of meaning 09:00–17:00 every day (N15). Only a call without schedule
+  arguments (`""` counts as omitted) keeps the legacy window. A schedule
+  stored before 0.4.3 with a zone `Intl` rejects has its hours read as UTC
+  (logged), so its closed days stay closed. Pass `{ scheduleId }` alone, or
+  `availableSlots` with `resourceTimezone`.
+- Schedule references stay valid (N15): `createEventType` and
+  `updateEventType` reject a `scheduleId` that names no schedule
+  (`SCHEDULE_NOT_FOUND`; `""` still means none), and `deleteSchedule` refuses
+  while an event type uses the schedule (new code `SCHEDULE_IN_USE`). Point
+  the event types `event_type_config` lists with `scheduleId` to an existing
+  schedule, or clear it, before deploying: from the deploy on,
+  `getMonthAvailability`, `getDaySlots` and `getEffectiveAvailability` throw
+  `SCHEDULE_NOT_FOUND` for them instead of reading 09:00–17:00, so a host
+  that forwards `eventType.scheduleId` sends the Booker to its error
+  boundary until the repair. Without a copy deployment, find them with
+  `listEventTypes` and `getSchedule` for each `scheduleId`; 0.4.x
+  `updateEventType` clears one with `scheduleId: ""`.
+- `deleteResource` and `deleteEventType` delete the deleted ID's links in the
+  same transaction (N12), so an ID created again starts unlinked: link it
+  explicitly. Links that deletes before 0.5.0 left behind stay;
+  `link_integrity` lists them (`resourceMissing`, `eventTypeMissing`). Call
+  `deleteAllLinksForResource` or `deleteAllLinksForEventType` once for those
+  IDs, at the latest before re-creating one.
+- `listBookings` rejects a `limit` that is not a positive integer with
+  `INVALID_INPUT` (F18, D23); 0.4.x read `0` as no limit, dropped rows for a
+  negative limit and truncated fractions. Omit `limit` for no limit. Without
+  a selector it still considers only the 1,000 most recently created
+  bookings: pass `organizationId`, `resourceId` or `eventTypeId`, or page
+  with `listBookingsPage`.
+- Booking statuses are a closed set (F16, D35): `status` is `provisional`,
+  `pending`, `confirmed`, `cancelled`, `declined` or `completed` in the
+  schema, in every returned booking and in the generated types
+  (`BookingStatus`), as are the history's `toStatus` and `fromStatus` (`""`
+  marks the creation entry). Host types that mirrored `status` as `string`
+  can use `BookingStatus`. `transitionBookingState({ toStatus })` and
+  `listBookings({ status })` reject other strings in argument validation: an
+  unknown target threw `INVALID_STATE` before, an unknown filter listed
+  nothing, and `""` meant no filter, so omit `status` instead. Convex checks
+  the stored rows against the narrowed schema when you deploy and refuses
+  the deploy while one holds another value, naming the table and document.
+  The component writes only these statuses, so only rows edited in the
+  dashboard or imported can block it: correct them there and deploy again.
+  `booking_status_invalid` then confirms that none is left, history
+  included.
+- `Booking.status` in `@mrfinch/booking/react`, and with it
+  `BookingView.status` and what `onBookingComplete` receives, is the
+  component's `BookingStatus` (exported from `/react` too). The deprecated
+  `"rescheduled"`, never stored, is no longer part of it: delete comparisons
+  and `case` branches with it (a moved booking is `cancelled`). A host
+  `createBooking` or `rescheduleBookingByToken` whose returns validator
+  declares `status: v.string()` no longer fits `PublicBookingAPI`: declare it
+  with `bookingStatusValidator`, or return the component's booking.
+- `getQuantityAvailability` returns `bookedQuantities` as
+  `Record<string, number>` instead of `any`, and the schema stores
+  `quantity_availability.slotQuantities` as that record (PR-66). The
+  component only ever wrote numbers, so the deploy check above fails only on
+  rows changed outside it. Drop host casts of the result.
+- Slot queries during a reschedule (F13): a host that forwards a client's
+  `excludeBookingUid` to `getDaySlots` or `getMonthAvailability` lets anyone
+  who knows a booking's UID see its time as free. Remove it from their
+  arguments and forward the booker's `rescheduleContext: { uid, token }`
+  instead, which frees the booking's own slots only with its management
+  token; keep `excludeBookingUid` for code that has authorized the move
+  itself. Passing both throws `INVALID_INPUT`.
+  [docs/host-functions.md](docs/host-functions.md#slot-queries-while-rescheduling)
+  shows a wrapper. The React components send the context only with
+  `BookingProvider`'s new `availabilityContext`, off by default (see
+  _Added_). Before you turn it on, declare
+  `eventTypeId: v.optional(v.string())` and
+  `rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() }))`
+  in the argument validators of both host wrappers and deploy them ahead of
+  the page: until then the validators reject every slot query.
+  `BookingProvider` rejects a `publicApi` without them, or whose
+  `rescheduleContext` lacks `uid` or `token`, at compile time (functions
+  with untyped arguments are not checked).
+- Hooks keep the version 1 payloads unless registered with
+  `payloadVersion: 2` (N7, D16), so existing hooks need no change. To switch
+  one to the version 2 envelope, register a handler that declares
+  `args: bookingHookEventV2` with `payloadVersion: 2`, then unregister the
+  old hook; `updateHook` cannot change the version. Events queued by 0.4.x
+  reach version 2 hooks not at all (logged).
+- `convex-helpers` (`^0.1.124`) is a required peer dependency:
+  `listBookingsPage` uses its paginator, so your deploy bundles it. Install
+  it next to `@mrfinch/booking` (React users already have it).
+- `BookingProvider` checks `publicApi` at compile time. The 11 functions the
+  components call (`getEventType`, `getResource`, `hasResourceEventTypeLink`,
+  `getMonthAvailability`, `getDaySlots`, `getDatePresence`, `getPresence`,
+  `createBooking`, `rescheduleBookingByToken`, `heartbeat`, `leave`) must
+  accept exactly the arguments the components send and return at least the
+  fields they read (`BookingUIOperations`). A mismatch is a type error that
+  names the operation; until 0.4.x it compiled and failed in the browser.
+  Fix the host function: declare every argument the components send (for
+  example `slotInterval` in `getDaySlots`, `eventTypeId` in `heartbeat`), make
+  arguments they never send optional, and return the view fields; the README's
+  host contract table lists them. To find the function, check the gateway on
+  its own with the exported contract type:
+  `api.public satisfies PublicBookingAPI` names it and lists its argument keys
+  next to the keys the components send; the error on `<BookingProvider>` can
+  name the opt-in type and a different function. The generated `api.public`
+  of the reference host compiles unchanged.
+- `PublicBookingAPI`'s 11 required members are `FunctionReference_future`
+  references (the checked slots) instead of plain
+  `FunctionReference<…, any, any>`. `convex/react`'s `useQuery` and
+  `useMutation` accept them, but a `FunctionReference_future` is not
+  assignable to a plain `FunctionReference`: convex-helpers' cached
+  `useQuery` (the hook `ConvexQueryCacheProvider` serves) and other APIs
+  that take a plain reference reject a member read from a value typed
+  `PublicBookingAPI`, such as a hand-built gateway or
+  `function useX(publicApi: PublicBookingAPI)` (TS2345). Take plain typed
+  references from `useBookingAPI()` or your generated `api` instead, and
+  check a gateway with `api.public satisfies PublicBookingAPI` rather than
+  annotating a variable as `PublicBookingAPI`.
+- The other 10 public operations (`getBooking`, `getBookingByUid`,
+  `getBookingByToken`, `cancelBookingByToken`, `getEventTypeBySlug`,
+  `listEventTypes`, `getAvailability`, `listResources`,
+  `getEventTypesForResource`, `getEffectiveAvailability`) are optional: no
+  component calls them, so a host need not export the token-less booking reads.
+  Code that reads them from `useBookingAPI()` must handle `undefined`, or call
+  its own `api.public` references.
+- `useBookingAPI()` types the 11 operations with the contract's arguments and
+  result views (`EventTypeView`, `ResourceView`, `BookingView`, …) instead of
+  `any`. Code that reads other fields through them, such as `eventType.slug`,
+  uses its own generated references instead. Calls through them must also
+  pass exactly the contract's arguments: `slotInterval` on `getDaySlots` and
+  `getMonthAvailability`, and no `scheduleId`, `excludeBookingUid` or extra
+  `createBooking` field, for example. For other argument shapes, call your
+  own `api.public` references.
+- Admin operations resolve only from `adminApi` and are `undefined` without
+  it; `publicApi` no longer stands in for them (deprecated in 0.4.3). A
+  plain-object `adminApi` no longer overrides public operations, and names
+  outside `PublicBookingAPI` and `AdminBookingAPI` are no longer passed
+  through. Pass `adminApi={api.admin}` wherever admin operations are used, and
+  call other functions through your own `api`. To route a public operation to
+  another function, pass a plain-object `publicApi` that lists the required
+  operations; a generated `api.public` cannot be spread.
+- `onBookingComplete` receives a `BookingView`: `uid`, `status`, `start`,
+  `end`, `timezone` and `bookerName`, and every other `Booking` field as
+  optional. A callback annotated `(booking: Booking) => …` takes `BookingView`
+  or drops the annotation. `BookingSuccess` accepts a `BookingView`.
+- All component indexes follow Convex's `by_field1_and_field2` naming: each
+  is named after its fields, in order, which do not change (`by_external_id`
+  keeps its name, since Convex reserves `by_id`). The deploy builds the
+  renamed indexes and the new `event_types` index `by_scheduleId` (for
+  `SCHEDULE_IN_USE`) and drops the old ones (a rollback to 0.4.x does the
+  reverse), so allow time on large tables. Component tables are internal, so
+  host code is unaffected.
+- Rolling back to 0.4.x: every 0.5.0 emitter queues `triggerHooks` with a
+  new `payloadV2` argument, and hooks registered with `payloadVersion: 2`
+  store it. 0.4.x's `triggerHooks` validator rejects that argument, so each
+  job still queued when 0.4.x deploys fails and the emails and hooks of its
+  event are lost, and Convex refuses the 0.4.x schema while a hook row has
+  `payloadVersion`. Before redeploying 0.4.x, unregister the hooks
+  registered with `payloadVersion: 2` and let the queued `triggerHooks` jobs
+  finish (they run right after their booking write).
+
+### Fixed
+
+Each of these changes behaviour; its _Upgrading_ entry says what to do.
+
+- Bundles, moves, confirmations and requests made from provisional holds
+  follow the booking rules of `createBooking`: deactivated, unlinked or
+  unknown configuration and other organizations' resources are rejected (F6,
+  F7, N13). A hold submitted as a request no longer tells the booker it
+  awaits approval when the approval can only fail.
+- Slot queries no longer open days a schedule keeps closed when given
+  partial schedule arguments or an unknown schedule (F12, N15).
+- Re-running `createEventType` no longer reactivates an event type or moves
+  another organization's event type to the caller's (N14), and adopting an
+  event type without organization no longer keeps its links to other
+  organizations' resources.
+- A bundle of an event type without organization no longer holds resources
+  of two organizations or names a third organization, and a move no longer
+  carries a missing or foreign organization over to the new booking.
+  No confirmation, request, cancellation, decline, completion or move sends
+  a foreign organization's hooks the booking and its management token any
+  more when all the booking's resources belong to its event type's
+  organization: the booking takes that organization first. Otherwise it
+  keeps the stored one, as before.
+- The slot queries' `excludeBookingUid` and `rescheduleContext` free a
+  bundle's own slots on every item, not only on its first, so an overlapping
+  move of the bundle is offered on each of its resources.
+- The pool flag no longer strands a resource's single-resource bookings,
+  whether set by `updateResource` or by `createResource` on an ID legacy
+  reservations hold (N16).
+- A resource or event type created again with a deleted ID starts unlinked
+  (N12).
+- `listBookings` no longer gives limits of 0, negative or fractional values
+  a meaning (F18).
+- The React integration keeps its types: Booker, Calendar and
+  `useConvexSlots` read typed results without casts, and a host reference whose
+  kind, visibility, arguments or result do not fit is rejected at compile time.
+  Host wrappers with extra optional arguments, broader argument types, the
+  component's own documents or redacted results with the view fields pass.
+- `BookingProvider` builds the API from its operation lists: public
+  operations from `publicApi`, admin operations from `adminApi`, nothing else.
+
+### Added
+
+- Error codes (N3): `BOOKING_ERROR_CODES`, the `BookingErrorCode` and
+  `BookingErrorData` types, `isBookingError` and `isBookingErrorCode` from
+  `@mrfinch/booking`. Each condition has one code in every function: a taken
+  slot is `SLOT_UNAVAILABLE` on the single-resource, bundle and move paths,
+  whose texts differ. [docs/errors.md](docs/errors.md) lists the codes and
+  the functions that throw them.
+- `rescheduleContext: { uid, token }` on `getDaySlots` and
+  `getMonthAvailability` (F13): with the moved booking's UID and management
+  token, its own slots count as free, so a move that overlaps its current
+  time is offered, as the move mutations accept it, on each resource it holds
+  (every item of a bundle). A token that does not match a pending or
+  confirmed booking with that UID that holds the queried resource frees
+  nothing and is no error; neither value appears in results or logs.
+  `makeInternalBookingAPI` forwards it.
+- Hook payloads, version 2 (N7): `registerHook({ …, payloadVersion: 2 })`
+  delivers one envelope per event, whichever function emitted it, built from
+  the written booking and without the management token. Handlers declare
+  `args: bookingHookEventV2` (exported with the `BookingHookEventV2` type
+  from `@mrfinch/booking`); see
+  [docs/hook-payloads-v2.md](docs/hook-payloads-v2.md). `listHooks` and
+  `getHook` return `payloadVersion`.
+- `listBookingsPage` (F18): cursor pages of exactly one organization's,
+  resource's or event type's bookings (newest `start` first), with
+  `dateFrom`, `dateTo`, `status`, `includeProvisional` (provisional holds are
+  hidden otherwise) and `paginationOpts`. It uses the convex-helpers
+  paginator, as components cannot use `.paginate()`; its cursor is the
+  complete index key, so equal starts are neither skipped nor repeated. A
+  page reads at most 1,000 rows, so filtered pages can be short or empty
+  while `isDone` is false. Page it reactively with `usePaginatedQuery` from
+  `convex-helpers/react`. `makeInternalBookingAPI` wraps it.
+- `updateEventType` clears `description`, `scheduleId`, `bufferBefore`,
+  `bufferAfter`, `minNoticeMinutes` and `maxFutureMinutes` with `null` (N25,
+  D30); an omitted field stays unchanged. `makeInternalBookingAPI` forwards
+  `null`.
+- `BOOKING_STATUSES`, the `BookingStatus` type, `bookingStatusValidator` and
+  `isBookingStatus` from `@mrfinch/booking`, for host types, validators and
+  status filters; the `BookingStatus` type also from `@mrfinch/booking/react`.
+- `@mrfinch/booking/react` exports the contract types: `BookingUIOperations`,
+  `OptionalPublicOperations`, the views `EventTypeView`, `ResourceView`,
+  `BookingView`, `DaySlotView`, `PresenceView` and `SlotHolderView`, and the
+  argument types `MonthAvailabilityArgs`, `DaySlotsArgs`, `CreateBookingArgs`,
+  `RescheduleBookingByTokenArgs` and `AvailabilityContextArgs`. The
+  availability queries accept the optional `eventTypeId` and
+  `rescheduleContext` of `AvailabilityContextArgs`; a host that declares them
+  must accept these types, one that does not still fits unless it opts in
+  (below).
+- `useBookingValidation` accepts the views, so a host DTO with the read fields
+  is enough.
+- A booking or reschedule error that carries a known component `code` but no
+  `message` shows a generic text for that code, for example "This time is no
+  longer available. Please choose another time." for `SLOT_UNAVAILABLE`,
+  instead of "Something went wrong". `data.message` still comes first; unknown
+  codes and plain errors keep the generic message.
+- `BookingProvider` takes `availabilityContext`, off by default. With it on,
+  the Calendar and `useConvexSlots` add `eventTypeId` and, while the Booker
+  reschedules, `rescheduleContext: { uid, token }` of the booking being moved
+  to `getDaySlots` and `getMonthAvailability`, so a host can apply the
+  selected event type's schedule and policy and, by passing
+  `rescheduleContext` on to the component, offer times that overlap the
+  booking being moved. Presence functions never receive the token; without
+  the opt-in the arguments are unchanged. What the host functions must
+  declare first is under _Upgrading_ (slot queries during a reschedule). For
+  custom calendars `Calendar` takes an optional `rescheduleContext` and
+  `useConvexSlots` an optional seventh argument
+  `{ eventTypeId, rescheduleContext }`, sent only with the opt-in. New types:
+  `PublicBookingAPIWithAvailabilityContext`, `AvailabilityContextOperations`,
+  `BookingProviderPropsWithAvailabilityContext`.
+
+### Deprecated
+
+- `BookingValidationError`, `BookingValidationResult`,
+  `ValidationError.recoveryPath`, `useConvexSlots().fetchSlots` and
+  `fetchMonthSlots` stay deprecated and available (see 0.4.3).
+
+### Removed
+
+- `BookingProvider` no longer resolves admin operations from `publicApi`
+  (deprecated in 0.4.3), lets a plain-object `adminApi` override public
+  operations, or passes other names through; see _Upgrading_.
+- The `"rescheduled"` member of `Booking.status` (deprecated in 0.4.3, never
+  stored); see _Upgrading_.
+
+### Documentation
+
+- [docs/maintenance.md](docs/maintenance.md): the upgrade order, every
+  `maintenance.audit` check with its repair, and the one-time repairs.
+- [docs/host-functions.md](docs/host-functions.md): slot-query wrappers that
+  forward `rescheduleContext` and declare the `availabilityContext`
+  arguments, and a paged booking list.
+- The README states which booking rules the component guarantees and which
+  policy stays with the host: authorization, notice and horizon, buffers,
+  abuse limits and email recipients.
+- The README lists the host contract per operation (required and optional,
+  the arguments the components send and the fields they read), shows the
+  `satisfies PublicBookingAPI` check, and describes the admin gateway and the
+  availability context opt-in, linking the slot-query wrapper.
+
+### Maintenance
+
+- `npm run lint` rejects `any` and the `no-unsafe-*` flows in the React sources
+  (tests excepted). No exception is needed today.
+- Compile-time tests check the React host contract against the component's
+  generated references and passthrough wrappers, so a component result
+  change that breaks them fails `npm run typecheck`.
+
 ## 0.4.3 — 30 September 2026
 
 ### Upgrading

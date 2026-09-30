@@ -15,6 +15,7 @@ export const {
   createResource,
   createEventType,
   linkResourceToEventType,
+  unlinkResourceFromEventType,
   hasResourceEventTypeLink,
   getEffectiveAvailability,
   getDaySlots,
@@ -26,6 +27,7 @@ export const {
   sweepOrphanedHolds,
   audit,
   backfillBookingOrganizations,
+  listBookingsPage,
 } = makeInternalBookingAPI(components.booking);
 
 const testApi = (
@@ -35,6 +37,7 @@ const testApi = (
       createResource: typeof createResource;
       createEventType: typeof createEventType;
       linkResourceToEventType: typeof linkResourceToEventType;
+      unlinkResourceFromEventType: typeof unlinkResourceFromEventType;
       hasResourceEventTypeLink: typeof hasResourceEventTypeLink;
       getEffectiveAvailability: typeof getEffectiveAvailability;
       getDaySlots: typeof getDaySlots;
@@ -46,6 +49,7 @@ const testApi = (
       sweepOrphanedHolds: typeof sweepOrphanedHolds;
       audit: typeof audit;
       backfillBookingOrganizations: typeof backfillBookingOrganizations;
+      listBookingsPage: typeof listBookingsPage;
     };
   }>
 )["index.test"];
@@ -215,6 +219,46 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     await expect(t.query(testApi.audit, { check: "f10_weekday", limit: 0 })).rejects.toThrow(
       "limit must be an integer from 1 to 500"
     );
+  });
+
+  test("booking_eligibility via the maintenance wrapper", async () => {
+    await seedThroughWrappers(t);
+    const booking = await bookTenToEleven(t);
+    // CONTROL: a booking that follows the rules is not listed.
+    expect(await t.query(testApi.audit, { check: "booking_eligibility", limit: 10 })).toMatchObject({ issues: [], scanned: 1 });
+    await t.mutation(testApi.unlinkResourceFromEventType, { resourceId: RESOURCE, eventTypeId: EVENT });
+    expect((await t.query(testApi.audit, { check: "booking_eligibility", limit: 10 })).issues).toEqual([
+      {
+        check: "booking_eligibility",
+        uid: booking.uid,
+        status: "confirmed",
+        start: TEN_BERLIN,
+        eventTypeId: EVENT,
+        resourceIds: [RESOURCE],
+        problems: ["resourceNotLinked"],
+      },
+    ]);
+  });
+
+  test("listBookingsPage via the booking wrapper: pages across the component boundary", async () => {
+    await seedThroughWrappers(t);
+    const first = await bookTenToEleven(t);
+    const second = await t.mutation(testApi.createBooking, {
+      eventTypeId: EVENT, resourceId: RESOURCE, start: ELEVEN_BERLIN, end: ELEVEN_BERLIN + 3_600_000, timezone: TZ,
+      booker: { name: "Ada", email: "ada@example.com" }, location: { type: "address", value: "Room 1" },
+    });
+    const page = (cursor: string | null) =>
+      t.query(testApi.listBookingsPage, { organizationId: ORG, paginationOpts: { numItems: 1, cursor } });
+    const one = await page(null);
+    expect(one.page.map((booking: { uid: string }) => booking.uid)).toEqual([second.uid]);
+    expect(one.isDone).toBe(false);
+    const two = await page(one.continueCursor);
+    expect(two.page.map((booking: { uid: string }) => booking.uid)).toEqual([first.uid]);
+    const end = await page(two.continueCursor);
+    expect(end).toMatchObject({ page: [], isDone: true });
+    await expect(
+      t.query(testApi.listBookingsPage, { paginationOpts: { numItems: 1, cursor: null } })
+    ).rejects.toThrow("listBookingsPage needs exactly one of organizationId, resourceId or eventTypeId");
   });
 
   test("backfillBookingOrganizations via the maintenance wrapper", async () => {

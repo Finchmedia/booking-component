@@ -1,12 +1,12 @@
 import React from "react";
-import type { Booking } from "../../types.js";
+import type { BookingView } from "../../contract.js";
 interface EventType {
     title: string;
     description?: string;
     lengthInMinutes: number;
 }
 interface BookingSuccessProps {
-    booking: Booking;
+    booking: BookingView;
     eventType: EventType;
     onBookAnother: () => void;
     /**

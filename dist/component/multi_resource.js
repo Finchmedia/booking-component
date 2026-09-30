@@ -4,10 +4,12 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, assertValidRange } from "./utils";
-import { terminateBooking } from "./booking_lifecycle";
+import { assertOrganizationOfResources, assertResourcesBookable, buildHookEventV2, loadBookableEventType, terminateBooking, withEventTypeOrganization, } from "./booking_lifecycle";
 import { generateManagementToken } from "./tokens";
 import { holdsActiveInventory, reserveResourceSlots, usesQuantityInventory, validateRequestedQuantity, validateResourceRequests, } from "./inventory_helpers";
 import { bookingDoc, bookingWithItemsDoc, successResult } from "./validators";
+import { throwBookingError } from "../shared/booking-errors.js";
+import { assertBookingDetails } from "./input_validation";
 // ============================================
 // MULTI-RESOURCE AVAILABILITY CHECK
 // ============================================
@@ -53,9 +55,9 @@ export const checkMultiResourceAvailability = query({
                     // Quantity-based resource
                     const quantityDoc = await ctx.db
                         .query("quantity_availability")
-                        .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceReq.resourceId).eq("date", date))
+                        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceReq.resourceId).eq("date", date))
                         .unique();
-                    const bookedQuantities = (quantityDoc?.slotQuantities ?? {});
+                    const bookedQuantities = quantityDoc?.slotQuantities ?? {};
                     for (const slot of slots) {
                         const booked = bookedQuantities[slot.toString()] ?? 0;
                         const available = totalQuantity - booked;
@@ -70,7 +72,7 @@ export const checkMultiResourceAvailability = query({
                     // Regular resource (quantity = 1)
                     const availability = await ctx.db
                         .query("daily_availability")
-                        .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceReq.resourceId).eq("date", date))
+                        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceReq.resourceId).eq("date", date))
                         .unique();
                     const busySlots = availability?.busySlots ?? [];
                     for (const slot of slots) {
@@ -127,29 +129,34 @@ export const createMultiResourceBooking = mutation({
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {
-        // 0. Range guard — shared with every other write path (an inverted or
-        // NaN range maps to zero slots and would create a booking that holds
-        // nothing).
+        // 0. Zone and booker address, as for single bookings. Range guard —
+        // shared with every other write path (an inverted or NaN range maps to
+        // zero slots and would create a booking that holds nothing).
+        assertBookingDetails(args);
         assertValidRange(args.start, args.end);
         validateResourceRequests(args.resources);
-        // 1. Get event type for metadata
-        const eventType = await ctx.db
-            .query("event_types")
-            .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
-            .unique();
-        if (!eventType) {
-            throw new Error(`Event type "${args.eventTypeId}" not found`);
-        }
+        // 1. The event type exists and is active.
+        const eventType = await loadBookableEventType(ctx, args.eventTypeId, "bundle");
         // The bundle belongs to its event type's organization, as single bookings
-        // do, unless the caller names one (stored as given). Used for the row and
-        // for hook routing alike.
-        const organizationId = args.organizationId ?? eventType.organizationId;
-        // 2. Check ALL resources are available (fail-fast)
+        // do. A different organizationId is rejected; for an event type without
+        // organization the argument is the fallback, and it must be the
+        // organization of the booked resources (checked below). Used for the row
+        // and for hook routing alike.
+        if (eventType.organizationId !== undefined &&
+            args.organizationId !== undefined &&
+            args.organizationId !== eventType.organizationId) {
+            throwBookingError("ORGANIZATION_MISMATCH", `Organization "${args.organizationId}" does not match the organization of event type "${args.eventTypeId}"`);
+        }
+        const organizationId = eventType.organizationId ?? args.organizationId;
+        // 2. Every item exists, is active, is linked and shares the event type's
+        // organization, all items share one organization (also under an event
+        // type without organization), and at least one of them is standalone
+        // (the add-on rule counts only these eligible resources). Unknown ids are
+        // rejected.
+        const resourcesOrganizationId = await assertResourcesBookable(ctx, eventType, args.resources.map((r) => r.resourceId), "bundle");
+        assertOrganizationOfResources(eventType, args.organizationId, resourcesOrganizationId, args.resources[0].resourceId);
+        // 3. Check ALL resources are available (fail-fast)
         const requiredSlots = getRequiredSlots(args.start, args.end);
-        // `isStandalone: false` marks an add-on (e.g. rental equipment) that can
-        // only be booked together with a standalone resource. Unknown resources
-        // (no document) count as standalone.
-        let hasStandaloneResource = false;
         for (const resourceReq of args.resources) {
             const requestedQty = resourceReq.quantity ?? 1;
             // Get resource
@@ -159,21 +166,18 @@ export const createMultiResourceBooking = mutation({
                 .unique();
             const totalQuantity = resource?.quantity ?? 1;
             validateRequestedQuantity(resource, requestedQty);
-            if (resource?.isStandalone !== false) {
-                hasStandaloneResource = true;
-            }
             for (const [date, slots] of requiredSlots.entries()) {
                 if (usesQuantityInventory(resource)) {
                     // Quantity-based
                     const quantityDoc = await ctx.db
                         .query("quantity_availability")
-                        .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceReq.resourceId).eq("date", date))
+                        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceReq.resourceId).eq("date", date))
                         .unique();
-                    const bookedQuantities = (quantityDoc?.slotQuantities ?? {});
+                    const bookedQuantities = quantityDoc?.slotQuantities ?? {};
                     for (const slot of slots) {
                         const booked = bookedQuantities[slot.toString()] ?? 0;
                         if (booked + requestedQty > totalQuantity) {
-                            throw new Error(`Resource "${resourceReq.resourceId}" is not available for the requested quantity`);
+                            throwBookingError("QUANTITY_UNAVAILABLE", `Resource "${resourceReq.resourceId}" is not available for the requested quantity`);
                         }
                     }
                 }
@@ -181,22 +185,18 @@ export const createMultiResourceBooking = mutation({
                     // Regular
                     const availability = await ctx.db
                         .query("daily_availability")
-                        .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceReq.resourceId).eq("date", date))
+                        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceReq.resourceId).eq("date", date))
                         .unique();
                     const busySlots = availability?.busySlots ?? [];
                     for (const slot of slots) {
                         if (requestedQty > totalQuantity || busySlots.includes(slot)) {
-                            throw new Error(`Resource "${resourceReq.resourceId}" is not available for the selected time`);
+                            throwBookingError("SLOT_UNAVAILABLE", `Resource "${resourceReq.resourceId}" is not available for the selected time`);
                         }
                     }
                 }
             }
         }
-        if (!hasStandaloneResource) {
-            const ids = args.resources.map((r) => `"${r.resourceId}"`).join(", ");
-            throw new Error(`Resource ${ids} cannot be booked alone (isStandalone: false): add a standalone resource to the booking`);
-        }
-        // 3. Create main booking record (use first resource as primary)
+        // 4. Create main booking record (use first resource as primary)
         const primaryResourceId = args.resources[0].resourceId;
         const bookingUid = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
         const managementToken = generateManagementToken();
@@ -222,7 +222,7 @@ export const createMultiResourceBooking = mutation({
             createdAt: now,
             updatedAt: now,
         });
-        // 4. Create booking_items for each resource
+        // 5. Create booking_items for each resource
         for (const resourceReq of args.resources) {
             await ctx.db.insert("booking_items", {
                 bookingId,
@@ -230,9 +230,9 @@ export const createMultiResourceBooking = mutation({
                 quantity: resourceReq.quantity ?? 1,
             });
         }
-        // 5. Reserve every item using the same inventory contract as rescheduling.
+        // 6. Reserve every item using the same inventory contract as rescheduling.
         await reserveResourceSlots(ctx, args.resources, args.start, args.end);
-        // 6. Record initial state in history
+        // 7. Record initial state in history
         await ctx.db.insert("booking_history", {
             bookingId,
             fromStatus: "",
@@ -244,7 +244,7 @@ export const createMultiResourceBooking = mutation({
         const booking = await ctx.db.get(bookingId);
         if (!booking)
             throw new Error("Booking not found after write");
-        // 7. Trigger booking.created hook
+        // 8. Trigger booking.created hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.created",
             emailContext: createBookingEmailContext(eventType.requiresConfirmation ? "pending" : "confirmed", booking, args.resendOptions),
@@ -265,9 +265,10 @@ export const createMultiResourceBooking = mutation({
                 isMultiResource: true,
                 resources: args.resources,
             },
+            payloadV2: await buildHookEventV2(ctx, "booking.created", bookingId, { changedBy: "system" }),
             resendOptions: args.resendOptions,
         });
-        // 8. Return the captured booking.
+        // 9. Return the captured booking.
         return booking;
     },
 });
@@ -284,7 +285,7 @@ export const getBookingWithItems = query({
             return null;
         const items = await ctx.db
             .query("booking_items")
-            .withIndex("by_booking", (q) => q.eq("bookingId", args.bookingId))
+            .withIndex("by_bookingId", (q) => q.eq("bookingId", args.bookingId))
             .collect();
         // Get resource details for each item
         const itemsWithResources = await Promise.all(items.map(async (item) => {
@@ -318,28 +319,32 @@ export const cancelMultiResourceBooking = mutation({
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.bookingId);
         if (!booking) {
-            throw new Error("Booking not found");
+            throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
         }
         if (booking.status === "cancelled") {
-            throw new Error("Booking is already cancelled");
+            throwBookingError("INVALID_STATE", "Booking is already cancelled");
         }
         if (!holdsActiveInventory(booking.status)) {
-            throw new Error(`Cannot cancel booking with status: ${booking.status}`);
+            throwBookingError("INVALID_STATE", `Cannot cancel booking with status: ${booking.status}`);
         }
-        // Release every booked resource (quantity_availability for pooled
-        // resources, daily_availability otherwise), record history and stamp the
+        // Notify the event type's organization when the booking's resources
+        // agree, else the stored one (withEventTypeOrganization). Release every
+        // booked resource (quantity_availability for pooled resources,
+        // daily_availability otherwise), record history and stamp the
         // cancellation — shared with every other cancel path.
+        const notified = await withEventTypeOrganization(ctx, booking);
+        const changedBy = args.cancelledBy ?? "unknown";
         await terminateBooking(ctx, booking, {
             to: "cancelled",
             reason: args.reason,
-            changedBy: args.cancelledBy ?? "unknown",
+            changedBy,
             now: Date.now(),
         });
         // Trigger booking.cancelled hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
-            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason: args.reason }),
-            organizationId: booking.organizationId,
+            emailContext: createBookingEmailContext("cancelled", notified, args.resendOptions, { reason: args.reason }),
+            organizationId: notified.organizationId,
             payload: {
                 bookingId: args.bookingId,
                 resourceId: booking.resourceId,
@@ -356,6 +361,11 @@ export const cancelMultiResourceBooking = mutation({
                 cancelledBy: args.cancelledBy,
                 isMultiResource: true,
             },
+            payloadV2: await buildHookEventV2(ctx, "booking.cancelled", booking._id, {
+                previousStatus: booking.status,
+                reason: args.reason,
+                changedBy,
+            }),
             resendOptions: args.resendOptions,
         });
         return { success: true };

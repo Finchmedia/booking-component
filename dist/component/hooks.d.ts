@@ -12,6 +12,7 @@ export declare const listHooks: import("convex/server").RegisteredQuery<"public"
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
+    payloadVersion?: 2 | undefined;
     eventType: string;
     functionHandle: string;
     enabled: boolean;
@@ -23,6 +24,7 @@ export declare const getHook: import("convex/server").RegisteredQuery<"public", 
     _id: import("convex/values").GenericId<"hooks">;
     _creationTime: number;
     organizationId?: string | undefined;
+    payloadVersion?: 2 | undefined;
     eventType: string;
     functionHandle: string;
     enabled: boolean;
@@ -31,11 +33,18 @@ export declare const getHook: import("convex/server").RegisteredQuery<"public", 
 /**
  * Registers a host function, given as a handle from `createFunctionHandle`,
  * for one lifecycle event (organization-scoped or global). The handle runs
- * with every matching payload, management token and booker details included,
- * so keep registration server-side and administrator-only.
+ * with every matching payload, booker details included, so keep
+ * registration server-side and administrator-only.
+ *
+ * `payloadVersion` selects the payload the handle receives as its args:
+ * - omitted: version 1, whose shape depends on the emitting function and
+ *   which mostly carries the management token (docs/hook-payloads-v1.md);
+ * - 2: one envelope per event name, `bookingHookEventV2`, without the token
+ *   (docs/hook-payloads-v2.md).
  */
 export declare const registerHook: import("convex/server").RegisteredMutation<"public", {
     organizationId?: string | undefined;
+    payloadVersion?: 2 | undefined;
     eventType: string;
     functionHandle: string;
 }, Promise<import("convex/values").GenericId<"hooks">>>;
@@ -86,6 +95,7 @@ export declare const triggerHooks: import("convex/server").RegisteredMutation<"i
         end: number;
         timezone: string;
     } | undefined;
+    payloadV2?: any;
     eventType: string;
     payload: any;
 }, Promise<null>>;
@@ -99,7 +109,7 @@ export declare const transitionBookingState: import("convex/server").RegisteredM
         apiKey: string;
     } | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
-    toStatus: string;
+    toStatus: "confirmed" | "pending" | "declined" | "cancelled" | "provisional" | "completed";
 }, Promise<{
     success: boolean;
 }>>;
@@ -111,8 +121,8 @@ export declare const getBookingHistory: import("convex/server").RegisteredQuery<
     reason?: string | undefined;
     changedBy?: string | undefined;
     bookingId: import("convex/values").GenericId<"bookings">;
-    toStatus: string;
-    fromStatus: string;
+    toStatus: "confirmed" | "pending" | "declined" | "cancelled" | "provisional" | "completed";
+    fromStatus: "" | "confirmed" | "pending" | "declined" | "cancelled" | "provisional" | "completed";
     timestamp: number;
 }[]>>;
 //# sourceMappingURL=hooks.d.ts.map

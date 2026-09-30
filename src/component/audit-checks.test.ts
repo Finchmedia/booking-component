@@ -1,0 +1,607 @@
+/// <reference types="vite/client" />
+/**
+ * maintenance.audit: the checks a host runs before upgrading to 0.5.0
+ * (plan PR-38). Each reports stored rows that 0.5.0 rejects on write, reads
+ * differently or cannot move, with the list of problems per row:
+ * - "event_type_config": invalid lengths, options, slot interval, buffers,
+ *   notice, horizon or zone, a length outside its options, a dangling
+ *   scheduleId;
+ * - "schedule_config" / "resource_config": a zone Intl rejects;
+ * - "date_override_config": an unknown type, "custom" without hours, a date
+ *   that is not a canonical calendar day;
+ * - "link_integrity": links to deleted rows, across organizations, and
+ *   second rows of a pair;
+ * - "booking_integrity": a missing organization the event type has (only
+ *   when the booking's resources belong to it), another one or a missing
+ *   one that must not be filled, and active item-less bookings on pools;
+ * - "booking_eligibility": active bookings that fail today's booking
+ *   rules, so moving or confirming them is rejected;
+ * - "booking_status_invalid": a booking or history status outside
+ *   BOOKING_STATUSES.
+ * Invalid rows are seeded with raw inserts, because the component's writes
+ * reject them now; each check has valid controls next to them. Paging uses
+ * the complete by_creation_time cursor (audit.test.ts covers ties).
+ */
+import { describe, expect, onTestFinished, test, vi } from "vitest";
+import { convexTest } from "convex-test";
+import { defineSchema } from "convex/server";
+import schema from "./schema.js";
+import { api } from "./_generated/api.js";
+import type { Doc } from "./_generated/dataModel.js";
+import type { WithoutSystemFields } from "convex/server";
+import {
+  BOOKER,
+  FIXED_NOW,
+  LOCATION,
+  ORG,
+  TUESDAY,
+  book,
+  drain,
+  modules,
+  seedFungibleResource,
+  seedResource,
+  seedResourceWithSchedule,
+  setup,
+  utc,
+  type T,
+} from "./setup.test.js";
+
+type Check = (typeof api.maintenance.audit)["_args"]["check"];
+
+const audit = (t: T, check: Check, limit = 100, cursor?: string | null) =>
+  t.query(api.maintenance.audit, { check, limit, cursor });
+
+/** Every issue of one check, walking all pages. */
+async function auditAll(t: T, check: Check, limit = 100) {
+  const issues = [];
+  let scanned = 0;
+  let cursor: string | null = null;
+  for (;;) {
+    const page = await audit(t, check, limit, cursor);
+    issues.push(...page.issues);
+    scanned += page.scanned;
+    if (page.isDone) return { issues, scanned };
+    cursor = page.continueCursor;
+  }
+}
+
+const at = (time: string) => utc(TUESDAY, time);
+const HOUR = 3_600_000;
+
+const EVENT_TYPE: WithoutSystemFields<Doc<"event_types">> = {
+  id: "et",
+  slug: "et",
+  title: "Consultation",
+  lengthInMinutes: 60,
+  timezone: "Europe/Berlin",
+  lockTimeZoneToggle: false,
+  locations: [],
+  organizationId: ORG,
+};
+
+describe("event_type_config", () => {
+  test("lists each stored value 0.5.0 rejects; valid event types are not reported", async () => {
+    const { t } = setup();
+    await t.mutation(api.schedules.createSchedule, {
+      id: "sch-1", organizationId: ORG, name: "Schedule", timezone: "Europe/Berlin", weeklyHours: [],
+    });
+    const rows: Array<Partial<Doc<"event_types">> & { id: string }> = [
+      // Controls: valid, options containing the length, empty options, "" schedule, zero buffers and
+      // notice, fractional buffers, notice and horizon.
+      { id: "ok" },
+      { id: "ok-options", lengthInMinutes: 30, lengthInMinutesOptions: [30, 60], slotInterval: 15, scheduleId: "sch-1" },
+      { id: "ok-empty-options", lengthInMinutesOptions: [], scheduleId: "" },
+      { id: "ok-zeros", bufferBefore: 0, bufferAfter: 0, minNoticeMinutes: 0, maxFutureMinutes: 1 },
+      { id: "ok-fractions", bufferBefore: 2.5, minNoticeMinutes: 0.5, maxFutureMinutes: 90.5 },
+      // Invalid.
+      { id: "length", lengthInMinutes: 0 },
+      { id: "fraction", lengthInMinutes: 22.5, lengthInMinutesOptions: [22.5, 30.5], slotInterval: 7.5 },
+      { id: "option", lengthInMinutesOptions: [60, Number.NaN] },
+      { id: "not-in-options", lengthInMinutes: 45, lengthInMinutesOptions: [60, 90] },
+      { id: "interval", slotInterval: -15 },
+      { id: "numbers", bufferBefore: -5, bufferAfter: Number.NaN, minNoticeMinutes: -1, maxFutureMinutes: Number.POSITIVE_INFINITY },
+      { id: "no-horizon", maxFutureMinutes: 0 },
+      { id: "zone", timezone: "Mars/Olympus_Mons" },
+      { id: "schedule", scheduleId: "ghost" },
+    ];
+    await t.run(async (ctx) => {
+      for (const row of rows) await ctx.db.insert("event_types", { ...EVENT_TYPE, slug: row.id, ...row });
+    });
+
+    const { issues, scanned } = await auditAll(t, "event_type_config", 4);
+    expect(scanned).toBe(rows.length);
+    expect(issues).toEqual([
+      { check: "event_type_config", eventTypeId: "length", problems: ["lengthInMinutes"] },
+      {
+        check: "event_type_config",
+        eventTypeId: "fraction",
+        problems: ["lengthInMinutes", "lengthInMinutesOptions", "slotInterval"],
+      },
+      { check: "event_type_config", eventTypeId: "option", problems: ["lengthInMinutesOptions"] },
+      { check: "event_type_config", eventTypeId: "not-in-options", problems: ["lengthNotInOptions"] },
+      { check: "event_type_config", eventTypeId: "interval", problems: ["slotInterval"] },
+      {
+        check: "event_type_config",
+        eventTypeId: "numbers",
+        problems: ["bufferBefore", "bufferAfter", "minNoticeMinutes", "maxFutureMinutes"],
+      },
+      { check: "event_type_config", eventTypeId: "no-horizon", problems: ["maxFutureMinutes"] },
+      { check: "event_type_config", eventTypeId: "zone", problems: ["timezone"] },
+      { check: "event_type_config", eventTypeId: "schedule", problems: ["scheduleId"] },
+    ]);
+  });
+
+  test("event types created through the component are clean", async () => {
+    const { t } = setup();
+    await seedResourceWithSchedule(t, { eventType: { lengthInMinutesOptions: [60, 90], bufferBefore: 10 } });
+    expect(await audit(t, "event_type_config")).toMatchObject({ issues: [], scanned: 1, isDone: true });
+  });
+});
+
+describe("schedule_config and resource_config", () => {
+  test("list zones Intl rejects", async () => {
+    const { t } = setup();
+    const seed = await seedResourceWithSchedule(t); // sch-1 and res-1 in Europe/Berlin: controls
+    await t.run(async (ctx) => {
+      await ctx.db.insert("schedules", {
+        id: "sch-bad", organizationId: ORG, name: "Bad", timezone: "UTC+2", isDefault: false, weeklyHours: [], createdAt: 0, updatedAt: 0,
+      });
+      await ctx.db.insert("resources", {
+        id: "res-bad", organizationId: ORG, name: "Bad", type: "room", timezone: "", isActive: true, createdAt: 0, updatedAt: 0,
+      });
+    });
+    expect(await audit(t, "schedule_config")).toMatchObject({
+      issues: [{ check: "schedule_config", scheduleId: "sch-bad", problems: ["timezone"] }],
+      scanned: 2,
+    });
+    expect(await audit(t, "resource_config")).toMatchObject({
+      issues: [{ check: "resource_config", resourceId: "res-bad", problems: ["timezone"] }],
+      scanned: 2,
+    });
+    expect(seed.scheduleId).toBe("sch-1");
+  });
+});
+
+describe("date_override_config", () => {
+  test("lists unknown types, custom overrides without hours and dates that are not canonical", async () => {
+    const { t } = setup();
+    const { scheduleDocId } = await seedResourceWithSchedule(t);
+    const hours = [{ startTime: "09:00", endTime: "12:00" }];
+    // Controls, through the component.
+    await t.mutation(api.schedules.createDateOverride, { scheduleId: scheduleDocId, date: "2027-03-10", type: "unavailable" });
+    await t.mutation(api.schedules.createDateOverride, { scheduleId: scheduleDocId, date: "2027-03-11", type: "custom", customHours: hours });
+    const bad: Array<Omit<Doc<"date_overrides">, "_id" | "_creationTime" | "scheduleId">> = [
+      { date: "2027-03-12", type: "holiday", customHours: hours },
+      { date: "2027-03-15", type: "holiday" },
+      { date: "2027-03-16", type: "custom" },
+      { date: "2027-03-17", type: "custom", customHours: [] },
+      { date: "2027-02-30", type: "unavailable" },
+      { date: "2027-3-18", type: "unavailable" },
+    ];
+    const ids = await t.run(async (ctx) => {
+      const inserted = [];
+      for (const row of bad) inserted.push(await ctx.db.insert("date_overrides", { scheduleId: scheduleDocId, ...row }));
+      return inserted;
+    });
+
+    const { issues, scanned } = await auditAll(t, "date_override_config");
+    expect(scanned).toBe(8);
+    expect(issues).toEqual([
+      { check: "date_override_config", overrideId: ids[0], date: "2027-03-12", type: "holiday", problems: ["type"] },
+      { check: "date_override_config", overrideId: ids[1], date: "2027-03-15", type: "holiday", problems: ["type"] },
+      { check: "date_override_config", overrideId: ids[2], date: "2027-03-16", type: "custom", problems: ["customHours"] },
+      { check: "date_override_config", overrideId: ids[3], date: "2027-03-17", type: "custom", problems: ["customHours"] },
+      { check: "date_override_config", overrideId: ids[4], date: "2027-02-30", type: "unavailable", problems: ["date"] },
+      { check: "date_override_config", overrideId: ids[5], date: "2027-3-18", type: "unavailable", problems: ["date"] },
+    ]);
+  });
+});
+
+describe("link_integrity", () => {
+  test("lists dangling, cross-organization and duplicate links; the first row of a pair and valid links are not reported", async () => {
+    const { t } = setup();
+    await seedResource(t); // res-1 ↔ et-1, both org-1: control
+    await seedResource(t, { resourceId: "res-2", eventTypeId: "et-2", organizationId: "org-2" });
+    // An event type without organization links any organization's resource: control.
+    await t.mutation(api.public.createEventType, { ...EVENT_TYPE, id: "et-global", slug: "et-global", organizationId: undefined });
+    await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: "res-2", eventTypeId: "et-global" });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("resource_event_types", { resourceId: "res-2", eventTypeId: "et-1" }); // across organizations
+      await ctx.db.insert("resource_event_types", { resourceId: "res-1", eventTypeId: "et-1" }); // second row of a pair
+      await ctx.db.insert("resource_event_types", { resourceId: "gone", eventTypeId: "et-1" });
+      await ctx.db.insert("resource_event_types", { resourceId: "res-1", eventTypeId: "gone" });
+      await ctx.db.insert("resource_event_types", { resourceId: "gone", eventTypeId: "gone" });
+    });
+
+    const { issues, scanned } = await auditAll(t, "link_integrity", 2);
+    expect(scanned).toBe(8);
+    expect(issues).toEqual([
+      { check: "link_integrity", resourceId: "res-2", eventTypeId: "et-1", problems: ["crossOrganization"] },
+      { check: "link_integrity", resourceId: "res-1", eventTypeId: "et-1", problems: ["duplicate"] },
+      { check: "link_integrity", resourceId: "gone", eventTypeId: "et-1", problems: ["resourceMissing"] },
+      { check: "link_integrity", resourceId: "res-1", eventTypeId: "gone", problems: ["eventTypeMissing"] },
+      { check: "link_integrity", resourceId: "gone", eventTypeId: "gone", problems: ["resourceMissing", "eventTypeMissing"] },
+    ]);
+
+    // CONTROL: relinking the pair collapses the duplicate, and the report follows.
+    await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: "res-1", eventTypeId: "et-1" });
+    expect((await auditAll(t, "link_integrity")).issues.map((issue) => ("problems" in issue ? issue.problems : null))).toEqual([
+      ["crossOrganization"], ["resourceMissing"], ["eventTypeMissing"], ["resourceMissing", "eventTypeMissing"],
+    ]);
+  });
+});
+
+describe("booking_integrity", () => {
+  test("lists missing organizations the event type has and active item-less bookings on pools", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t);
+    await seedFungibleResource(t, { eventTypeId: seed.eventTypeId });
+    await t.mutation(api.public.createEventType, { ...EVENT_TYPE, id: "et-global", slug: "et-global", organizationId: undefined });
+    await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: seed.resourceId, eventTypeId: "et-global" });
+
+    const clean = await book(t, seed, at("08:00"), at("08:00") + HOUR); // control
+    const noOrg = await book(t, seed, at("09:00"), at("09:00") + HOUR);
+    const global = await book(t, { ...seed, eventTypeId: "et-global" }, at("10:00"), at("10:00") + HOUR); // control
+    const legacyId = await t.mutation(api.public.createReservation, {
+      resourceId: seed.resourceId, actorId: BOOKER.email, start: at("11:00"), end: at("11:00") + HOUR,
+    }); // control: legacy rows never have one
+    const stranded = await book(t, seed, at("12:00"), at("12:00") + HOUR);
+    const ended = await book(t, seed, at("13:00"), at("13:00") + HOUR);
+    await t.mutation(api.public.cancelBookingByToken, { uid: ended.uid, token: ended.managementToken! });
+    const bundle = await t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId: seed.eventTypeId, resources: [{ resourceId: seed.resourceId }, { resourceId: "pool-1", quantity: 1 }],
+      start: at("14:00"), end: at("14:00") + HOUR, timezone: "UTC", booker: BOOKER, location: LOCATION,
+    }); // control: a bundle keeps its items
+    await t.run(async (ctx) => {
+      await ctx.db.patch(noOrg._id, { organizationId: undefined });
+      // A 0.4.x flag change updateResource now refuses: res-1 becomes a pool of one.
+      const resource = await ctx.db.query("resources").withIndex("by_external_id", (q) => q.eq("id", seed.resourceId)).unique();
+      await ctx.db.patch(resource!._id, { isFungible: true });
+    });
+
+    const { issues, scanned } = await auditAll(t, "booking_integrity", 3);
+    expect(scanned).toBe(7);
+    // Every active single booking on res-1 is stranded now, the clean one included.
+    expect(issues).toEqual([
+      { check: "booking_integrity", uid: clean.uid, problems: ["poolWithoutItems"] },
+      { check: "booking_integrity", uid: noOrg.uid, problems: ["organizationMissing", "poolWithoutItems"] },
+      { check: "booking_integrity", uid: global.uid, problems: ["poolWithoutItems"] },
+      { check: "booking_integrity", uid: (await t.query(api.public.getBooking, { bookingId: legacyId }))!.uid, problems: ["poolWithoutItems"] },
+      { check: "booking_integrity", uid: stranded.uid, problems: ["poolWithoutItems"] },
+    ]);
+    expect(issues.map((issue) => (issue.check === "booking_integrity" ? issue.uid : null))).not.toContain(bundle.uid);
+    expect(issues.map((issue) => (issue.check === "booking_integrity" ? issue.uid : null))).not.toContain(ended.uid);
+  });
+
+  test("without a pool flag only the missing organization is reported, and the backfill clears it", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t);
+    const noOrg = await book(t, seed, at("09:00"), at("09:00") + HOUR);
+    await book(t, seed, at("10:00"), at("10:00") + HOUR); // control
+    await t.run(async (ctx) => ctx.db.patch(noOrg._id, { organizationId: undefined }));
+    expect((await audit(t, "booking_integrity")).issues).toEqual([
+      { check: "booking_integrity", uid: noOrg.uid, problems: ["organizationMissing"] },
+    ]);
+    await t.mutation(api.maintenance.backfillBookingOrganizations, { limit: 100, dryRun: false });
+    expect((await audit(t, "booking_integrity")).issues).toEqual([]);
+  });
+});
+
+describe("booking_integrity: organizations follow the booking's resources", () => {
+  test("a missing organization is fillable only when every resource belongs to the event type's; other ones are mismatches", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t); // res-1 ↔ et-1, org-1
+    await seedResource(t, { resourceId: "res-2", eventTypeId: "et-2", organizationId: "org-2" });
+    const single = await book(t, seed, at("08:00"), at("08:00") + HOUR);
+    const bundleOfOwn = await t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId: seed.eventTypeId, resources: [{ resourceId: seed.resourceId }],
+      start: at("09:00"), end: at("09:00") + HOUR, timezone: "UTC", booker: BOOKER, location: LOCATION,
+    });
+    const bundleWithForeign = await t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId: seed.eventTypeId, resources: [{ resourceId: seed.resourceId }],
+      start: at("10:00"), end: at("10:00") + HOUR, timezone: "UTC", booker: BOOKER, location: LOCATION,
+    });
+    const foreignOrganization = await book(t, seed, at("11:00"), at("11:00") + HOUR);
+    const clean = await book(t, seed, at("12:00"), at("12:00") + HOUR); // control
+    await t.run(async (ctx) => {
+      for (const booking of [single, bundleOfOwn, bundleWithForeign]) {
+        await ctx.db.patch(booking._id, { organizationId: undefined });
+      }
+      // A 0.4.x bundle item of another organization's resource.
+      await ctx.db.insert("booking_items", { bookingId: bundleWithForeign._id, resourceId: "res-2", quantity: 1 });
+      // Stored for another organization, as 0.4.3 stored an explicit argument.
+      await ctx.db.patch(foreignOrganization._id, { organizationId: "org-2" });
+    });
+
+    expect((await auditAll(t, "booking_integrity", 2)).issues).toEqual([
+      { check: "booking_integrity", uid: single.uid, problems: ["organizationMissing"] },
+      { check: "booking_integrity", uid: bundleOfOwn.uid, problems: ["organizationMissing"] },
+      { check: "booking_integrity", uid: bundleWithForeign.uid, problems: ["organizationMismatch"] },
+      { check: "booking_integrity", uid: foreignOrganization.uid, problems: ["organizationMismatch"] },
+    ]);
+    expect(clean.organizationId).toBe(ORG);
+
+    // The backfill fills exactly the organizationMissing rows and lists the
+    // others: without organization in needsReview, with another in mismatches.
+    const backfill = await t.mutation(api.maintenance.backfillBookingOrganizations, { limit: 100, dryRun: false });
+    expect(backfill).toMatchObject({
+      updated: 2,
+      mismatches: [{ uid: foreignOrganization.uid, organizationId: "org-2", eventTypeOrganizationId: ORG }],
+      needsReview: [
+        {
+          uid: bundleWithForeign.uid, eventTypeId: seed.eventTypeId, reason: "resource_organization_differs",
+          eventTypeOrganizationId: ORG, resourceId: "res-2", resourceOrganizationId: "org-2",
+        },
+      ],
+    });
+    expect((await auditAll(t, "booking_integrity")).issues.map((issue) => ("problems" in issue ? issue.problems : null))).toEqual([
+      ["organizationMismatch"],
+      ["organizationMismatch"],
+    ]);
+  });
+});
+
+describe("booking_eligibility", () => {
+  /** A bundle of et-1 on the given resources, at `time`. */
+  const bundleAt = (t: T, time: string, resources: Array<{ resourceId: string; quantity?: number }>, eventTypeId = "et-1", organizationId?: string) =>
+    t.mutation(api.multi_resource.createMultiResourceBooking, {
+      eventTypeId, organizationId, resources, start: at(time), end: at(time) + HOUR, timezone: "UTC", booker: BOOKER, location: LOCATION,
+    });
+  const link = (t: T, resourceId: string, eventTypeId: string) =>
+    t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId, eventTypeId });
+  const unlink = (t: T, resourceId: string, eventTypeId: string) =>
+    t.mutation(api.resource_event_types.unlinkResourceFromEventType, { resourceId, eventTypeId });
+  const room = (t: T, id: string, organizationId = ORG, extra: { isStandalone?: boolean } = {}) =>
+    t.mutation(api.resources.createResource, { id, organizationId, name: id, type: "room", timezone: "UTC", ...extra });
+
+  test("lists active bookings that a move or a confirmation would reject, with every problem", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t, { requiresConfirmation: true }); // res-1 ↔ et-1, org-1: requests are pending
+    await seedFungibleResource(t, { eventTypeId: seed.eventTypeId }); // pool-1, linked
+    await room(t, "addon", ORG, { isStandalone: false });
+    await link(t, "addon", seed.eventTypeId);
+    await room(t, "res-inactive");
+    await link(t, "res-inactive", seed.eventTypeId);
+    await room(t, "res-foreign", "org-2");
+    await t.run(async (ctx) => {
+      await ctx.db.insert("resource_event_types", { resourceId: "res-foreign", eventTypeId: seed.eventTypeId }); // a 0.4.x link
+    });
+    await t.mutation(api.public.createEventType, { ...EVENT_TYPE, id: "et-off", slug: "et-off" });
+    await link(t, seed.resourceId, "et-off");
+    await t.mutation(api.public.createEventType, { ...EVENT_TYPE, id: "et-gone", slug: "et-gone" });
+    await link(t, seed.resourceId, "et-gone");
+
+    const clean = await book(t, seed, at("07:00"), at("07:00") + HOUR); // control
+    const unlinkedPool = await bundleAt(t, "08:00", [{ resourceId: seed.resourceId }, { resourceId: "pool-1", quantity: 1 }]);
+    const ghostItem = await bundleAt(t, "09:00", [{ resourceId: seed.resourceId }, { resourceId: "addon" }]);
+    const hold = await t.mutation(api.public.createProvisionalBooking, {
+      eventTypeId: "et-off", resourceId: seed.resourceId, start: at("10:00"), end: at("10:00") + HOUR,
+      timezone: "UTC", booker: BOOKER, location: LOCATION,
+    });
+    const orphan = await book(t, { ...seed, eventTypeId: "et-gone" }, at("11:00"), at("11:00") + HOUR);
+    const onInactive = await bundleAt(t, "12:00", [{ resourceId: "res-inactive" }]);
+    const foreign = await bundleAt(t, "13:00", [{ resourceId: seed.resourceId }]);
+    const addonOnly = await bundleAt(t, "14:00", [{ resourceId: seed.resourceId }, { resourceId: "addon" }]);
+    const ended = await bundleAt(t, "15:00", [{ resourceId: seed.resourceId }, { resourceId: "pool-1", quantity: 1 }]);
+    await t.mutation(api.multi_resource.cancelMultiResourceBooking, { bookingId: ended._id }); // control: ended
+    const legacyId = await t.mutation(api.public.createReservation, {
+      resourceId: "legacy-room", actorId: BOOKER.email, start: at("16:00"), end: at("16:00") + HOUR,
+    }); // control: legacy rows keep the legacy rules
+
+    // What changed after they were made (or what 0.4.x stored).
+    await unlink(t, "pool-1", seed.eventTypeId);
+    await t.mutation(api.public.toggleEventTypeActive, { id: "et-off", isActive: false });
+    await t.mutation(api.resources.toggleResourceActive, { id: "res-inactive", isActive: false });
+    await t.run(async (ctx) => {
+      const itemOf = async (bookingId: Doc<"bookings">["_id"], resourceId: string) =>
+        (await ctx.db.query("booking_items").withIndex("by_bookingId", (q) => q.eq("bookingId", bookingId)).collect())
+          .find((item) => item.resourceId === resourceId)!;
+      await ctx.db.patch((await itemOf(ghostItem._id, "addon"))._id, { resourceId: "ghost" }); // 0.4.x took unknown ids
+      await ctx.db.insert("booking_items", { bookingId: foreign._id, resourceId: "res-foreign", quantity: 1 });
+      const eventType = await ctx.db.query("event_types").withIndex("by_external_id", (q) => q.eq("id", "et-gone")).unique();
+      await ctx.db.delete(eventType!._id);
+      // The room of addonOnly becomes an add-on too: no standalone item is left.
+      await ctx.db.patch((await itemOf(addonOnly._id, seed.resourceId))._id, { resourceId: "addon-2" });
+      await ctx.db.insert("resources", {
+        id: "addon-2", organizationId: ORG, name: "Addon 2", type: "equipment", timezone: "UTC",
+        isStandalone: false, isActive: true, createdAt: 0, updatedAt: 0,
+      });
+      await ctx.db.insert("resource_event_types", { resourceId: "addon-2", eventTypeId: seed.eventTypeId });
+    });
+
+    const { issues, scanned } = await auditAll(t, "booking_eligibility", 3);
+    expect(scanned).toBe(10);
+    const issue = (booking: Doc<"bookings">, resourceIds: string[], problems: string[], eventTypeId = "et-1") => ({
+      check: "booking_eligibility", uid: booking.uid, status: booking.status, start: booking.start, eventTypeId, resourceIds, problems,
+    });
+    expect(issues).toEqual([
+      issue(unlinkedPool, [seed.resourceId, "pool-1"], ["resourceNotLinked"]),
+      issue(ghostItem, [seed.resourceId, "ghost"], ["resourceMissing"]),
+      issue(hold, [seed.resourceId], ["eventTypeInactive"], "et-off"),
+      issue(orphan, [seed.resourceId], ["eventTypeMissing"], "et-gone"),
+      issue(onInactive, ["res-inactive"], ["resourceInactive"]),
+      issue(foreign, [seed.resourceId, "res-foreign"], ["crossOrganization"]),
+      issue(addonOnly, ["addon-2", "addon"], ["noStandalone"]),
+    ]);
+    const listed = issues.map((row) => ("uid" in row ? row.uid : null));
+    const legacy = (await t.query(api.public.getBooking, { bookingId: legacyId }))!;
+    expect([clean.uid, ended.uid, legacy.uid].some((uid) => listed.includes(uid))).toBe(false);
+    expect([unlinkedPool.status, hold.status]).toEqual(["pending", "provisional"]);
+
+    // Each listed booking is rejected as the audit says; the clean one is not (control).
+    await expect(t.mutation(api.hooks.transitionBookingState, { bookingId: unlinkedPool._id, toStatus: "confirmed" }))
+      .rejects.toMatchObject({ data: { code: "RESOURCE_NOT_LINKED" } });
+    await expect(t.mutation(api.hooks.transitionBookingState, { bookingId: hold._id, toStatus: "pending" }))
+      .rejects.toMatchObject({ data: { code: "EVENT_TYPE_INACTIVE" } });
+    await expect(t.mutation(api.public.rescheduleBooking, { bookingId: ghostItem._id, newStart: at("17:00"), newEnd: at("17:00") + HOUR }))
+      .rejects.toMatchObject({ data: { code: "RESOURCE_NOT_FOUND" } });
+    await expect(t.mutation(api.public.rescheduleBooking, { bookingId: addonOnly._id, newStart: at("17:00"), newEnd: at("17:00") + HOUR }))
+      .rejects.toMatchObject({ data: { code: "RESOURCE_NOT_STANDALONE" } });
+    expect(await t.mutation(api.hooks.transitionBookingState, { bookingId: clean._id, toStatus: "confirmed" })).toEqual({ success: true });
+
+    // CONTROL: relinking the pool clears its issue, and the request can be approved.
+    await link(t, "pool-1", seed.eventTypeId);
+    const after = (await auditAll(t, "booking_eligibility")).issues.map((row) => ("uid" in row ? row.uid : null));
+    expect(after).not.toContain(unlinkedPool.uid);
+    expect(after).toHaveLength(6);
+    expect(await t.mutation(api.hooks.transitionBookingState, { bookingId: unlinkedPool._id, toStatus: "confirmed" })).toEqual({ success: true });
+  });
+
+  test("event types without organization: resources of two organizations, or a stored organization that is not theirs", async () => {
+    const { t } = setup();
+    await t.mutation(api.public.createEventType, { ...EVENT_TYPE, id: "et-global", slug: "et-global", organizationId: undefined });
+    for (const [id, organizationId] of [["ra", "org-a"], ["ra-2", "org-a"], ["rb", "org-b"]]) {
+      await room(t, id, organizationId);
+      await link(t, id, "et-global");
+    }
+    const own = await bundleAt(t, "08:00", [{ resourceId: "ra" }, { resourceId: "ra-2" }], "et-global", "org-a"); // control
+    const unscoped = await bundleAt(t, "09:00", [{ resourceId: "ra" }], "et-global"); // control
+    const mixed = await bundleAt(t, "10:00", [{ resourceId: "ra" }, { resourceId: "ra-2" }], "et-global");
+    const thirdParty = await bundleAt(t, "11:00", [{ resourceId: "ra" }], "et-global", "org-a");
+    // As 0.4.3 stored them: a bundle over two organizations, and one under a third.
+    await t.run(async (ctx) => {
+      const item = (await ctx.db.query("booking_items").withIndex("by_bookingId", (q) => q.eq("bookingId", mixed._id)).collect())[1];
+      await ctx.db.patch(item._id, { resourceId: "rb" });
+      await ctx.db.patch(thirdParty._id, { organizationId: "org-c" });
+    });
+
+    expect((await auditAll(t, "booking_eligibility")).issues).toEqual([
+      expect.objectContaining({ uid: mixed.uid, resourceIds: ["ra", "rb"], problems: ["crossOrganization"] }),
+      expect.objectContaining({ uid: thirdParty.uid, resourceIds: ["ra"], problems: ["crossOrganization"] }),
+    ]);
+    expect([own.organizationId, unscoped.organizationId]).toEqual(["org-a", undefined]);
+    // The rules reject both moves.
+    await expect(t.mutation(api.public.rescheduleBooking, { bookingId: mixed._id, newStart: at("13:00"), newEnd: at("13:00") + HOUR }))
+      .rejects.toMatchObject({ data: { code: "ORGANIZATION_MISMATCH", message: 'Resource "rb" belongs to another organization than resource "ra"' } });
+    await expect(t.mutation(api.public.rescheduleBooking, { bookingId: thirdParty._id, newStart: at("13:00"), newEnd: at("13:00") + HOUR }))
+      .rejects.toMatchObject({ data: { code: "ORGANIZATION_MISMATCH", message: 'Organization "org-c" does not match the organization of resource "ra"' } });
+  });
+});
+
+describe("booking_status_invalid", () => {
+  test("lists bookings whose status or history status is outside BOOKING_STATUSES; every status the component writes is clean", async () => {
+    // The 0.5.0 schema refuses such rows (and a deploy while they exist), so
+    // this backend stores them without schema validation, as 0.4.x did.
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+    const t = convexTest({ schema: defineSchema(schema.tables, { schemaValidation: false }), modules }) as unknown as T;
+    onTestFinished(async () => {
+      await drain(t);
+      vi.useRealTimers();
+    });
+    const seed = await seedResource(t);
+    const hold = (time: string) =>
+      t.mutation(api.public.createProvisionalBooking, {
+        resourceId: seed.resourceId, eventTypeId: seed.eventTypeId, start: at(time), end: at(time) + HOUR,
+        timezone: "UTC", booker: BOOKER, location: LOCATION,
+      });
+    const transition = (bookingId: Doc<"bookings">["_id"], toStatus: Doc<"bookings">["status"]) =>
+      t.mutation(api.hooks.transitionBookingState, { bookingId, toStatus });
+
+    // Controls: each of the six statuses, written by the component.
+    await hold("07:00"); // provisional
+    const requested = await hold("08:00");
+    await transition(requested._id, "pending");
+    const declined = await hold("09:00");
+    await transition(declined._id, "pending");
+    await transition(declined._id, "declined");
+    const completed = await book(t, seed, at("10:00"), at("10:00") + HOUR);
+    await transition(completed._id, "completed");
+    const cancelled = await book(t, seed, at("11:00"), at("11:00") + HOUR);
+    await t.mutation(api.public.cancelBookingByToken, { uid: cancelled.uid, token: cancelled.managementToken! });
+    const moved = await book(t, seed, at("12:00"), at("12:00") + HOUR);
+    await t.mutation(api.public.rescheduleBooking, { bookingId: moved._id, newStart: at("13:00"), newEnd: at("13:00") + HOUR });
+    await t.mutation(api.public.createReservation, {
+      resourceId: seed.resourceId, actorId: BOOKER.email, start: at("14:00"), end: at("14:00") + HOUR,
+    });
+
+    // Rows edited outside the component.
+    const archived = await book(t, seed, at("15:00"), at("15:00") + HOUR);
+    const badHistory = await book(t, seed, at("16:00"), at("16:00") + HOUR);
+    const both = await book(t, seed, at("17:00"), at("17:00") + HOUR);
+    await t.run(async (ctx) => {
+      const raw = ctx.db as unknown as { patch(id: string, value: object): Promise<void>; insert(table: string, value: object): Promise<string> };
+      await raw.patch(archived._id, { status: "archived" });
+      await raw.insert("booking_history", { bookingId: badHistory._id, fromStatus: "confirmed", toStatus: "rescheduled", timestamp: 0 });
+      await raw.patch(both._id, { status: "" });
+      await raw.insert("booking_history", { bookingId: both._id, fromStatus: "rescheduled", toStatus: "cancelled", timestamp: 0 });
+    });
+
+    const { issues, scanned } = await auditAll(t, "booking_status_invalid", 3);
+    expect(scanned).toBe(11); // a move adds its successor
+    expect(issues).toEqual([
+      { check: "booking_status_invalid", uid: archived.uid, status: "archived", problems: ["status"] },
+      { check: "booking_status_invalid", uid: badHistory.uid, status: "confirmed", problems: ["historyStatus"] },
+      { check: "booking_status_invalid", uid: both.uid, status: "", problems: ["status", "historyStatus"] },
+    ]);
+    // CONTROL: the clean rows have history of their own, the "" creation entries included.
+    const history = await t.run(async (ctx) => await ctx.db.query("booking_history").collect());
+    expect(history.filter((row) => row.fromStatus === "").length).toBeGreaterThanOrEqual(9);
+    expect(new Set(history.map((row) => row.toStatus))).toEqual(
+      new Set(["provisional", "pending", "declined", "confirmed", "completed", "cancelled", "rescheduled"])
+    );
+  });
+
+  test("a backend with the 0.5.0 schema stores no other status", async () => {
+    const { t } = setup();
+    const seed = await seedResource(t);
+    const booking = await book(t, seed, at("09:00"), at("09:00") + HOUR);
+    await expect(
+      t.run(async (ctx) => ctx.db.patch(booking._id, { status: "archived" as Doc<"bookings">["status"] }))
+    ).rejects.toThrow("Validator error");
+    expect(await audit(t, "booking_status_invalid")).toMatchObject({ issues: [], scanned: 1, isDone: true });
+  });
+});
+
+describe("paging over the new tables", () => {
+  test("a cursor of another table is rejected; a restart from a returned cursor continues there", async () => {
+    const { t } = setup();
+    const seed = await seedResourceWithSchedule(t);
+    await book(t, seed, at("09:00"), at("09:00") + HOUR);
+    const bookingCursor = (await audit(t, "booking_integrity", 1)).continueCursor;
+    for (const check of ["event_type_config", "schedule_config", "resource_config", "date_override_config", "link_integrity"] as const) {
+      await expect(audit(t, check, 1, bookingCursor)).rejects.toThrow("Invalid audit cursor");
+    }
+    // The bookings checks share it.
+    expect(await audit(t, "booking_status_invalid", 10, bookingCursor)).toMatchObject({ scanned: 0, isDone: true });
+    // Two checks of one table share its cursors.
+    const eventCursor = (await audit(t, "event_length_invalid", 1)).continueCursor;
+    expect(await audit(t, "event_type_config", 10, eventCursor)).toMatchObject({ scanned: 0, isDone: true });
+  });
+
+  test("a full page of the costliest checks fits Convex's default limits", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+    try {
+      const t: T = convexTest({ schema, modules, transactionLimits: true });
+      // 500 of each, every row with its own event type and pool: no lookup is shared.
+      await t.run(async (ctx) => {
+        for (let i = 0; i < 500; i++) {
+          await ctx.db.insert("event_types", { ...EVENT_TYPE, id: `et-${i}`, slug: `et-${i}`, scheduleId: `gone-${i}` });
+          await ctx.db.insert("resources", {
+            id: `pool-${i}`, organizationId: "org-2", name: "Pool", type: "equipment", timezone: "UTC",
+            isFungible: true, quantity: 1, isActive: true, createdAt: 0, updatedAt: 0,
+          });
+          await ctx.db.insert("resource_event_types", { resourceId: `pool-${i}`, eventTypeId: `et-${i}` });
+          const bookingId = await ctx.db.insert("bookings", {
+            resourceId: `pool-${i}`, actorId: BOOKER.email, start: at("09:00"), end: at("10:00"), status: "confirmed",
+            uid: `bk-${i}`, eventTypeId: `et-${i}`, timezone: "UTC", bookerName: BOOKER.name, bookerEmail: BOOKER.email,
+            eventTitle: "Consultation", location: { type: "address" }, createdAt: 0, updatedAt: 0,
+          });
+          // Three status changes each for booking_status_invalid.
+          for (const [fromStatus, toStatus] of [["", "provisional"], ["provisional", "pending"], ["pending", "confirmed"]] as const) {
+            await ctx.db.insert("booking_history", { bookingId, fromStatus, toStatus, timestamp: 0 });
+          }
+        }
+      });
+      const clean = await audit(t, "booking_status_invalid", 500);
+      expect({ scanned: clean.scanned, issues: clean.issues.length }).toEqual({ scanned: 500, issues: 0 });
+      for (const check of ["event_type_config", "link_integrity", "booking_integrity", "booking_eligibility"] as const) {
+        const page = await audit(t, check, 500);
+        expect({ check, scanned: page.scanned, issues: page.issues.length }).toEqual({ check, scanned: 500, issues: 500 });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 60_000);
+});

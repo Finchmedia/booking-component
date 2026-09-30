@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Calendar, CheckCircle, Clock, MapPin, User } from "lucide-react";
-import type { Booking } from "../../types.js";
+import type { BookingView } from "../../contract.js";
 import { formatDateTime, formatDuration } from "../../utils/formatting.js";
 
 interface EventType {
@@ -12,7 +12,7 @@ interface EventType {
 }
 
 interface BookingSuccessProps {
-  booking: Booking;
+  booking: BookingView;
   eventType: EventType;
   onBookAnother: () => void;
   /**

@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { bookingStatusValidator } from "../shared/booking-status.js";
 
 export default defineSchema({
   // ============================================
@@ -29,9 +30,10 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    // Convex reserves `by_id`, so every index on ["id"] is named by_external_id.
     .index("by_external_id", ["id"])
-    .index("by_org", ["organizationId"])
-    .index("by_org_type", ["organizationId", "type"]),
+    .index("by_organizationId", ["organizationId"])
+    .index("by_organizationId_and_type", ["organizationId", "type"]),
 
   // ============================================
   // SCHEDULES (Weekly Patterns)
@@ -53,7 +55,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_external_id", ["id"])
-    .index("by_org", ["organizationId"])
+    .index("by_organizationId", ["organizationId"])
     // An organization's default schedule without reading its other schedules.
     .index("by_organizationId_and_isDefault", ["organizationId", "isDefault"]),
 
@@ -70,7 +72,7 @@ export default defineSchema({
         })
       )
     ),
-  }).index("by_schedule_date", ["scheduleId", "date"]),
+  }).index("by_scheduleId_and_date", ["scheduleId", "date"]),
 
   // ============================================
   // EVENT TYPES (Extended)
@@ -117,7 +119,10 @@ export default defineSchema({
   })
     .index("by_external_id", ["id"])
     .index("by_slug", ["slug"])
-    .index("by_org", ["organizationId"]),
+    .index("by_organizationId", ["organizationId"])
+    // deleteSchedule's reference check; event types may have no organization,
+    // so by_organizationId cannot serve it.
+    .index("by_scheduleId", ["scheduleId"]),
 
   // ============================================
   // RESOURCE ↔ EVENT TYPE MAPPING (Many-to-Many)
@@ -126,12 +131,12 @@ export default defineSchema({
     resourceId: v.string(),
     eventTypeId: v.string(),
   })
-    .index("by_resource", ["resourceId"]) // Resource → Event Types
-    .index("by_event_type", ["eventTypeId"]) // Event Type → Resources
+    .index("by_resourceId", ["resourceId"]) // Resource → Event Types
+    .index("by_eventTypeId", ["eventTypeId"]) // Event Type → Resources
     // Compound index for the exact (resourceId, eventTypeId) link lookup —
-    // replaces the withIndex("by_resource") + .filter(eventTypeId) scans that
+    // replaces the withIndex("by_resourceId") + .filter(eventTypeId) scans that
     // loaded every link of a resource and filtered in JS.
-    .index("by_resource_event_type", ["resourceId", "eventTypeId"]),
+    .index("by_resourceId_and_eventTypeId", ["resourceId", "eventTypeId"]),
 
   // ============================================
   // AVAILABILITY (Bitmap Pattern)
@@ -140,14 +145,14 @@ export default defineSchema({
     resourceId: v.string(),
     date: v.string(), // "2024-05-20" (ISO Date)
     busySlots: v.array(v.number()), // Indices of 15-min chunks (0-95)
-  }).index("by_resource_date", ["resourceId", "date"]),
+  }).index("by_resourceId_and_date", ["resourceId", "date"]),
 
   // Quantity availability tracking (for pooled resources)
   quantity_availability: defineTable({
     resourceId: v.string(),
     date: v.string(),
-    slotQuantities: v.any(), // { "36": 2, "37": 1 } = booked count per slot
-  }).index("by_resource_date", ["resourceId", "date"]),
+    slotQuantities: v.record(v.string(), v.number()), // { "36": 2, "37": 1 } = booked count per slot
+  }).index("by_resourceId_and_date", ["resourceId", "date"]),
 
   // ============================================
   // BOOKINGS (Extended)
@@ -158,7 +163,7 @@ export default defineSchema({
     actorId: v.string(),
     start: v.number(),
     end: v.number(),
-    status: v.string(), // "pending" | "confirmed" | "cancelled" | "completed"
+    status: bookingStatusValidator, // BOOKING_STATUSES in src/shared/booking-status.ts
 
     // Unique identifiers
     uid: v.string(), // e.g., "bk_abc123xyz"
@@ -196,11 +201,11 @@ export default defineSchema({
     cancellationReason: v.optional(v.string()),
   })
     // listBookings ranges on `start` (dateFrom/dateTo) and reads newest-first
-    // straight out of these three compound indexes; by_resource_start and
+    // straight out of these three compound indexes; by_resourceId_and_start and
     // by_eventTypeId_and_start also serve the deleteResource / deleteEventType
     // existence probes as prefix queries.
-    .index("by_org_start", ["organizationId", "start"])
-    .index("by_resource_start", ["resourceId", "start"])
+    .index("by_organizationId_and_start", ["organizationId", "start"])
+    .index("by_resourceId_and_start", ["resourceId", "start"])
     .index("by_eventTypeId_and_start", ["eventTypeId", "start"])
     .index("by_uid", ["uid"]),
 
@@ -210,18 +215,19 @@ export default defineSchema({
     resourceId: v.string(),
     quantity: v.number(),
   })
-    .index("by_booking", ["bookingId"])
-    .index("by_resource", ["resourceId"]),
+    .index("by_bookingId", ["bookingId"])
+    .index("by_resourceId", ["resourceId"]),
 
   // Booking state history (audit trail)
   booking_history: defineTable({
     bookingId: v.id("bookings"),
-    fromStatus: v.string(),
-    toStatus: v.string(),
+    // "" marks the entry that records a booking's creation.
+    fromStatus: v.union(v.literal(""), ...bookingStatusValidator.members),
+    toStatus: bookingStatusValidator,
     changedBy: v.optional(v.string()),
     reason: v.optional(v.string()),
     timestamp: v.number(),
-  }).index("by_booking", ["bookingId"]),
+  }).index("by_bookingId", ["bookingId"]),
 
   // ============================================
   // PRESENCE (Real-time Slot Locking)
@@ -237,16 +243,16 @@ export default defineSchema({
     updated: v.number(),
     data: v.optional(v.any()),
   })
-    .index("by_resource_slot_updated", ["resourceId", "slot", "updated"])
-    .index("by_user_slot_resource", ["user", "slot", "resourceId"])
-    .index("by_event_type", ["eventTypeId"]),
+    .index("by_resourceId_and_slot_and_updated", ["resourceId", "slot", "updated"])
+    .index("by_user_and_slot_and_resourceId", ["user", "slot", "resourceId"])
+    .index("by_eventTypeId", ["eventTypeId"]),
 
   presence_heartbeats: defineTable({
     resourceId: v.string(),
     user: v.string(),
     slot: v.string(),
     markAsGone: v.id("_scheduled_functions"),
-  }).index("by_user_slot_resource", ["user", "slot", "resourceId"]),
+  }).index("by_user_and_slot_and_resourceId", ["user", "slot", "resourceId"]),
 
   // ============================================
   // HOOKS (Notification System)
@@ -257,5 +263,7 @@ export default defineSchema({
     organizationId: v.optional(v.string()), // External org ID from auth system
     enabled: v.boolean(),
     createdAt: v.number(),
-  }).index("by_event", ["eventType", "enabled"]),
+    // Absent: version 1 payloads (per emitter, frozen). 2: bookingHookEventV2.
+    payloadVersion: v.optional(v.literal(2)),
+  }).index("by_eventType_and_enabled", ["eventType", "enabled"]),
 });

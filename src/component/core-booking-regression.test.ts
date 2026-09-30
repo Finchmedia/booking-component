@@ -290,7 +290,8 @@ describe("listBookings", () => {
   });
 
   // createBooking stamps the event type's organizationId on the booking (the
-  // same scope the hooks receive) so the by_org_start index finds it.
+  // same scope the hooks receive) so the by_organizationId_and_start index
+  // finds it.
   test("scopes bookings to an organization", async () => {
     const seed = await seedResource(t);
     const booking = await book(t, seed, AT("09:00"), AT("10:00"));
@@ -822,9 +823,8 @@ describe("event type CRUD", () => {
       requiresConfirmation: true,
     });
     expect(await t.query(api.public.listEventTypes, {})).toHaveLength(1);
-    await expect(t.query(api.public.getEventType, { eventTypeId: "ghost" })).rejects.toThrow(
-      "Event type not found: ghost"
-    );
+    // 0.5.0 (N1, D12): null, like getResource; 0.4.x threw "Event type not found: ghost".
+    expect(await t.query(api.public.getEventType, { eventTypeId: "ghost" })).toBeNull();
   });
 
   test("getEventTypeBySlug and listEventTypes scope by organization and active flag", async () => {
@@ -952,9 +952,7 @@ describe("event type CRUD", () => {
     expect(await t.mutation(api.public.deleteEventType, { id: "et-unused" })).toEqual({
       success: true,
     });
-    await expect(t.query(api.public.getEventType, { eventTypeId: "et-unused" })).rejects.toThrow(
-      "Event type not found: et-unused"
-    );
+    expect(await t.query(api.public.getEventType, { eventTypeId: "et-unused" })).toBeNull();
     await expect(t.mutation(api.public.deleteEventType, { id: "et-unused" })).rejects.toThrow(
       'Event type "et-unused" not found'
     );
@@ -1022,7 +1020,7 @@ describe("resource CRUD", () => {
     ).rejects.toThrow('Resource "ghost" not found');
   });
 
-  test("deleteResource refuses while bookings exist and leaves the links of a deleted resource behind", async () => {
+  test("deleteResource refuses while bookings exist and removes the links of a deleted resource", async () => {
     const seed = await seedResource(t);
     const spare = await seedResource(t, { resourceId: "res-2", eventTypeId: "et-2" });
     const booking = await book(t, seed, AT("09:00"), AT("10:00"));
@@ -1047,12 +1045,15 @@ describe("resource CRUD", () => {
     expect(
       (await t.query(api.resources.listResources, { organizationId: ORG })).map((r) => r.id)
     ).toEqual([RESOURCE]);
-    // Deleting does not cascade: the link row survives (callers use deleteAllLinksForResource).
+    // 0.5.0 (N12): its link rows go with it; the refused delete kept its own.
     expect(
       await t.query(api.resource_event_types.getEventTypeIdsForResource, {
         resourceId: spare.resourceId,
       })
-    ).toEqual(["et-2"]);
+    ).toEqual([]);
+    expect(
+      await t.query(api.resource_event_types.getEventTypeIdsForResource, { resourceId: RESOURCE })
+    ).toEqual([seed.eventTypeId]);
 
     await expect(t.mutation(api.resources.deleteResource, { id: "ghost" })).rejects.toThrow(
       'Resource "ghost" not found'

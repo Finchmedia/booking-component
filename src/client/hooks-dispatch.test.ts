@@ -18,6 +18,7 @@ import {
 } from "convex/server";
 import { v } from "convex/values";
 import bookingComponent from "../test.js";
+import { bookingHookEventV2 } from "./index.js";
 
 // Host fixture: the hook target records what it received.
 const hostSchema = defineSchema({ deliveries: defineTable({ uid: v.string(), start: v.number() }) });
@@ -29,6 +30,13 @@ const START = Date.UTC(2027, 2, 9, 9);
 const onBookingCreated = internalMutationGeneric({
   handler: async (ctx, payload: { uid: string; start: number }) => {
     await ctx.db.insert("deliveries", { uid: payload.uid, start: payload.start });
+  },
+});
+// A payloadVersion 2 target validates its args with the root export.
+const onBookingEventV2 = internalMutationGeneric({
+  args: bookingHookEventV2,
+  handler: async (ctx, event) => {
+    await ctx.db.insert("deliveries", { uid: event.uid, start: event.start });
   },
 });
 const deliveries = queryGeneric({
@@ -53,7 +61,7 @@ const inspectJobs = queryGeneric({
 function setup() {
   const t = convexTest(hostSchema, {
     "./_generated/api.ts": async () => ({}),
-    "./fixture.ts": async () => ({ onBookingCreated, deliveries }),
+    "./fixture.ts": async () => ({ onBookingCreated, onBookingEventV2, deliveries }),
   });
   t.registerComponent("booking", bookingComponent.schema, {
     ...bookingComponent.modules,
@@ -107,6 +115,19 @@ describe("hook function handles", () => {
 
     const created = await createAndDrain();
 
+    expect(await t.query(fixtureApi.deliveries, {})).toEqual([
+      expect.objectContaining({ uid: created.uid, start: START }),
+    ]);
+  });
+
+  test("a payloadVersion 2 host handler whose args are the exported bookingHookEventV2 receives the envelope", async () => {
+    await seed();
+    const handle = await t.run(() => createFunctionHandle(fixtureApi.onBookingEventV2));
+    await t.mutation(booking.hooks.registerHook, { eventType: "booking.created", functionHandle: handle, payloadVersion: 2 });
+
+    const created = await createAndDrain();
+
+    // The handler only writes after its args validator accepted the payload.
     expect(await t.query(fixtureApi.deliveries, {})).toEqual([
       expect.objectContaining({ uid: created.uid, start: START }),
     ]);

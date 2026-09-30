@@ -2,16 +2,44 @@ import { createBookingEmailContext } from "./emails/context.js";
 import { bookingEmailOptionsValidator } from "../emails.js";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { v } from "convex/values";
+import { jsonToConvex, v } from "convex/values";
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
+import { stream } from "convex-helpers/server/stream";
+import schema from "./schema";
 import { getRequiredSlots, generateDaySlots, generateDaySlotsWithTimezone, isCandidateAvailable, isDayAvailable, assertValidRange, } from "./utils";
 import { isAvailable } from "./availability";
-import { getDateOverridesByDate, getScheduleByExternalId, getScheduleDaySlots, } from "./schedules";
-import { assertSingleBookable, terminateBooking } from "./booking_lifecycle";
+import { getDateOverridesByDate, getExistingSchedule, getScheduleDaySlots, } from "./schedules";
+import { LEGACY_EVENT_TYPE_ID, assertSingleBookable, assertStillBookable, buildHookEventV2, terminateBooking, withEventTypeOrganization, } from "./booking_lifecycle";
+import { assertLinksAdoptable, deleteLinks } from "./resource_event_types";
 import { generateManagementToken } from "./tokens";
 import { parseCivilDate } from "../shared/time.js";
-import { assertDateOrder, assertEventLength, assertSlotIndices, assertTimeZone, isValidTimeZone, } from "./input_validation";
+import { throwBookingError } from "../shared/booking-errors.js";
+import { bookingStatusValidator } from "../shared/booking-status.js";
+import { MAX_MONTH_RANGE_DAYS, assertAvailabilityRangeLength, assertBookingDetails, assertDateOrder, assertDateRangeLength, assertEventLength, assertEventTypeNumbers, assertLengthInOptions, assertSlotIndices, assertTimeZone, isValidTimeZone, } from "./input_validation";
 import { assertSingleResourceSupported, holdsActiveInventory, isFungibleResource, reserveResourceSlots, } from "./inventory_helpers";
 import { bookingDoc, cancelResult, eventTypeDoc, successResult, successWithAffectedUsers, } from "./validators";
+/**
+ * The busySlots `booking` holds on `resourceId` (dateStr → slot indices), or
+ * null when it holds none there. A booking holds the resources of its
+ * booking_items (a bundle; its resourceId is the first item), else its
+ * resourceId: the resources a cancel or a move releases, each for
+ * [start, end). One bitmap slot has one holder, so these slots free this
+ * booking and never another one.
+ *
+ * Only the busySlots bitmap of a non-fungible resource is read with it. A
+ * pool (isFungible) counts the booking's quantity in quantity_availability
+ * instead, and the slot queries offer no times on a pool at all.
+ */
+async function slotsHeldOn(ctx, booking, resourceId) {
+    const items = await ctx.db
+        .query("booking_items")
+        .withIndex("by_bookingId", (q) => q.eq("bookingId", booking._id))
+        .collect();
+    const holds = items.length > 0
+        ? items.some((item) => item.resourceId === resourceId)
+        : booking.resourceId === resourceId;
+    return holds ? getRequiredSlots(booking.start, booking.end) : null;
+}
 /**
  * Resolves the busy slots currently held by ONE specific booking so that the
  * availability queries can treat them as free. Reschedule flow: a booking's own
@@ -20,14 +48,14 @@ import { bookingDoc, cancelResult, eventTypeDoc, successResult, successWithAffec
  *
  * Returns the booking's slot map (dateStr → slot indices) or null when there is
  * nothing to exclude. Guards:
- * - unknown uid / different resource → null (never touch other resources)
+ * - unknown uid / a resource the booking does not hold → null (never touch
+ *   other resources); every item of a bundle counts (see slotsHeldOn)
  * - only statuses that actually hold slots (pending/confirmed/provisional):
  *   a cancelled booking already released its slots — excluding its indices
  *   again would free OTHER bookings occupying the same slots by now.
  *
- * Only valid for NON-fungible resources (busySlots bitmap, one holder per
- * slot) — pooled resources track quantity_availability, which this exclusion
- * does not touch.
+ * The uid is not a credential: excludeBookingUid is for trusted host code.
+ * Client input goes through rescheduleContext (getRescheduleExclusion).
  */
 async function getExcludedSlotsForBooking(ctx, resourceId, excludeBookingUid) {
     if (!excludeBookingUid)
@@ -38,12 +66,50 @@ async function getExcludedSlotsForBooking(ctx, resourceId, excludeBookingUid) {
         .unique();
     if (!booking)
         return null;
-    if (booking.resourceId !== resourceId)
-        return null;
     if (!["pending", "confirmed", "provisional"].includes(booking.status)) {
         return null;
     }
-    return getRequiredSlots(booking.start, booking.end);
+    return await slotsHeldOn(ctx, booking, resourceId);
+}
+/**
+ * A booker's reschedule credential for the slot queries: the booking's uid
+ * and management token, which a client may forward. Unlike
+ * excludeBookingUid, which any caller could fill with a uid it saw, it proves
+ * the right to move the booking.
+ */
+const rescheduleContextValidator = v.optional(v.object({ uid: v.string(), token: v.string() }));
+/** The slot queries take one reschedule argument at most. */
+function assertOneRescheduleArgument(args) {
+    if (args.rescheduleContext !== undefined && args.excludeBookingUid !== undefined) {
+        throwBookingError("INVALID_INPUT", "Invalid reschedule arguments: pass rescheduleContext or excludeBookingUid, not both");
+    }
+}
+/**
+ * The slots of the booking a slot query treats as free:
+ * - `rescheduleContext`: a pending or confirmed booking that holds this
+ *   resource (its resource, or any item of a bundle) and whose uid and
+ *   management token both match. Anything else (unknown uid, wrong token, a
+ *   booking without a token, another status, a resource it does not hold)
+ *   excludes nothing and is no error, so no other booking is ever freed.
+ * - `excludeBookingUid`: for trusted host code (see getExcludedSlotsForBooking).
+ * Neither value is logged or returned.
+ */
+async function getRescheduleExclusion(ctx, resourceId, args) {
+    const context = args.rescheduleContext;
+    if (context === undefined) {
+        return await getExcludedSlotsForBooking(ctx, resourceId, args.excludeBookingUid);
+    }
+    const booking = await ctx.db
+        .query("bookings")
+        .withIndex("by_uid", (q) => q.eq("uid", context.uid))
+        .unique();
+    if (!booking ||
+        booking.managementToken === undefined ||
+        booking.managementToken !== context.token ||
+        !["pending", "confirmed"].includes(booking.status)) {
+        return null;
+    }
+    return await slotsHeldOn(ctx, booking, resourceId);
 }
 /**
  * Busy slot indices of ONE UTC date, minus the excluded booking's own slots
@@ -52,7 +118,7 @@ async function getExcludedSlotsForBooking(ctx, resourceId, excludeBookingUid) {
 async function loadBusySlots(ctx, resourceId, date, excludedByDate) {
     const availabilityDoc = await ctx.db
         .query("daily_availability")
-        .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
+        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
         .unique();
     const excludedSlots = excludedByDate?.get(date) ?? [];
     return (availabilityDoc?.busySlots ?? []).filter((slot) => !excludedSlots.includes(slot));
@@ -87,46 +153,70 @@ function candidateDates(candidates) {
     return dates;
 }
 /**
- * The zone that interprets a schedule's local hours in the availability
- * queries. A caller-supplied resourceTimezone wins, as before; when it differs
- * from the schedule's own zone that is logged, since the hours then shift by
- * the difference. Without one, the schedule's zone applies — until 0.4.2 the
- * schedule's local hours were then read as UTC (month view) or ignored (day
- * view). Undefined for an unknown schedule without resourceTimezone, which
- * keeps the legacy path. Also undefined, with a warning, for a schedule stored
- * before 0.4.3 with a zone Intl rejects: reads stay tolerant and take the
- * legacy path, the month view's 0.4.2 answer, instead of throwing.
+ * The schedule arguments of getMonthAvailability and getDaySlots, checked
+ * (0.5.0). Valid shapes:
+ * - none of them: the legacy 09:00–17:00 UTC window;
+ * - `scheduleId`, optionally with `availableSlots` (getDaySlots), and with a
+ *   `resourceTimezone` only if it equals the schedule's zone;
+ * - `availableSlots` together with `resourceTimezone` (getDaySlots).
+ * A partial shape (`resourceTimezone` alone; `availableSlots` without a
+ * zone) and a zone that differs from the schedule's throw INVALID_INPUT
+ * instead of reading closed days as open; an unknown `scheduleId` throws
+ * SCHEDULE_NOT_FOUND. `""` counts as omitted for `scheduleId` and
+ * `resourceTimezone`, as before.
+ *
+ * Returns the schedule (null without one) and the zone its hours are read
+ * in, always defined for a schedule. For a schedule stored before 0.4.3 with
+ * a zone Intl rejects, reads stay tolerant and logged: its hours are read in
+ * a given resourceTimezone, else as UTC (0.4.3 took the legacy window, which
+ * opened its closed days).
  */
-function resolveScheduleZone(functionName, schedule, resourceTimezone) {
-    if (!schedule)
-        return resourceTimezone;
-    if (resourceTimezone === undefined || resourceTimezone === "") {
-        if (isValidTimeZone(schedule.timezone))
-            return schedule.timezone;
-        console.warn(`[booking] ${functionName}: schedule "${schedule.id}" has the invalid time zone "${schedule.timezone}"; using the legacy path. Set a valid zone with updateSchedule.`);
-        return undefined;
+async function resolveScheduleArgs(ctx, functionName, args) {
+    const resourceTimezone = args.resourceTimezone || undefined;
+    if (!args.scheduleId) {
+        if (resourceTimezone !== undefined && args.availableSlots === undefined) {
+            throwBookingError("INVALID_INPUT", functionName === "getDaySlots"
+                ? "Incomplete schedule arguments: resourceTimezone needs availableSlots or scheduleId (pass none of them for the legacy 09:00–17:00 UTC hours)"
+                : "Incomplete schedule arguments: resourceTimezone needs scheduleId (pass neither for the legacy 09:00–17:00 UTC hours)");
+        }
+        if (args.availableSlots !== undefined && resourceTimezone === undefined) {
+            throwBookingError("INVALID_INPUT", "Incomplete schedule arguments: availableSlots needs resourceTimezone or scheduleId (pass none of them for the legacy 09:00–17:00 UTC hours)");
+        }
+        return { schedule: null, timezone: resourceTimezone };
     }
-    if (resourceTimezone !== schedule.timezone) {
-        console.warn(`[booking] ${functionName}: resourceTimezone "${resourceTimezone}" differs from the timezone "${schedule.timezone}" of schedule "${schedule.id}"; using resourceTimezone. Omit it to use the schedule's zone.`);
+    const schedule = await getExistingSchedule(ctx, args.scheduleId);
+    if (!isValidTimeZone(schedule.timezone)) {
+        const timezone = resourceTimezone ?? "UTC";
+        console.warn(`[booking] ${functionName}: schedule "${schedule.id}" has the invalid time zone "${schedule.timezone}"; reading its hours in ${timezone}. Set a valid zone with updateSchedule.`);
+        return { schedule, timezone };
     }
-    return resourceTimezone;
+    if (resourceTimezone !== undefined && resourceTimezone !== schedule.timezone) {
+        throwBookingError("INVALID_INPUT", `Invalid resourceTimezone "${resourceTimezone}": schedule "${schedule.id}" uses "${schedule.timezone}". Omit resourceTimezone to use the schedule's zone.`);
+    }
+    return { schedule, timezone: schedule.timezone };
 }
+/**
+ * The event type with this ID, or null when there is none (like getResource
+ * and the getBooking* queries). Until 0.5.0 a missing ID threw
+ * EVENT_TYPE_NOT_FOUND "Event type not found: <id>".
+ */
 export const getEventType = query({
     args: {
         eventTypeId: v.string(),
     },
-    returns: eventTypeDoc,
+    returns: v.union(eventTypeDoc, v.null()),
     handler: async (ctx, args) => {
-        const eventType = await ctx.db
+        return await ctx.db
             .query("event_types")
             .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
             .unique();
-        if (!eventType) {
-            throw new Error(`Event type not found: ${args.eventTypeId}`);
-        }
-        return eventType;
     },
 });
+/**
+ * Whether [start, end) is free on a resource that is booked by time slot.
+ * Ranges longer than 366 days throw INVALID_RANGE (0.5.0); booking writes
+ * have no such cap.
+ */
 export const getAvailability = query({
     args: {
         resourceId: v.string(),
@@ -135,6 +225,8 @@ export const getAvailability = query({
     },
     returns: v.boolean(),
     handler: async (ctx, args) => {
+        assertValidRange(args.start, args.end);
+        assertAvailabilityRangeLength(args.start, args.end);
         return await isAvailable(ctx, args.resourceId, args.start, args.end);
     },
 });
@@ -146,14 +238,26 @@ export const getAvailability = query({
  * - dateFrom/dateTo are calendar dates ("2025-06-17"; "2025-6-17" is read as
  *   the same day). With a schedule they are the schedule's local days;
  *   without one, UTC days.
- * - With scheduleId, the schedule's hours are read in its own timezone, or in
- *   resourceTimezone when given (a mismatch is logged). A schedule stored
- *   with a zone Intl rejects is read as before 0.4.3, its hours as UTC
- *   (logged), unless resourceTimezone is given.
- * - Without scheduleId, the legacy 09:00–17:00 UTC window applies.
+ * - With scheduleId, the schedule's hours are read in its own timezone;
+ *   resourceTimezone may be omitted and must otherwise equal it. A schedule
+ *   stored with a zone Intl rejects has its hours read as UTC, or in a given
+ *   resourceTimezone (logged).
+ * - Without scheduleId and resourceTimezone, the legacy 09:00–17:00 UTC
+ *   window applies.
  *
- * Rejects an eventLength that is not a positive number, impossible dates and
- * dateFrom after dateTo.
+ * RESCHEDULING: `rescheduleContext` ({ uid, token } of the booking being
+ * moved) treats that booking's own slots as free when the token matches a
+ * pending or confirmed booking that holds this resource (as its resource or
+ * as any item of a bundle), and is ignored otherwise.
+ * `excludeBookingUid` does the same without a token and is for trusted host
+ * code only: never forward it from a client, which could free any booking
+ * whose uid it knows. Passing both throws.
+ *
+ * Rejects an eventLength that is not a positive number, impossible dates,
+ * dateFrom after dateTo, a range of more than 93 days (MAX_MONTH_RANGE_DAYS,
+ * both ends included), resourceTimezone without scheduleId, a
+ * resourceTimezone that differs from the schedule's, an unknown
+ * scheduleId (see resolveScheduleArgs) and both reschedule arguments at once.
  */
 export const getMonthAvailability = query({
     args: {
@@ -164,7 +268,8 @@ export const getMonthAvailability = query({
         slotInterval: v.optional(v.number()), // Slot interval
         resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
         scheduleId: v.optional(v.string()), // Schedule ID for opening-hours-aware availability
-        excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
+        excludeBookingUid: v.optional(v.string()), // Trusted host code only: treat this booking's own slots as free
+        rescheduleContext: rescheduleContextValidator, // A booker's { uid, token }: treat that booking's own slots as free
     },
     returns: v.record(v.string(), v.boolean()),
     handler: async (ctx, args) => {
@@ -172,24 +277,21 @@ export const getMonthAvailability = query({
         const dateFrom = parseCivilDate(args.dateFrom);
         const dateTo = parseCivilDate(args.dateTo);
         assertDateOrder(dateFrom, dateTo);
+        assertDateRangeLength(dateFrom, dateTo, MAX_MONTH_RANGE_DAYS);
         assertEventLength(eventLength);
-        const pooledResource = await isFungibleResource(ctx, resourceId);
+        assertOneRescheduleArgument(args);
         // The schedule and its overrides are read once for the whole range.
-        const schedule = args.scheduleId
-            ? await getScheduleByExternalId(ctx, args.scheduleId)
-            : null;
+        const { schedule, timezone } = await resolveScheduleArgs(ctx, "getMonthAvailability", args);
+        const pooledResource = await isFungibleResource(ctx, resourceId);
         const overridesByDate = schedule && !pooledResource
             ? await getDateOverridesByDate(ctx, schedule, dateFrom, dateTo)
             : undefined;
-        const timezone = args.scheduleId
-            ? resolveScheduleZone("getMonthAvailability", schedule, args.resourceTimezone)
-            : args.resourceTimezone;
         // Parse dates with explicit UTC context to avoid timezone bugs
         // Adding T00:00:00.000Z ensures we get UTC midnight, not local midnight
         const startDate = new Date(dateFrom + "T00:00:00.000Z");
         const endDate = new Date(dateTo + "T00:00:00.000Z");
         // Slots held by the excluded booking (resolved once for the range).
-        const excludedByDate = await getExcludedSlotsForBooking(ctx, resourceId, args.excludeBookingUid);
+        const excludedByDate = await getRescheduleExclusion(ctx, resourceId, args);
         // Result object: { "2025-06-17": true, "2025-06-18": false }
         const availabilityByDate = {};
         // Busy slots per UTC date, shared across the whole range so that each
@@ -208,11 +310,6 @@ export const getMonthAvailability = query({
                 currentDate.setUTCDate(currentDate.getUTCDate() + 1);
                 continue;
             }
-            // If a scheduleId is provided, use it to determine the available slots window
-            let scheduleSlots;
-            if (args.scheduleId) {
-                scheduleSlots = await getScheduleDaySlots(ctx, schedule, dateStr, overridesByDate);
-            }
             // Decide availability via the SAME slot-generation path as
             // getDaySlots, so month- and day-view always agree.
             // Previously isDayAvailable() compared the schedule's LOCAL
@@ -226,9 +323,11 @@ export const getMonthAvailability = query({
             // NOT available — it must not fall through to the legacy
             // 9–17-UTC branch, which made weekends/vacation days read as
             // bookable in the month view. The legacy branch remains only for
-            // schedule-less setups.
+            // queries without any schedule argument (resolveScheduleArgs
+            // rejects partial ones and always gives a schedule a zone).
             let hasAvailability;
-            if (timezone && scheduleSlots) {
+            if (schedule && timezone) {
+                const scheduleSlots = await getScheduleDaySlots(ctx, schedule, dateStr, overridesByDate);
                 if (scheduleSlots.length === 0) {
                     hasAvailability = false;
                 }
@@ -242,10 +341,10 @@ export const getMonthAvailability = query({
                 }
             }
             else {
-                // Legacy / no-timezone path: hardcoded UTC business hours,
-                // all slots on `dateStr` itself.
+                // Legacy path (no schedule arguments): hardcoded UTC
+                // business hours, all slots on `dateStr` itself.
                 await loadBusySlotsForDates(ctx, resourceId, [dateStr], excludedByDate, busyByDate);
-                hasAvailability = isDayAvailable(eventLength, busyByDate.get(dateStr) ?? [], args.slotInterval ?? 15, scheduleSlots);
+                hasAvailability = isDayAvailable(eventLength, busyByDate.get(dateStr) ?? [], args.slotInterval ?? 15);
             }
             availabilityByDate[dateStr] = hasAvailability;
             // Move to next day (using UTC methods to avoid DST issues)
@@ -264,14 +363,22 @@ export const getMonthAvailability = query({
  *   resourceTimezone generate the slots in that timezone
  * - scheduleId (optional) supplies what is missing: the schedule's effective
  *   hours for `date` when availableSlots is omitted, and the schedule's own
- *   timezone when resourceTimezone is omitted (a mismatch is logged).
+ *   timezone (a given resourceTimezone must equal it).
  *   `{ scheduleId }` alone equals getEffectiveAvailability followed by this
  *   query with availableSlots and the schedule's timezone. A schedule stored
- *   with a zone Intl rejects supplies no zone (logged).
- * - Otherwise the legacy 09:00–17:00 UTC window applies.
+ *   with a zone Intl rejects has its hours read as UTC, or in a given
+ *   resourceTimezone (logged).
+ * - Without any of the three, the legacy 09:00–17:00 UTC window applies.
  *
- * Rejects an eventLength that is not a positive number, impossible dates and
- * availableSlots outside 0–95.
+ * RESCHEDULING: `rescheduleContext` and `excludeBookingUid` as in
+ * getMonthAvailability (the token-checked context for client input,
+ * `excludeBookingUid` for trusted host code only).
+ *
+ * Rejects an eventLength that is not a positive number, impossible dates,
+ * availableSlots outside 0–95, a partial shape (resourceTimezone or
+ * availableSlots alone), a resourceTimezone that differs from the
+ * schedule's, an unknown scheduleId (see resolveScheduleArgs) and both
+ * reschedule arguments at once.
  */
 export const getDaySlots = query({
     args: {
@@ -281,8 +388,9 @@ export const getDaySlots = query({
         slotInterval: v.optional(v.number()), // Step between slots (default: 15)
         resourceTimezone: v.optional(v.string()), // IANA timezone (e.g., "Europe/Berlin")
         availableSlots: v.optional(v.array(v.number())), // Schedule-based available slot indices (in resource's local timezone)
-        excludeBookingUid: v.optional(v.string()), // Treat this booking's own slots as free (reschedule flow)
+        excludeBookingUid: v.optional(v.string()), // Trusted host code only: treat this booking's own slots as free
         scheduleId: v.optional(v.string()), // Resolves the day's hours and/or the timezone from this schedule
+        rescheduleContext: rescheduleContextValidator, // A booker's { uid, token }: treat that booking's own slots as free
     },
     returns: v.array(v.object({ time: v.string() })),
     handler: async (ctx, args) => {
@@ -291,12 +399,12 @@ export const getDaySlots = query({
         assertEventLength(eventLength);
         if (args.availableSlots)
             assertSlotIndices(args.availableSlots);
+        assertOneRescheduleArgument(args);
+        const { schedule, timezone: resourceTimezone } = await resolveScheduleArgs(ctx, "getDaySlots", args);
         if (await isFungibleResource(ctx, resourceId))
             return [];
-        let { resourceTimezone, availableSlots } = args;
-        if (args.scheduleId) {
-            const schedule = await getScheduleByExternalId(ctx, args.scheduleId);
-            resourceTimezone = resolveScheduleZone("getDaySlots", schedule, resourceTimezone);
+        let { availableSlots } = args;
+        if (schedule) {
             availableSlots ??= await getScheduleDaySlots(ctx, schedule, date);
         }
         // Generate all possible slots for this day
@@ -315,7 +423,7 @@ export const getDaySlots = query({
             possibleSlots = generateDaySlots(date, eventLength, slotInterval);
         }
         // The excluded booking's own slots do not count as busy.
-        const excludedByDate = await getExcludedSlotsForBooking(ctx, resourceId, args.excludeBookingUid);
+        const excludedByDate = await getRescheduleExclusion(ctx, resourceId, args);
         // Busy slots of every UTC date the candidates touch — not just the
         // row of the requested local `date`: for a resource whose business
         // day crosses UTC midnight the morning candidates live on the
@@ -349,7 +457,7 @@ export const createReservation = mutation({
         // Note: We re-check inside the transaction to ensure atomicity
         const available = await isAvailable(ctx, resourceId, start, end);
         if (!available) {
-            throw new Error("Resource is not available for the requested time range.");
+            throwBookingError("SLOT_UNAVAILABLE", "Resource is not available for the requested time range.");
         }
         // 2. Calculate required slots
         const requiredSlots = getRequiredSlots(start, end);
@@ -357,13 +465,13 @@ export const createReservation = mutation({
         for (const [date, slots] of requiredSlots.entries()) {
             const existing = await ctx.db
                 .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
+                .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
                 .unique();
             if (existing) {
                 // Double check conflict (redundant but safe)
                 for (const slot of slots) {
                     if (existing.busySlots.includes(slot)) {
-                        throw new Error(`Conflict detected on ${date} at slot ${slot}`);
+                        throwBookingError("SLOT_UNAVAILABLE", `Conflict detected on ${date} at slot ${slot}`);
                     }
                 }
                 // Merge new slots
@@ -389,7 +497,7 @@ export const createReservation = mutation({
             status: "confirmed",
             // Fill required new fields with placeholders/defaults for backward compat
             uid: `legacy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            eventTypeId: "legacy",
+            eventTypeId: LEGACY_EVENT_TYPE_ID,
             timezone: "UTC",
             bookerName: "Legacy Booker",
             bookerEmail: actorId, // Assume actorId is email for legacy
@@ -413,6 +521,8 @@ export const createReservation = mutation({
                 status: "confirmed",
                 bookerEmail: actorId,
             },
+            // The legacy path records no history, so no changedBy.
+            payloadV2: await buildHookEventV2(ctx, "booking.created", bookingId),
             resendOptions: args.resendOptions,
         });
         return bookingId;
@@ -444,8 +554,10 @@ export const createBooking = mutation({
     },
     returns: bookingDoc,
     handler: async (ctx, args) => {
-        // 0–4. Range, pool, event type, resource, link and free slots — shared
-        // with createProvisionalBooking, including the order of the checks.
+        // Zone and booker address, then 0–4. range, pool, event type, resource,
+        // link and free slots — shared with createProvisionalBooking, including
+        // the order of the checks.
+        assertBookingDetails(args);
         const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
         // 5. Generate unique booking UID
         const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -462,8 +574,8 @@ export const createBooking = mutation({
             actorId: args.booker.email, // Use email as actorId
             eventTypeId: args.eventTypeId,
             // Scope the booking to the event type's organization so that
-            // listBookings({ organizationId }) (index by_org_start) finds it — the same
-            // scope the booking hooks receive.
+            // listBookings({ organizationId }) (index by_organizationId_and_start)
+            // finds it — the same scope the booking hooks receive.
             organizationId: eventType.organizationId,
             start: args.start,
             end: args.end,
@@ -492,7 +604,7 @@ export const createBooking = mutation({
         for (const [date, slots] of requiredSlots.entries()) {
             const existing = await ctx.db
                 .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
+                .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
                 .unique();
             if (existing) {
                 await ctx.db.patch(existing._id, {
@@ -529,6 +641,7 @@ export const createBooking = mutation({
                 uid,
                 managementToken,
             },
+            payloadV2: await buildHookEventV2(ctx, "booking.created", bookingId, { changedBy: "system" }),
             resendOptions: args.resendOptions,
         });
         // 12. Return the captured booking.
@@ -556,6 +669,7 @@ export const createProvisionalBooking = mutation({
     returns: bookingDoc,
     handler: async (ctx, args) => {
         // The same checks, in the same order, as createBooking.
+        assertBookingDetails(args);
         const { eventType, requiredSlots } = await assertSingleBookable(ctx, args);
         const uid = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const managementToken = generateManagementToken();
@@ -592,7 +706,7 @@ export const createProvisionalBooking = mutation({
         for (const [date, slots] of requiredSlots.entries()) {
             const existing = await ctx.db
                 .query("daily_availability")
-                .withIndex("by_resource_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
+                .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", args.resourceId).eq("date", date))
                 .unique();
             if (existing) {
                 await ctx.db.patch(existing._id, {
@@ -637,7 +751,7 @@ export const cancelReservation = mutation({
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.reservationId);
         if (!booking) {
-            throw new Error("Reservation not found");
+            throwBookingError("BOOKING_NOT_FOUND", "Reservation not found");
         }
         if (booking.status === "cancelled") {
             // Idempotent: the slots were released by the first cancel, and
@@ -645,20 +759,24 @@ export const cancelReservation = mutation({
             return { success: true, alreadyCancelled: true };
         }
         if (!holdsActiveInventory(booking.status)) {
-            throw new Error(`Cannot cancel booking with status: ${booking.status}`);
+            throwBookingError("INVALID_STATE", `Cannot cancel booking with status: ${booking.status}`);
         }
-        // 3. Release, record history and stamp the cancellation
+        // 3. Notify the event type's organization when the booking's
+        // resources agree, else the stored one (withEventTypeOrganization);
+        // release, record history and stamp the cancellation.
+        const notified = await withEventTypeOrganization(ctx, booking);
+        const changedBy = args.cancelledBy ?? "unknown";
         await terminateBooking(ctx, booking, {
             to: "cancelled",
             reason: args.reason,
-            changedBy: args.cancelledBy ?? "unknown",
+            changedBy,
             now: Date.now(),
         });
         // 4. Trigger booking.cancelled hook (v1 payload unchanged: no reason)
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
-            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason: args.reason }),
-            organizationId: booking.organizationId,
+            emailContext: createBookingEmailContext("cancelled", notified, args.resendOptions, { reason: args.reason }),
+            organizationId: notified.organizationId,
             payload: {
                 bookingId: args.reservationId,
                 resourceId: booking.resourceId,
@@ -672,6 +790,11 @@ export const cancelReservation = mutation({
                 eventTitle: booking.eventTitle,
                 previousStatus: booking.status,
             },
+            payloadV2: await buildHookEventV2(ctx, "booking.cancelled", booking._id, {
+                previousStatus: booking.status,
+                reason: args.reason,
+                changedBy,
+            }),
             resendOptions: args.resendOptions,
         });
         return { success: true, alreadyCancelled: false };
@@ -686,7 +809,7 @@ export const expireProvisionalBooking = mutation({
     handler: async (ctx, args) => {
         const booking = await ctx.db.get(args.bookingId);
         if (!booking) {
-            throw new Error("Booking not found");
+            throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
         }
         if (booking.status === "cancelled") {
             return { success: true };
@@ -694,6 +817,9 @@ export const expireProvisionalBooking = mutation({
         if (booking.status !== "provisional") {
             return { success: false, reason: `Booking is ${booking.status}` };
         }
+        // No notification, but the expired row takes the organization every
+        // other ended booking takes (withEventTypeOrganization).
+        await withEventTypeOrganization(ctx, booking);
         await terminateBooking(ctx, booking, {
             to: "cancelled",
             reason: args.reason ?? "Provisional booking expired",
@@ -703,6 +829,25 @@ export const expireProvisionalBooking = mutation({
         return { success: true };
     },
 });
+/**
+ * An event type's scheduleId names an existing schedule, or is "" (no
+ * schedule, as the availability queries read it). Availability reads reject
+ * an unknown id, and deleteSchedule refuses while event types use one.
+ */
+async function assertScheduleReference(ctx, scheduleId) {
+    if (scheduleId)
+        await getExistingSchedule(ctx, scheduleId);
+}
+/**
+ * Creates an event type, or updates the one with this `id` (keeping what it
+ * is not given). Lengths, length options and the slot interval must be whole
+ * minutes greater than 0, buffers and notice 0 or more, the horizon greater
+ * than 0, and the length one of the options when there are any, counting
+ * the stored options an upsert keeps (INVALID_INPUT). The ID "legacy" is
+ * reserved for createReservation bookings (INVALID_INPUT), also for an
+ * upsert of an event type stored with it before 0.5.0; updateEventType
+ * still changes that one.
+ */
 export const createEventType = mutation({
     args: {
         id: v.string(),
@@ -731,25 +876,49 @@ export const createEventType = mutation({
     },
     returns: v.id("event_types"),
     handler: async (ctx, args) => {
+        // Bookings naming "legacy" are createReservation rows, which keep the
+        // legacy rules only while no event type has this ID.
+        if (args.id === LEGACY_EVENT_TYPE_ID) {
+            throwBookingError("INVALID_INPUT", `Invalid id "${LEGACY_EVENT_TYPE_ID}": reserved for createReservation bookings, choose another event type ID`);
+        }
         assertTimeZone(args.timezone);
+        assertEventTypeNumbers(args);
+        await assertScheduleReference(ctx, args.scheduleId);
         const existing = await ctx.db
             .query("event_types")
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
             .unique();
         const now = Date.now();
-        const data = {
+        if (existing) {
+            // An upsert updates the given fields and keeps the others: an omitted
+            // isActive does not reactivate a deactivated event type, and an
+            // omitted organizationId keeps the stored one. It never moves an event
+            // type to another organization; adopting one stored without
+            // organization is allowed when its linked resources belong to the
+            // adopting organization.
+            if (existing.organizationId !== undefined &&
+                args.organizationId !== undefined &&
+                args.organizationId !== existing.organizationId) {
+                throwBookingError("ORGANIZATION_MISMATCH", `Event type "${args.id}" belongs to another organization than "${args.organizationId}"`);
+            }
+            // Adopting one without organization keeps its links: each linked
+            // resource must belong to the adopting organization.
+            if (existing.organizationId === undefined && args.organizationId !== undefined) {
+                await assertLinksAdoptable(ctx.db, args.id, args.organizationId);
+            }
+            // Omitted options stay, so the length is checked against the options
+            // the upsert leaves behind.
+            assertLengthInOptions(args.lengthInMinutes, args.lengthInMinutesOptions ?? existing.lengthInMinutesOptions);
+            await ctx.db.patch(existing._id, { ...args, updatedAt: now });
+            return existing._id;
+        }
+        assertLengthInOptions(args.lengthInMinutes, args.lengthInMinutesOptions);
+        return await ctx.db.insert("event_types", {
             ...args,
             isActive: args.isActive ?? true,
             createdAt: now,
             updatedAt: now,
-        };
-        if (existing) {
-            await ctx.db.patch(existing._id, { ...data, createdAt: existing.createdAt });
-            return existing._id;
-        }
-        else {
-            return await ctx.db.insert("event_types", data);
-        }
+        });
     },
 });
 // ============================================
@@ -766,7 +935,7 @@ export const listEventTypes = query({
         if (args.organizationId) {
             eventTypes = await ctx.db
                 .query("event_types")
-                .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+                .withIndex("by_organizationId", (q) => q.eq("organizationId", args.organizationId))
                 .collect();
         }
         else {
@@ -795,12 +964,25 @@ export const getEventTypeBySlug = query({
         return eventTypes[0] ?? null;
     },
 });
+/**
+ * Changes the fields it is given and keeps every omitted one. `null` removes
+ * `description`, `scheduleId`, `bufferBefore`, `bufferAfter`,
+ * `minNoticeMinutes` or `maxFutureMinutes` (N25).
+ *
+ * The given settings are checked as in createEventType: lengths, length
+ * options and the slot interval are whole minutes greater than 0, buffers and
+ * notice 0 or more, the horizon greater than 0 (INVALID_INPUT). An update
+ * that gives `lengthInMinutes` or `lengthInMinutesOptions` must leave a
+ * length that is one of the options (when there are any), counting the
+ * stored value of the field it omits. Other updates of an event type stored
+ * before 0.5.0 that breaks these rules still work.
+ */
 export const updateEventType = mutation({
     args: {
         id: v.string(),
         title: v.optional(v.string()),
         slug: v.optional(v.string()),
-        description: v.optional(v.string()),
+        description: v.optional(v.union(v.null(), v.string())),
         lengthInMinutes: v.optional(v.number()),
         lengthInMinutesOptions: v.optional(v.array(v.number())),
         slotInterval: v.optional(v.number()),
@@ -811,11 +993,11 @@ export const updateEventType = mutation({
             address: v.optional(v.string()),
             public: v.optional(v.boolean()),
         }))),
-        scheduleId: v.optional(v.string()),
-        bufferBefore: v.optional(v.number()),
-        bufferAfter: v.optional(v.number()),
-        minNoticeMinutes: v.optional(v.number()),
-        maxFutureMinutes: v.optional(v.number()),
+        scheduleId: v.optional(v.union(v.null(), v.string())),
+        bufferBefore: v.optional(v.union(v.null(), v.number())),
+        bufferAfter: v.optional(v.union(v.null(), v.number())),
+        minNoticeMinutes: v.optional(v.union(v.null(), v.number())),
+        maxFutureMinutes: v.optional(v.union(v.null(), v.number())),
         requiresConfirmation: v.optional(v.boolean()),
         isActive: v.optional(v.boolean()),
     },
@@ -824,21 +1006,29 @@ export const updateEventType = mutation({
         if (args.timezone !== undefined) {
             assertTimeZone(args.timezone);
         }
+        assertEventTypeNumbers(args);
         const eventType = await ctx.db
             .query("event_types")
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
             .unique();
         if (!eventType) {
-            throw new Error(`Event type "${args.id}" not found`);
+            throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
+        }
+        await assertScheduleReference(ctx, args.scheduleId ?? undefined);
+        // The length rule applies to the merged configuration, and only when
+        // this update touches it.
+        if (args.lengthInMinutes !== undefined || args.lengthInMinutesOptions !== undefined) {
+            assertLengthInOptions(args.lengthInMinutes ?? eventType.lengthInMinutes, args.lengthInMinutesOptions ?? eventType.lengthInMinutesOptions);
         }
         // The arguments besides `id` are event_types columns (their types are
-        // checked here); only the ones given are patched.
+        // checked here); only the ones given are patched, and `null` becomes
+        // `undefined`, which removes the field.
         const { id: _id, ...fields } = args;
         const updates = fields;
         const filteredUpdates = { updatedAt: Date.now() };
         for (const [key, value] of Object.entries(updates)) {
             if (value !== undefined) {
-                Object.assign(filteredUpdates, { [key]: value });
+                Object.assign(filteredUpdates, { [key]: value ?? undefined });
             }
         }
         await ctx.db.patch(eventType._id, filteredUpdates);
@@ -854,7 +1044,7 @@ export const deleteEventType = mutation({
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
             .unique();
         if (!eventType) {
-            throw new Error(`Event type "${args.id}" not found`);
+            throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
         }
         // Check for existing bookings
         const bookings = await ctx.db
@@ -862,8 +1052,11 @@ export const deleteEventType = mutation({
             .withIndex("by_eventTypeId_and_start", (q) => q.eq("eventTypeId", args.id))
             .first();
         if (bookings) {
-            throw new Error("Cannot delete event type with existing bookings. Deactivate it instead.");
+            throwBookingError("EVENT_TYPE_IN_USE", "Cannot delete event type with existing bookings. Deactivate it instead.");
         }
+        // Its links go with it, so an event type created later with this id
+        // starts without resources instead of inheriting the old ones.
+        await deleteLinks(ctx, { eventTypeId: args.id });
         await ctx.db.delete(eventType._id);
         return { success: true };
     },
@@ -880,14 +1073,14 @@ export const toggleEventTypeActive = mutation({
             .withIndex("by_external_id", (q) => q.eq("id", args.id))
             .unique();
         if (!eventType) {
-            throw new Error(`Event type "${args.id}" not found`);
+            throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
         }
         // Check for active presence (final safety guard)
         const TIMEOUT_MS = 10_000;
         const now = Date.now();
         const presenceRecords = await ctx.db
             .query("presence")
-            .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.id))
+            .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.id))
             .collect();
         const activePresence = presenceRecords.filter((p) => now - p.updated <= TIMEOUT_MS);
         const uniqueUsers = [...new Set(activePresence.map((p) => p.user))];
@@ -933,7 +1126,7 @@ function bookingsInRange(ctx, args, order) {
     const bookings = ctx.db.query("bookings");
     if (organizationId) {
         return bookings
-            .withIndex("by_org_start", (q) => {
+            .withIndex("by_organizationId_and_start", (q) => {
             const byOrg = q.eq("organizationId", organizationId);
             const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
             return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -942,7 +1135,7 @@ function bookingsInRange(ctx, args, order) {
     }
     if (resourceId) {
         return bookings
-            .withIndex("by_resource_start", (q) => {
+            .withIndex("by_resourceId_and_start", (q) => {
             const byResource = q.eq("resourceId", resourceId);
             const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
             return dateTo !== undefined ? from.lte("start", dateTo) : from;
@@ -1011,15 +1204,17 @@ async function firstMatching(rows, args, limit, oldestFirstTies) {
  * unless `status` asks for them.
  *
  * Pass `organizationId`, `resourceId` or `eventTypeId` (tried in that order):
- * the branch reads the `by_org_start` / `by_resource_start` /
- * `by_eventTypeId_and_start` index, so `dateFrom` / `dateTo` narrow the index
- * range itself and the scan is proportional to the window. With a positive
- * integer `limit` the scan also stops once `limit` bookings match, so it reads
- * the limit plus the rows the other filters skip (for `eventTypeId`, plus the
- * rest of the bookings sharing the last one's `start`). Without a limit it
- * reads the whole range. Other `limit` values keep their earlier meaning (0: no
- * limit). Bookings with equal `start` come newest-created first, except in
- * the `eventTypeId` branch, where they come oldest-created first.
+ * the branch reads the `by_organizationId_and_start` /
+ * `by_resourceId_and_start` / `by_eventTypeId_and_start` index, so
+ * `dateFrom` / `dateTo` narrow the index range itself and the scan is
+ * proportional to the window. With a `limit` the scan also stops once `limit`
+ * bookings match, so it reads the limit plus the rows the other filters skip
+ * (for `eventTypeId`, plus the rest of the bookings sharing the last one's
+ * `start`). Without a limit it reads the whole range; listBookingsPage pages
+ * through a range instead. `limit` must be a positive integer (0.5.0;
+ * INVALID_INPUT otherwise, where 0.4.x read 0 as no limit). Bookings with
+ * equal `start` come newest-created first, except in the `eventTypeId`
+ * branch, where they come oldest-created first.
  *
  * `resourceId` matches a booking's primary resource: a bundle is listed under
  * its first resource only, not under its other items (pools included).
@@ -1036,7 +1231,7 @@ export const listBookings = query({
         organizationId: v.optional(v.string()),
         resourceId: v.optional(v.string()),
         eventTypeId: v.optional(v.string()),
-        status: v.optional(v.string()),
+        status: v.optional(bookingStatusValidator),
         dateFrom: v.optional(v.number()),
         dateTo: v.optional(v.number()),
         limit: v.optional(v.number()),
@@ -1044,10 +1239,13 @@ export const listBookings = query({
     returns: v.array(bookingDoc),
     handler: async (ctx, args) => {
         const { limit } = args;
+        if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) {
+            throwBookingError("INVALID_INPUT", `Invalid limit ${limit}: expected a positive integer`);
+        }
         // The eventTypeId branch used to read `by_event_type` (creation order) and
         // then sort by start, so its equal starts come oldest first.
         const oldestFirstTies = !args.organizationId && !args.resourceId && !!args.eventTypeId;
-        if (limit !== undefined && Number.isInteger(limit) && limit > 0) {
+        if (limit !== undefined) {
             const rows = bookingsInRange(ctx, args, "desc");
             if (rows)
                 return await firstMatching(rows, args, limit, oldestFirstTies);
@@ -1062,10 +1260,154 @@ export const listBookings = query({
         // branches (index order, stable sort keeps it); orders the other two.
         bookings.sort((a, b) => b.start - a.start);
         // Apply limit
-        if (limit) {
+        if (limit !== undefined) {
             bookings = bookings.slice(0, limit);
         }
         return bookings;
+    },
+});
+/**
+ * Rows one listBookingsPage call reads at most, the ones the status filter
+ * skips included (a lower `paginationOpts.maximumRowsRead` wins).
+ */
+const LIST_PAGE_MAX_ROWS_READ = 1000;
+const PAGE_SELECTORS = ["organizationId", "resourceId", "eventTypeId"];
+/** listBookingsPage's one selector; anything but exactly one non-empty id throws. */
+function pageSelector(args) {
+    const given = PAGE_SELECTORS.filter((field) => args[field] !== undefined);
+    const value = given.length === 1 ? args[given[0]] : undefined;
+    if (!value) {
+        throwBookingError("INVALID_INPUT", "listBookingsPage needs exactly one of organizationId, resourceId or eventTypeId");
+    }
+    return { field: given[0], value };
+}
+/**
+ * The selector's index range as a convex-helpers stream, newest `start`
+ * first (equal starts newest-created first: the index order).
+ */
+function bookingPageStream(ctx, { field, value }, args) {
+    const { dateFrom, dateTo } = args;
+    const bookings = stream(ctx.db, schema).query("bookings");
+    if (field === "organizationId") {
+        return bookings
+            .withIndex("by_organizationId_and_start", (q) => {
+            const byOrg = q.eq("organizationId", value);
+            const from = dateFrom !== undefined ? byOrg.gte("start", dateFrom) : byOrg;
+            return dateTo !== undefined ? from.lte("start", dateTo) : from;
+        })
+            .order("desc");
+    }
+    if (field === "resourceId") {
+        return bookings
+            .withIndex("by_resourceId_and_start", (q) => {
+            const byResource = q.eq("resourceId", value);
+            const from = dateFrom !== undefined ? byResource.gte("start", dateFrom) : byResource;
+            return dateTo !== undefined ? from.lte("start", dateTo) : from;
+        })
+            .order("desc");
+    }
+    return bookings
+        .withIndex("by_eventTypeId_and_start", (q) => {
+        const byEventType = q.eq("eventTypeId", value);
+        const from = dateFrom !== undefined ? byEventType.gte("start", dateFrom) : byEventType;
+        return dateTo !== undefined ? from.lte("start", dateTo) : from;
+    })
+        .order("desc");
+}
+/** convex-helpers' continueCursor after the last row: an empty index key. */
+const PAGE_END = "[]";
+/**
+ * A cursor listBookingsPage issued for this selector: the complete index key
+ * of a row ([selector id, start, _creationTime, _id], as convex-helpers
+ * serializes it) or "[]", the end. A cursor of another selector would bound
+ * the wrong range, so it is rejected instead of listing wrong rows.
+ */
+function assertPageCursor(cursor, selector) {
+    if (cursor === null || cursor === undefined)
+        return;
+    let key;
+    try {
+        key = jsonToConvex(JSON.parse(cursor));
+    }
+    catch {
+        key = null;
+    }
+    // convex-helpers prefixes "_" to a string that ends in "undefined".
+    const stored = selector.endsWith("undefined") ? `_${selector}` : selector;
+    const valid = Array.isArray(key) &&
+        (key.length === 0 ||
+            (key.length === 4 &&
+                key[0] === stored &&
+                typeof key[1] === "number" &&
+                typeof key[2] === "number" &&
+                typeof key[3] === "string"));
+    if (!valid)
+        throwBookingError("INVALID_INPUT", "Invalid listBookingsPage cursor");
+}
+/**
+ * Pages through the bookings of one organization, resource or event type
+ * (exactly one of `organizationId`, `resourceId`, `eventTypeId`), newest
+ * `start` first, bookings with equal `start` newest-created first.
+ * `dateFrom` / `dateTo` narrow `start` (inclusive), `status` keeps one
+ * status; without `status`, provisional holds are left out unless
+ * `includeProvisional`. As in listBookings, `resourceId` matches a booking's
+ * primary resource only, and bookings are returned whole, `managementToken`
+ * included.
+ *
+ * Built on the convex-helpers paginator (component functions cannot use
+ * `.paginate()`): `continueCursor` is the complete index key of the last row
+ * read, so bookings with equal `start` (and equal creation times) are neither
+ * skipped nor repeated across pages. A page reads at most 1,000 rows,
+ * filtered ones included (`paginationOpts.maximumRowsRead` may lower that),
+ * so with a status filter a page can hold fewer than `numItems` bookings, or
+ * none, while `isDone` is false: continue with `continueCursor`. For
+ * reactive paging from a host query, use `usePaginatedQuery` from
+ * `convex-helpers/react`, which passes `endCursor` and splits pages at
+ * `splitCursor`. `numItems` must be a positive integer; a cursor issued for
+ * another selector is rejected (INVALID_INPUT).
+ */
+export const listBookingsPage = query({
+    args: {
+        organizationId: v.optional(v.string()),
+        resourceId: v.optional(v.string()),
+        eventTypeId: v.optional(v.string()),
+        dateFrom: v.optional(v.number()),
+        dateTo: v.optional(v.number()),
+        status: v.optional(bookingStatusValidator),
+        includeProvisional: v.optional(v.boolean()),
+        paginationOpts: paginationOptsValidator,
+    },
+    returns: paginationResultValidator(bookingDoc),
+    handler: async (ctx, args) => {
+        const { paginationOpts: opts, status, includeProvisional } = args;
+        const selector = pageSelector(args);
+        if (!Number.isInteger(opts.numItems) || opts.numItems < 1) {
+            throwBookingError("INVALID_INPUT", `Invalid numItems ${opts.numItems}: expected a positive integer`);
+        }
+        if (opts.maximumRowsRead !== undefined && !(Number.isInteger(opts.maximumRowsRead) && opts.maximumRowsRead > 0)) {
+            throwBookingError("INVALID_INPUT", `Invalid maximumRowsRead ${opts.maximumRowsRead}: expected a positive integer`);
+        }
+        assertPageCursor(opts.cursor, selector.value);
+        assertPageCursor(opts.endCursor, selector.value);
+        // "[]" is the cursor after the last page. The helper reads it as no
+        // bound at all, so a caller that continued past isDone would get the
+        // whole range again; answer with the end instead.
+        if (opts.cursor === PAGE_END)
+            return { page: [], isDone: true, continueCursor: PAGE_END };
+        const range = bookingPageStream(ctx, selector, args);
+        const keep = status !== undefined
+            ? (booking) => booking.status === status
+            : includeProvisional
+                ? null
+                : (booking) => booking.status !== "provisional";
+        const rows = keep ? range.filterWith(async (booking) => keep(booking)) : range;
+        return await rows.paginate({
+            numItems: opts.numItems,
+            cursor: opts.cursor,
+            endCursor: opts.endCursor,
+            maximumRowsRead: Math.min(opts.maximumRowsRead ?? LIST_PAGE_MAX_ROWS_READ, LIST_PAGE_MAX_ROWS_READ),
+            maximumBytesRead: opts.maximumBytesRead,
+        });
     },
 });
 // ============================================
@@ -1080,10 +1422,10 @@ export const getBookingByToken = query({
             .withIndex("by_uid", (q) => q.eq("uid", args.uid))
             .unique();
         if (!booking) {
-            throw new Error("Booking not found");
+            throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
         }
         if (booking.managementToken !== args.token) {
-            throw new Error("Invalid token");
+            throwBookingError("INVALID_TOKEN", "Invalid token");
         }
         return booking;
     }
@@ -1103,18 +1445,21 @@ export const cancelBookingByToken = mutation({
             .withIndex("by_uid", (q) => q.eq("uid", args.uid))
             .unique();
         if (!booking) {
-            throw new Error("Booking not found");
+            throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
         }
         if (booking.managementToken !== args.token) {
-            throw new Error("Invalid token");
+            throwBookingError("INVALID_TOKEN", "Invalid token");
         }
         // 2. Check if booking can be cancelled (not already cancelled/completed/declined)
         if (!holdsActiveInventory(booking.status)) {
-            throw new Error(`Cannot cancel booking with status: ${booking.status}`);
+            throwBookingError("INVALID_STATE", `Cannot cancel booking with status: ${booking.status}`);
         }
         const reason = args.reason || "Cancelled by booker";
-        // 3–5. Release every item (pooled add-ons and legacy bookings included),
-        // record history and stamp the cancellation.
+        // 3–5. Notify the event type's organization when the booking's resources
+        // agree, else the stored one (withEventTypeOrganization); release every
+        // item (pooled add-ons and legacy bookings included), record history and
+        // stamp the cancellation.
+        const notified = await withEventTypeOrganization(ctx, booking);
         await terminateBooking(ctx, booking, {
             to: "cancelled",
             reason,
@@ -1124,11 +1469,11 @@ export const cancelBookingByToken = mutation({
         // 6. Trigger booking.cancelled hook
         await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
             eventType: "booking.cancelled",
-            emailContext: createBookingEmailContext("cancelled", booking, args.resendOptions, { reason }),
-            organizationId: booking.organizationId,
+            emailContext: createBookingEmailContext("cancelled", notified, args.resendOptions, { reason }),
+            organizationId: notified.organizationId,
             payload: {
                 bookingId: booking._id,
-                booking: { ...booking, status: "cancelled" },
+                booking: { ...notified, status: "cancelled" },
                 previousStatus: booking.status,
                 reason,
                 bookerEmail: booking.bookerEmail,
@@ -1138,6 +1483,11 @@ export const cancelBookingByToken = mutation({
                 end: booking.end,
                 timezone: booking.timezone,
             },
+            payloadV2: await buildHookEventV2(ctx, "booking.cancelled", booking._id, {
+                previousStatus: booking.status,
+                reason,
+                changedBy: "user",
+            }),
             resendOptions: args.resendOptions,
         });
         return { success: true };
@@ -1147,10 +1497,10 @@ export const cancelBookingByToken = mutation({
 async function moveBooking(ctx, original, args) {
     assertValidRange(args.newStart, args.newEnd);
     if (!["pending", "confirmed"].includes(original.status)) {
-        throw new Error(`Cannot reschedule booking with status: ${original.status}`);
+        throwBookingError("INVALID_STATE", `Cannot reschedule booking with status: ${original.status}`);
     }
     const items = await ctx.db.query("booking_items")
-        .withIndex("by_booking", q => q.eq("bookingId", original._id)).collect();
+        .withIndex("by_bookingId", q => q.eq("bookingId", original._id)).collect();
     const resources = items.length > 0
         ? items.map(item => ({ resourceId: item.resourceId, quantity: item.quantity }))
         : [{ resourceId: original.resourceId, quantity: 1 }];
@@ -1158,6 +1508,17 @@ async function moveBooking(ctx, original, args) {
     // reinterpret it after a host has changed the resource into a pool.
     if (items.length === 0)
         await assertSingleResourceSupported(ctx, original.resourceId);
+    // The destination follows the current booking rules, for every item, before
+    // anything is released: a move after deactivation, unlinking or a change of
+    // organization is rejected, by token and by id alike (no admin override).
+    await assertStillBookable(ctx, original, items);
+    // The new row belongs to its event type's organization, as a new booking
+    // does: a missing or different organization stored before 0.5.0 is not
+    // carried over (the rules above passed, so the resources corroborate it,
+    // see withEventTypeOrganization), and the cancelled original is given it
+    // too. Legacy rows and event types without organization keep the stored
+    // one.
+    const { organizationId } = await withEventTypeOrganization(ctx, original);
     // The original ends first: read-your-writes lets overlapping moves reuse
     // only its inventory. Any destination conflict aborts this mutation and
     // restores the original with ALL its items.
@@ -1170,7 +1531,7 @@ async function moveBooking(ctx, original, args) {
     const newBookingId = await ctx.db.insert("bookings", {
         uid: newUid,
         resourceId: original.resourceId,
-        organizationId: original.organizationId,
+        organizationId,
         eventTypeId: original.eventTypeId,
         eventTitle: original.eventTitle,
         eventDescription: original.eventDescription,
@@ -1217,7 +1578,7 @@ async function moveBooking(ctx, original, args) {
             previousEnd: original.end,
             reason: args.reason,
         }),
-        organizationId: original.organizationId,
+        organizationId,
         payload: {
             originalBookingId: original._id,
             newBookingId,
@@ -1234,6 +1595,11 @@ async function moveBooking(ctx, original, args) {
             resources,
             isMultiResource: items.length > 0,
         },
+        payloadV2: await buildHookEventV2(ctx, "booking.rescheduled", newBookingId, {
+            reason,
+            changedBy,
+            original,
+        }),
         resendOptions: args.resendOptions,
     });
     return booking;
@@ -1252,7 +1618,7 @@ export const rescheduleBooking = mutation({
         assertValidRange(args.newStart, args.newEnd);
         const booking = await ctx.db.get(args.bookingId);
         if (!booking)
-            throw new Error("Booking not found");
+            throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
         return await moveBooking(ctx, booking, args);
     },
 });
@@ -1270,9 +1636,9 @@ export const rescheduleBookingByToken = mutation({
         const booking = await ctx.db.query("bookings")
             .withIndex("by_uid", q => q.eq("uid", args.uid)).unique();
         if (!booking)
-            throw new Error("Booking not found");
+            throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
         if (booking.managementToken !== args.token)
-            throw new Error("Invalid token");
+            throwBookingError("INVALID_TOKEN", "Invalid token");
         return await moveBooking(ctx, booking, args);
     },
 });

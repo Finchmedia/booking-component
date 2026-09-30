@@ -5,7 +5,15 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { FunctionHandle, WithoutSystemFields } from "convex/server";
 import type { Doc } from "./_generated/dataModel";
-import { terminateBooking } from "./booking_lifecycle";
+import {
+  assertStillBookable,
+  buildHookEventV2,
+  terminateBooking,
+  withEventTypeOrganization,
+} from "./booking_lifecycle";
+import { throwBookingError } from "../shared/booking-errors.js";
+import { bookingStatusValidator, type BookingStatus } from "../shared/booking-status.js";
+import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 import {
   bookingHistoryDoc,
   hookDoc,
@@ -41,7 +49,8 @@ function isFunctionHandle(value: string): boolean {
 
 function assertFunctionHandle(value: string): void {
   if (!isFunctionHandle(value)) {
-    throw new Error(
+    throwBookingError(
+      "INVALID_INPUT",
       `Invalid hook functionHandle "${value}": expected a function handle from createFunctionHandle`
     );
   }
@@ -67,7 +76,7 @@ export const listHooks = query({
     let hooks = eventType
       ? await ctx.db
           .query("hooks")
-          .withIndex("by_event", (q) => q.eq("eventType", eventType))
+          .withIndex("by_eventType_and_enabled", (q) => q.eq("eventType", eventType))
           .collect()
       : await ctx.db.query("hooks").collect();
 
@@ -79,9 +88,9 @@ export const listHooks = query({
       );
     }
 
-    // `by_event` is [eventType, enabled], so the prefix scan above comes back
-    // grouped by `enabled` (disabled first), not by creation time. Pin the
-    // order so both branches agree; the hooks table is tiny.
+    // `by_eventType_and_enabled` is [eventType, enabled], so the prefix scan
+    // above comes back grouped by `enabled` (disabled first), not by creation
+    // time. Pin the order so both branches agree; the hooks table is tiny.
     hooks.sort((a, b) => a._creationTime - b._creationTime);
 
     return hooks;
@@ -103,20 +112,28 @@ export const getHook = query({
 /**
  * Registers a host function, given as a handle from `createFunctionHandle`,
  * for one lifecycle event (organization-scoped or global). The handle runs
- * with every matching payload, management token and booker details included,
- * so keep registration server-side and administrator-only.
+ * with every matching payload, booker details included, so keep
+ * registration server-side and administrator-only.
+ *
+ * `payloadVersion` selects the payload the handle receives as its args:
+ * - omitted: version 1, whose shape depends on the emitting function and
+ *   which mostly carries the management token (docs/hook-payloads-v1.md);
+ * - 2: one envelope per event name, `bookingHookEventV2`, without the token
+ *   (docs/hook-payloads-v2.md).
  */
 export const registerHook = mutation({
   args: {
     eventType: v.string(),
     functionHandle: v.string(),
     organizationId: v.optional(v.string()),
+    payloadVersion: v.optional(v.literal(2)),
   },
   returns: v.id("hooks"),
   handler: async (ctx, args) => {
     // Validate event type
     if (!HOOK_EVENTS.includes(args.eventType as HookEventType)) {
-      throw new Error(
+      throwBookingError(
+        "INVALID_INPUT",
         `Invalid hook event type: ${args.eventType}. Valid types: ${HOOK_EVENTS.join(", ")}`
       );
     }
@@ -128,6 +145,7 @@ export const registerHook = mutation({
       organizationId: args.organizationId,
       enabled: true,
       createdAt: Date.now(),
+      payloadVersion: args.payloadVersion,
     });
   },
 });
@@ -145,7 +163,7 @@ export const updateHook = mutation({
     }
     const hook = await ctx.db.get(args.hookId);
     if (!hook) {
-      throw new Error("Hook not found");
+      throwBookingError("HOOK_NOT_FOUND", "Hook not found");
     }
 
     const updates: Partial<WithoutSystemFields<Doc<"hooks">>> = {};
@@ -164,7 +182,7 @@ export const unregisterHook = mutation({
   handler: async (ctx, args) => {
     const hook = await ctx.db.get(args.hookId);
     if (!hook) {
-      throw new Error("Hook not found");
+      throwBookingError("HOOK_NOT_FOUND", "Hook not found");
     }
 
     await ctx.db.delete(args.hookId);
@@ -180,10 +198,16 @@ export const triggerHooks = internalMutation({
   args: {
     eventType: v.string(),
     organizationId: v.optional(v.string()),
+    // Version 1 payload, the emitter's own shape (frozen, see hook-payloads-v1.test.ts)
     payload: v.any(),
     emailContext: v.optional(bookingEmailContextValidator),
     // Resend config passed from main app (components can't access process.env)
     resendOptions: v.optional(bookingEmailOptionsValidator),
+    // Version 2 payload (bookingHookEventV2, built by buildHookEventV2). Jobs
+    // queued before 0.5.0 lack it; their version 2 hooks are skipped. Kept
+    // v.any() so a payload problem can only fail the version 2 handler, never
+    // the emails and version 1 hooks of the event.
+    payloadV2: v.optional(v.any()),
   },
   // Only ever scheduled, and scheduled jobs keep no result: nothing to report.
   returns: v.null(),
@@ -339,7 +363,7 @@ export const triggerHooks = internalMutation({
     // ========================================
     const allHooks = await ctx.db
       .query("hooks")
-      .withIndex("by_event", (q) =>
+      .withIndex("by_eventType_and_enabled", (q) =>
         q.eq("eventType", args.eventType).eq("enabled", true)
       )
       .collect();
@@ -361,9 +385,18 @@ export const triggerHooks = internalMutation({
         console.error(`Skipped hook ${hook._id}: functionHandle is not a function handle`);
         continue;
       }
+      // Each registration gets the payload version it registered for.
+      let payload: unknown = args.payload;
+      if (hook.payloadVersion === 2) {
+        if (args.payloadV2 === undefined) {
+          console.warn(`Skipped hook ${hook._id}: this ${args.eventType} event was queued without a version 2 payload`);
+          continue;
+        }
+        payload = args.payloadV2;
+      }
       try {
         const handle = hook.functionHandle as FunctionHandle<"mutation">;
-        await ctx.scheduler.runAfter(0, handle, args.payload);
+        await ctx.scheduler.runAfter(0, handle, payload as Record<string, unknown>);
       } catch (error) {
         // Log error but don't fail the main operation
         console.error(`Failed to trigger hook ${hook._id}:`, error);
@@ -378,7 +411,7 @@ export const triggerHooks = internalMutation({
 // BOOKING STATE TRANSITIONS
 // ============================================
 
-const STATE_TRANSITIONS: Record<string, string[]> = {
+const STATE_TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
   provisional: ["pending", "confirmed", "cancelled"],
   pending: ["confirmed", "cancelled", "declined"],
   confirmed: ["cancelled", "completed"],
@@ -390,7 +423,7 @@ const STATE_TRANSITIONS: Record<string, string[]> = {
 export const transitionBookingState = mutation({
   args: {
     bookingId: v.id("bookings"),
-    toStatus: v.string(),
+    toStatus: bookingStatusValidator,
     reason: v.optional(v.string()),
     changedBy: v.optional(v.string()),
     // Resend config passed from main app (components can't access process.env)
@@ -400,17 +433,38 @@ export const transitionBookingState = mutation({
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) {
-      throw new Error("Booking not found");
+      throwBookingError("BOOKING_NOT_FOUND", "Booking not found");
     }
 
     const currentStatus = booking.status;
-    const allowedTransitions = STATE_TRANSITIONS[currentStatus] ?? [];
+    const allowedTransitions = STATE_TRANSITIONS[currentStatus];
 
     if (!allowedTransitions.includes(args.toStatus)) {
-      throw new Error(
+      throwBookingError(
+        "INVALID_STATE",
         `Invalid state transition: ${currentStatus} -> ${args.toStatus}. Allowed: ${allowedTransitions.join(", ") || "none"}`
       );
     }
+
+    // Completing a hold or a request follows the current booking rules:
+    // confirming a provisional hold or approving a pending request, and
+    // submitting a provisional hold as a request (provisional -> pending,
+    // which tells the booker it awaits approval). After deactivation,
+    // unlinking or a change of organization they are rejected. Cancelling,
+    // declining and completing never are.
+    if (args.toStatus === "confirmed" || args.toStatus === "pending") {
+      const items = await ctx.db
+        .query("booking_items")
+        .withIndex("by_bookingId", (q) => q.eq("bookingId", booking._id))
+        .collect();
+      await assertStillBookable(ctx, booking, items);
+    }
+    // Every transition notifies the organization withEventTypeOrganization
+    // resolves: the event type's, given to a booking stored before 0.5.0
+    // with another one or none when all its resources belong to it, else
+    // the stored one.
+    const notified = await withEventTypeOrganization(ctx, booking);
+    const organizationId = notified.organizationId;
 
     const now = Date.now();
 
@@ -458,12 +512,12 @@ export const transitionBookingState = mutation({
       await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
         eventType: hookEventType,
         emailContext: emailKind
-          ? createBookingEmailContext(emailKind, booking, args.resendOptions, { reason: args.reason })
+          ? createBookingEmailContext(emailKind, notified, args.resendOptions, { reason: args.reason })
           : undefined,
-        organizationId: booking.organizationId,
+        organizationId,
         payload: {
           bookingId: args.bookingId,
-          booking: { ...booking, status: args.toStatus },
+          booking: { ...notified, status: args.toStatus },
           previousStatus: currentStatus,
           reason: args.reason,
           // Fields needed for email templates
@@ -476,6 +530,13 @@ export const transitionBookingState = mutation({
           uid: booking.uid,
           managementToken: booking.managementToken,
         },
+        // booking.<toStatus> of an allowed transition: pending, confirmed,
+        // cancelled, completed or declined.
+        payloadV2: await buildHookEventV2(ctx, hookEventType as BookingHookEventV2["event"], args.bookingId, {
+          previousStatus: currentStatus,
+          reason: args.reason,
+          changedBy: args.changedBy,
+        }),
         resendOptions: args.resendOptions,
       });
     }
@@ -494,7 +555,7 @@ export const getBookingHistory = query({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("booking_history")
-      .withIndex("by_booking", (q) => q.eq("bookingId", args.bookingId))
+      .withIndex("by_bookingId", (q) => q.eq("bookingId", args.bookingId))
       .collect();
   },
 });

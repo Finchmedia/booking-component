@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { api } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
+import type { BookingStatus } from "../shared/booking-status.js";
 import {
   BOOKER,
   FIXED_NOW,
@@ -61,7 +62,7 @@ const history = (bookingId: Id<"bookings">) =>
 
 const transition = (
   bookingId: Id<"bookings">,
-  toStatus: string,
+  toStatus: BookingStatus,
   extra: { reason?: string; changedBy?: string } = {}
 ) => t.mutation(api.hooks.transitionBookingState, { bookingId, toStatus, ...extra });
 
@@ -89,7 +90,7 @@ function slotQuantities(
   return t.run(async (ctx) => {
     const doc = await ctx.db
       .query("quantity_availability")
-      .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
+      .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
       .unique();
     return doc ? ((doc.slotQuantities ?? {}) as Record<string, number>) : null;
   });
@@ -269,9 +270,11 @@ describe("transitionBookingState: guard", () => {
     await expect(transition(booking!._id, "completed")).rejects.toThrow(
       `Invalid state transition: pending -> completed. ${pendingAllowed}`
     );
-    // A status outside the machine entirely, and a no-op transition.
-    await expect(transition(booking!._id, "archived")).rejects.toThrow(
-      `Invalid state transition: pending -> archived. ${pendingAllowed}`
+    // A status outside BOOKING_STATUSES fails argument validation (0.5.0;
+    // 0.4.x answered "Invalid state transition: pending -> archived"), and a
+    // no-op transition.
+    await expect(transition(booking!._id, "archived" as BookingStatus)).rejects.toThrow(
+      'Validator error: Expected one of literal, literal, literal, literal, literal, literal, got `"archived"`'
     );
     await expect(transition(booking!._id, "pending")).rejects.toThrow(
       `Invalid state transition: pending -> pending. ${pendingAllowed}`
@@ -396,7 +399,7 @@ describe("transitionBookingState: guard", () => {
     await t.run(async (ctx) => {
       const row = await ctx.db
         .query("daily_availability")
-        .withIndex("by_resource_date", (q) => q.eq("resourceId", RESOURCE).eq("date", DAY))
+        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", RESOURCE).eq("date", DAY))
         .unique();
       await ctx.db.delete(row!._id);
     });
@@ -527,7 +530,7 @@ describe("transitionBookingState: multi-resource release", () => {
     await t.run(async (ctx) => {
       const doc = await ctx.db
         .query("quantity_availability")
-        .withIndex("by_resource_date", (q) => q.eq("resourceId", POOL).eq("date", DAY))
+        .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", POOL).eq("date", DAY))
         .unique();
       await ctx.db.patch(doc!._id, { slotQuantities: { "36": 1 } });
     });

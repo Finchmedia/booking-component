@@ -9,7 +9,7 @@
   "bugs": {
     "url": "https://github.com/Finchmedia/booking-component/issues"
   },
-  "version": "0.4.3",
+  "version": "0.5.0",
   "license": "Apache-2.0",
   "keywords": [
     "convex",
@@ -87,9 +87,6 @@
   },
   "peerDependenciesMeta": {
     "@hookform/resolvers": {
-      "optional": true
-    },
-    "convex-helpers": {
       "optional": true
     },
     "lucide-react": {

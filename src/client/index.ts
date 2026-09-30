@@ -1,7 +1,8 @@
 import { bookingEmailOptionsValidator } from "../emails.js";
-import { internalQueryGeneric, internalMutationGeneric } from "convex/server";
+import { internalQueryGeneric, internalMutationGeneric, paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
+import { bookingStatusValidator } from "../shared/booking-status.js";
 
 // The durations and slot grid the Booker and Calendar use, for host guards
 export {
@@ -9,6 +10,26 @@ export {
   effectiveSlotInterval,
   type EventTypeDurations,
 } from "../shared/durations.js";
+
+// The payload of hooks registered with payloadVersion: 2
+export { bookingHookEventV2, type BookingHookEventV2 } from "../shared/hook-events-v2.js";
+
+// Every value of a booking's `status`
+export {
+  BOOKING_STATUSES,
+  bookingStatusValidator,
+  isBookingStatus,
+  type BookingStatus,
+} from "../shared/booking-status.js";
+
+// The codes of the component's ConvexError({ code, message }) rejections
+export {
+  BOOKING_ERROR_CODES,
+  isBookingError,
+  isBookingErrorCode,
+  type BookingErrorCode,
+  type BookingErrorData,
+} from "../shared/booking-errors.js";
 
 /**
  * Creates server-only helpers for the booking component.
@@ -90,7 +111,8 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         lengthInMinutes: v.optional(v.number()),
         lengthInMinutesOptions: v.optional(v.array(v.number())),
         slotInterval: v.optional(v.number()),
-        description: v.optional(v.string()),
+        // null clears the field; omitted keeps it
+        description: v.optional(v.union(v.null(), v.string())),
         timezone: v.optional(v.string()),
         lockTimeZoneToggle: v.optional(v.boolean()),
         locations: v.optional(
@@ -102,11 +124,11 @@ export function makeInternalBookingAPI(component: ComponentApi) {
             })
           )
         ),
-        scheduleId: v.optional(v.string()),
-        bufferBefore: v.optional(v.number()),
-        bufferAfter: v.optional(v.number()),
-        minNoticeMinutes: v.optional(v.number()),
-        maxFutureMinutes: v.optional(v.number()),
+        scheduleId: v.optional(v.union(v.null(), v.string())),
+        bufferBefore: v.optional(v.union(v.null(), v.number())),
+        bufferAfter: v.optional(v.union(v.null(), v.number())),
+        minNoticeMinutes: v.optional(v.union(v.null(), v.number())),
+        maxFutureMinutes: v.optional(v.union(v.null(), v.number())),
         requiresConfirmation: v.optional(v.boolean()),
         isActive: v.optional(v.boolean()),
       },
@@ -153,6 +175,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         resourceTimezone: v.optional(v.string()),
         scheduleId: v.optional(v.string()),
         excludeBookingUid: v.optional(v.string()),
+        rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() })),
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getMonthAvailability, args);
@@ -169,6 +192,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         availableSlots: v.optional(v.array(v.number())),
         excludeBookingUid: v.optional(v.string()),
         scheduleId: v.optional(v.string()),
+        rescheduleContext: v.optional(v.object({ uid: v.string(), token: v.string() })),
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.getDaySlots, args);
@@ -258,7 +282,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       args: {
         organizationId: v.optional(v.string()),
         resourceId: v.optional(v.string()),
-        status: v.optional(v.string()),
+        status: v.optional(bookingStatusValidator),
         dateFrom: v.optional(v.number()),
         dateTo: v.optional(v.number()),
         eventTypeId: v.optional(v.string()),
@@ -266,6 +290,23 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       },
       handler: async (ctx, args) => {
         return await ctx.runQuery(component.public.listBookings, args);
+      },
+    }),
+
+    // Cursor pages of one organization's, resource's or event type's bookings.
+    listBookingsPage: internalQueryGeneric({
+      args: {
+        organizationId: v.optional(v.string()),
+        resourceId: v.optional(v.string()),
+        eventTypeId: v.optional(v.string()),
+        dateFrom: v.optional(v.number()),
+        dateTo: v.optional(v.number()),
+        status: v.optional(bookingStatusValidator),
+        includeProvisional: v.optional(v.boolean()),
+        paginationOpts: paginationOptsValidator,
+      },
+      handler: async (ctx, args) => {
+        return await ctx.runQuery(component.public.listBookingsPage, args);
       },
     }),
 
@@ -551,7 +592,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
       args: {
         scheduleId: v.string(),
         date: v.string(),
-        type: v.string(),
+        type: v.union(v.literal("unavailable"), v.literal("custom")),
         customHours: v.optional(
           v.array(
             v.object({
@@ -665,6 +706,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         eventType: v.string(),
         functionHandle: v.string(),
         organizationId: v.optional(v.string()),
+        payloadVersion: v.optional(v.literal(2)),
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.hooks.registerHook, args);
@@ -683,7 +725,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
     transitionBookingState: internalMutationGeneric({
       args: {
         bookingId: v.string(),
-        toStatus: v.string(),
+        toStatus: bookingStatusValidator,
         reason: v.optional(v.string()),
         changedBy: v.optional(v.string()),
         resendOptions: v.optional(bookingEmailOptionsValidator),
@@ -808,7 +850,18 @@ export function makeInternalBookingAPI(component: ComponentApi) {
     // Read-only upgrade audit of stored rows; see CHANGELOG.
     audit: internalQueryGeneric({
       args: {
-        check: v.union(v.literal("f10_weekday"), v.literal("event_length_invalid")),
+        check: v.union(
+          v.literal("f10_weekday"),
+          v.literal("event_length_invalid"),
+          v.literal("event_type_config"),
+          v.literal("schedule_config"),
+          v.literal("resource_config"),
+          v.literal("date_override_config"),
+          v.literal("link_integrity"),
+          v.literal("booking_integrity"),
+          v.literal("booking_eligibility"),
+          v.literal("booking_status_invalid"),
+        ),
         cursor: v.optional(v.union(v.string(), v.null())),
         limit: v.number(),
       },

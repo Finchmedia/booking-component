@@ -1,4 +1,4 @@
-import type { EventType, Resource } from "../types.js";
+import type { EventTypeView, ResourceView } from "../contract.js";
 export type ValidationErrorType = "event_deleted" | "event_deactivated" | "resource_deleted" | "resource_deactivated" | "duration_invalid" | "resource_unlinked";
 /**
  * What the user can do next. Hosts map it to their own routes:
@@ -38,5 +38,5 @@ export declare function eventDeletedError(resourceId: string): ValidationError;
  * @param resourceId - Resource ID for the deprecated recoveryPath
  * @returns Validation result with status and optional error
  */
-export declare function useBookingValidation(eventType: EventType | null | undefined, resource: Resource | null | undefined, hasLink: boolean | null | undefined, selectedDuration: number, resourceId: string): ValidationResult;
+export declare function useBookingValidation(eventType: EventTypeView | null | undefined, resource: ResourceView | null | undefined, hasLink: boolean | null | undefined, selectedDuration: number, resourceId: string): ValidationResult;
 //# sourceMappingURL=use-booking-validation.d.ts.map

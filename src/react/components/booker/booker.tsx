@@ -15,13 +15,8 @@ import { BookingForm, type CurrentUser } from "../form/booking-form.js";
 import { BookingSuccess } from "../form/booking-success.js";
 import { BookingErrorDialog } from "./booking-error-dialog.js";
 import { getRecoveryAction } from "./recovery.js";
-import type {
-  BookingStep,
-  BookingFormData,
-  Booking,
-  EventType,
-  Resource,
-} from "../../types.js";
+import type { BookingStep, BookingFormData, Booking } from "../../types.js";
+import type { BookingView, EventTypeView } from "../../contract.js";
 
 type BookingPhase = "create" | "reschedule";
 
@@ -46,10 +41,12 @@ export interface BookerProps {
   /** Current logged-in user for prefilling name/email in the form */
   currentUser?: CurrentUser;
   /**
-   * Callback when booking is successfully created. An error it throws is
-   * logged; the booking is not reported as failed.
+   * Callback when a booking is created or moved. Receives the result of your
+   * createBooking or rescheduleBookingByToken function, typed as the fields
+   * the contract requires (`BookingView`). An error it throws is logged; the
+   * booking is not reported as failed.
    */
-  onBookingComplete?: (booking: Booking) => void;
+  onBookingComplete?: (booking: BookingView) => void;
   /**
    * Callback to reset event type selection (for embedded Booker). Used when the
    * event type is deleted or deactivated or the resource is unlinked.
@@ -76,6 +73,9 @@ export interface BookerProps {
   /**
    * Reschedule mode: Provide the original booking to modify
    * When present, the Booker will call rescheduleBookingByToken instead of createBooking
+   * With BookingProvider's `availabilityContext` on, its `uid` and
+   * `managementToken` also go to getDaySlots and getMonthAvailability as
+   * `rescheduleContext`, so times overlapping it can be offered.
    */
   originalBooking?: Booking;
   /**
@@ -92,14 +92,14 @@ export interface BookerProps {
  * The first configured location's address, never an invented one. The type is
  * "address" as before; without a configured address there is no value.
  */
-function bookingLocation(locations: EventType["locations"]): { type: string; value?: string } {
+function bookingLocation(locations: EventTypeView["locations"]): { type: string; value?: string } {
   const address = locations?.[0]?.address;
   return address ? { type: "address", value: address } : { type: "address" };
 }
 
 /** A completed submission and what its success screen shows, fixed when it completed. */
 interface Completion {
-  booking: Booking;
+  booking: BookingView;
   eventType: { title: string; description?: string; lengthInMinutes: number };
   isRescheduling: boolean;
   timeFormat: "12h" | "24h";
@@ -194,6 +194,11 @@ function BookerFlow({
 
   // Detect reschedule mode
   const isRescheduling = !!originalBooking;
+  // The booking being moved, for slot queries that exclude its own occupancy.
+  // Sent only with the provider's availabilityContext opt-in.
+  const rescheduleContext = originalBooking?.managementToken
+    ? { uid: originalBooking.uid, token: originalBooking.managementToken }
+    : undefined;
 
   // Step state
   const [bookingStep, setBookingStep] = useState<BookingStep>("event-meta");
@@ -220,9 +225,10 @@ function BookerFlow({
 
   // Mutations
   const createBooking = useMutation(api.createBooking);
-  // Reschedule mutation (for token-based public reschedule). useMutation needs a
-  // reference on every render, so a hand-built API without the reschedule
-  // reference stays bound to createBooking; reschedule paths check it instead.
+  // Reschedule mutation (for token-based public reschedule). The contract
+  // requires it, but an untyped hand-built API can lack it at runtime. useMutation
+  // needs a reference on every render, so it then stays bound to createBooking;
+  // reschedule paths check it instead.
   const rescheduleBookingByToken = useMutation(
     api.rescheduleBookingByToken ?? api.createBooking
   );
@@ -249,18 +255,12 @@ function BookerFlow({
   }
 
   // Fetch event type, resource, and link state from DB
-  const eventType = useQuery(api.getEventType, { eventTypeId }) as
-    | EventType
-    | null
-    | undefined;
-  const resource = useQuery(api.getResource, { id: resourceId }) as
-    | Resource
-    | null
-    | undefined;
+  const eventType = useQuery(api.getEventType, { eventTypeId });
+  const resource = useQuery(api.getResource, { id: resourceId });
   const hasLink = useQuery(api.hasResourceEventTypeLink, {
     resourceId,
     eventTypeId,
-  }) as boolean | null | undefined;
+  });
 
   // Derive a valid default as event data arrives; no effect/state round-trip.
   // Preserve the original duration in reschedule mode for validation to report.
@@ -311,12 +311,13 @@ function BookerFlow({
   // this flow being replaced meanwhile and keeps the event type it was made for
   // even if that later resolves to null. Host callbacks run after the mutation,
   // outside its error handling, for every booking made, shown or not.
-  const completeBooking = (submission: number, result: unknown) => {
-    const booking = result as Booking;
+  const completeBooking = (submission: number, booking: BookingView) => {
     onCompletion(submission, {
       booking,
       eventType: {
-        title: eventType?.title ?? booking.eventTitle,
+        // A host may leave eventTitle out of its result (BookingView); a move
+        // keeps the original's title
+        title: eventType?.title ?? booking.eventTitle ?? originalBooking?.eventTitle ?? "",
         description: eventType?.description,
         lengthInMinutes: selectedDuration,
       },
@@ -351,7 +352,7 @@ function BookerFlow({
     setIsSubmitting(true);
     const submission = onSubmissionStart();
 
-    let newBooking;
+    let newBooking: BookingView;
     try {
       const newStart = new Date(newSlot).getTime();
       const newEnd = newStart + selectedDuration * 60 * 1000;
@@ -409,7 +410,7 @@ function BookerFlow({
     setBookingError(null);
     const submission = onSubmissionStart();
 
-    let booking;
+    let booking: BookingView;
     try {
       const start = new Date(selectedSlot).getTime();
       const end = start + selectedDuration * 60 * 1000;
@@ -573,6 +574,7 @@ function BookerFlow({
               timeFormat={timeFormat}
               onTimeFormatChange={setTimeFormat}
               disabled={isSubmitting}
+              rescheduleContext={rescheduleContext}
             />
           )}
 

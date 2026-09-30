@@ -2,13 +2,14 @@
 /**
  * maintenance.backfillBookingOrganizations (F7 repair, PR-28).
  *
- * Bundles created by 0.4.2 and earlier without `organizationId` stored none,
- * and no other function can set a booking's organization. The backfill fills
- * it from the event type only when every resource the booking occupies exists
- * and belongs to that organization too: an event type can move to another
- * organization later, and that organization must not receive older bookings
- * (booker details, management token) through its booking list. It skips
- * legacy rows, lists the rows it cannot assign in `needsReview` with a
+ * Bundles created by 0.4.2 and earlier without `organizationId` stored none.
+ * Since 0.5.0 a booking takes its event type's organization when it is
+ * moved, transitioned or cancelled; for the untouched ones the backfill fills
+ * it from the event type only when every resource the booking occupies
+ * exists and belongs to that organization too: an event type can move to
+ * another organization later, and that organization must not receive older
+ * bookings (booker details, management token) through its booking list. It
+ * skips legacy rows, lists the rows it cannot assign in `needsReview` with a
  * reason, and reports (never rewrites) rows whose organization differs from
  * their event type's. The cursor is the complete by_creation_time key, as in
  * maintenance.audit.
@@ -74,9 +75,10 @@ function bundle(t: T, eventTypeId: string, h: number, organizationId?: string) {
 }
 
 /**
- * One row per case on res-1 (org-1): complete, missing (bundle and a moved
- * single booking, whose successor copied the gap), foreign, legacy, deleted
- * event type and event type without organization.
+ * One row per case on res-1 (org-1): complete, missing (a bundle), a moved
+ * single booking stored without organization (since 0.5.0 the move gives
+ * the original and its successor the event type's organization), foreign,
+ * legacy, deleted event type and event type without organization.
  */
 async function seedMixed(t: T) {
   const seed = await seedResource(t);
@@ -87,6 +89,10 @@ async function seedMixed(t: T) {
   await t.mutation(api.public.createEventType, {
     id: "et-gone", slug: "et-gone", title: "Deleted", lengthInMinutes: 60,
     timezone: "UTC", lockTimeZoneToggle: false, locations: [], organizationId: ORG,
+  });
+  // Bundle items are linked to their event type (required since 0.5.0).
+  await t.mutation(api.resource_event_types.setEventTypesForResource, {
+    resourceId: seed.resourceId, eventTypeIds: [seed.eventTypeId, "et-no-org", "et-gone"],
   });
 
   const complete = await book(t, seed, hour(6), hour(7));
@@ -99,7 +105,9 @@ async function seedMixed(t: T) {
     newStart: hour(9),
     newEnd: hour(10),
   });
-  const foreign = await bundle(t, seed.eventTypeId, 10, "org-2");
+  // A foreign organization as 0.4.x stored it (rejected at creation since 0.5.0).
+  const foreign = await bundle(t, seed.eventTypeId, 10);
+  await t.run((ctx) => ctx.db.patch(foreign._id, { organizationId: "org-2" }));
   const legacyId = await t.mutation(api.public.createReservation, {
     resourceId: seed.resourceId, actorId: "ops@example.com", start: hour(11), end: hour(12),
   });
@@ -120,8 +128,8 @@ async function seedMixed(t: T) {
   expect(await organizations(t)).toEqual({
     [complete.uid]: ORG,
     [missing.uid]: undefined,
-    [movedAway.uid]: undefined,
-    [successor.uid]: undefined,
+    [movedAway.uid]: ORG, // a move fills the gap on both rows (0.5.0)
+    [successor.uid]: ORG,
     [foreign.uid]: "org-2",
     [legacy.uid]: undefined,
     [gone.uid]: undefined,
@@ -138,7 +146,7 @@ describe("backfillBookingOrganizations", () => {
 
     expect(await backfill(t, { limit: 100, dryRun: true })).toEqual({
       scanned: 8,
-      updated: 3,
+      updated: 1,
       skipped: 3,
       mismatches: [{ uid: rows.foreign.uid, organizationId: "org-2", eventTypeOrganizationId: ORG }],
       needsReview: [
@@ -156,7 +164,7 @@ describe("backfillBookingOrganizations", () => {
     const rows = await seedMixed(t);
 
     const first = await backfill(t, { limit: 100, dryRun: false });
-    expect(first).toMatchObject({ scanned: 8, updated: 3, skipped: 3, isDone: true });
+    expect(first).toMatchObject({ scanned: 8, updated: 1, skipped: 3, isDone: true });
     expect(await organizations(t)).toEqual({
       [rows.complete.uid]: ORG,
       [rows.missing.uid]: ORG,
@@ -179,19 +187,24 @@ describe("backfillBookingOrganizations", () => {
 });
 
 describe("the booking's resources must corroborate the event type's organization", () => {
-  /** A bundle of et-1 over `resourceIds`, stored without organization as 0.4.2 did. */
-  async function orphanBundle(t: T, resourceIds: string[], h: number) {
-    const created = await t.mutation(api.multi_resource.createMultiResourceBooking, {
-      eventTypeId: "et-1",
-      resources: resourceIds.map((resourceId) => ({ resourceId })),
-      start: hour(h),
-      end: hour(h + 1),
-      timezone: "UTC",
-      booker: BOOKER,
-      location: LOCATION,
+  /**
+   * A bundle of et-1 over `resourceIds` as 0.4.2 stored it: without
+   * organization, and with items 0.5.0 rejects (unlinked, unknown or another
+   * organization's resources).
+   */
+  function orphanBundle(t: T, resourceIds: string[], h: number) {
+    return t.run(async (ctx) => {
+      const bookingId = await ctx.db.insert("bookings", {
+        resourceId: resourceIds[0], actorId: BOOKER.email, start: hour(h), end: hour(h + 1),
+        status: "confirmed", uid: `orphan-${h}`, eventTypeId: "et-1", timezone: "UTC",
+        bookerName: BOOKER.name, bookerEmail: BOOKER.email, eventTitle: "Consultation",
+        location: LOCATION, createdAt: 0, updatedAt: 0,
+      });
+      for (const resourceId of resourceIds) {
+        await ctx.db.insert("booking_items", { bookingId, resourceId, quantity: 1 });
+      }
+      return (await ctx.db.get(bookingId))!;
     });
-    await dropOrganization(t, created._id);
-    return created;
   }
 
   const listed = async (t: T, organizationId: string) =>
@@ -274,7 +287,7 @@ describe("the booking's resources must corroborate the event type's organization
     const { t } = setup();
     await seedResource(t); // res-1 and et-1 in org-1
     await seedResource(t, { resourceId: "res-2", eventTypeId: "et-2" });
-    // Bundles accept resource ids without a document.
+    // 0.4.2 bundles accepted resource ids without a document.
     const unknown = await orphanBundle(t, ["res-1", "res-unknown"], 9);
     const deleted = await orphanBundle(t, ["res-2"], 11);
     await t.run(async (ctx) => {
@@ -296,6 +309,76 @@ describe("the booking's resources must corroborate the event type's organization
       ],
     });
     expect(await organizations(t)).toEqual({ [unknown.uid]: undefined, [deleted.uid]: undefined, [complete.uid]: ORG });
+  });
+
+  /**
+   * et-g, stored without organization and later given org-a as 0.4.x let
+   * createEventType do while a resource of org-b stayed linked (0.5.0
+   * refuses that adoption): res-a (org-a) and res-b (org-b) are linked.
+   */
+  async function seedAdopted(t: T) {
+    await t.mutation(api.public.createEventType, {
+      id: "et-g", slug: "et-g", title: "Global", lengthInMinutes: 60, timezone: "UTC",
+      lockTimeZoneToggle: false, locations: [],
+    });
+    for (const [id, organizationId] of [["res-a", "org-a"], ["res-b", "org-b"]]) {
+      await t.mutation(api.resources.createResource, { id, organizationId, name: id, type: "room", timezone: "UTC" });
+      await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: id, eventTypeId: "et-g" });
+    }
+    const on = (resourceIds: string[], h: number) =>
+      t.mutation(api.multi_resource.createMultiResourceBooking, {
+        eventTypeId: "et-g", resources: resourceIds.map((resourceId) => ({ resourceId })),
+        start: hour(h), end: hour(h + 1), timezone: "UTC", booker: BOOKER, location: LOCATION,
+      });
+    const ownSingle = await book(t, { resourceId: "res-a", eventTypeId: "et-g", timezone: "UTC" }, hour(8), hour(9));
+    const otherSingle = await book(t, { resourceId: "res-b", eventTypeId: "et-g", timezone: "UTC" }, hour(8), hour(9));
+    const ownBundle = await on(["res-a"], 10);
+    const mixedBundle = await on(["res-a"], 11);
+    const ghostBundle = await on(["res-a"], 12);
+    await t.run(async (ctx) => {
+      const eventType = await ctx.db.query("event_types").withIndex("by_external_id", (q) => q.eq("id", "et-g")).unique();
+      await ctx.db.patch(eventType!._id, { organizationId: "org-a" });
+      // 0.4.x bundles: an item of another organization, and an id without a resource.
+      await ctx.db.insert("booking_items", { bookingId: mixedBundle._id, resourceId: "res-b", quantity: 1 });
+      await ctx.db.insert("booking_items", { bookingId: ghostBundle._id, resourceId: "no-such-resource", quantity: 1 });
+    });
+    // CONTROL: none has an organization (a global event type's bookings store none).
+    expect(Object.values(await organizations(t))).toEqual(Array(5).fill(undefined));
+    return { ownSingle, otherSingle, ownBundle, mixedBundle, ghostBundle };
+  }
+
+  test("an event type given an organization later: only bookings on its resources are filled, the audit agrees", async () => {
+    const { t } = setup();
+    const rows = await seedAdopted(t);
+    const review = { eventTypeId: "et-g", eventTypeOrganizationId: "org-a" };
+    const differs = { reason: "resource_organization_differs", resourceId: "res-b", resourceOrganizationId: "org-b" };
+
+    const dry = await backfill(t, { limit: 100, dryRun: true });
+    expect(dry).toMatchObject({
+      scanned: 5, updated: 2, skipped: 3, mismatches: [],
+      needsReview: [
+        { uid: rows.otherSingle.uid, ...review, ...differs },
+        { uid: rows.mixedBundle.uid, ...review, ...differs },
+        { uid: rows.ghostBundle.uid, ...review, reason: "resource_missing", resourceId: "no-such-resource" },
+      ],
+    });
+    expect(await backfill(t, { limit: 100, dryRun: false })).toEqual({ ...dry, continueCursor: expect.any(String) });
+    expect(await organizations(t)).toEqual({
+      [rows.ownSingle.uid]: "org-a",
+      [rows.ownBundle.uid]: "org-a",
+      [rows.otherSingle.uid]: undefined, // org-b's booking is not stamped with org-a
+      [rows.mixedBundle.uid]: undefined,
+      [rows.ghostBundle.uid]: undefined,
+    });
+    // org-a lists, and its hooks would receive, only its own bookings.
+    expect(await listed(t, "org-a")).toEqual([rows.ownSingle.uid, rows.ownBundle.uid].sort());
+    // The audit agrees: the rest are mismatches, not fillable gaps.
+    const integrity = await t.query(api.maintenance.audit, { check: "booking_integrity", limit: 100 });
+    expect(integrity.issues).toEqual(
+      [rows.otherSingle, rows.mixedBundle, rows.ghostBundle].map((booking) => ({
+        check: "booking_integrity", uid: booking.uid, problems: ["organizationMismatch"],
+      }))
+    );
   });
 });
 
@@ -376,7 +459,7 @@ describe("paging", () => {
     for (const limit of [0, -1, 2.5, 501, Number.NaN]) {
       await expect(backfill(t, { limit, dryRun: true })).rejects.toThrow("limit must be an integer from 1 to 500");
     }
-    const eventType = await t.query(api.public.getEventType, { eventTypeId: "et-1" });
+    const eventType = (await t.query(api.public.getEventType, { eventTypeId: "et-1" }))!;
     for (const cursor of ["", "nope", "[1]", JSON.stringify([1, eventType._id])]) {
       await expect(backfill(t, { limit: 1, dryRun: true, cursor })).rejects.toThrow("Invalid backfill cursor");
     }

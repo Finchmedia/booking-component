@@ -21,6 +21,7 @@
 import { describe, expect, test } from "vitest";
 import { api } from "./_generated/api.js";
 import type { Doc } from "./_generated/dataModel.js";
+import type { BookingStatus } from "../shared/booking-status.js";
 import {
   BOOKER,
   LOCATION,
@@ -86,6 +87,10 @@ async function seedWorld(t: T) {
   await t.mutation(api.public.createEventType, {
     id: "et-no-org", slug: "et-no-org", title: "No organization", lengthInMinutes: 60, timezone: "UTC",
     lockTimeZoneToggle: false, locations: [], minNoticeMinutes: 0, maxFutureMinutes: 365 * 24 * 60,
+  });
+  // Bundle items are linked to their event type (required since 0.5.0).
+  await t.mutation(api.resource_event_types.setResourcesForEventType, {
+    eventTypeId: "et-no-org", resourceIds: [seed.resourceId, "pool-1"],
   });
 
   const single = (time: string, location: { type: string; value?: string } = LOCATION) =>
@@ -173,8 +178,11 @@ const S = "string";
 const N = "number";
 const B = "boolean";
 
-const WITH_ORG = ["emailContext", "eventType", "organizationId", "payload"];
-const WITHOUT_ORG = ["emailContext", "eventType", "payload"];
+// The envelope is the internal triggerHooks job, not what a hook receives. Since
+// 0.5.0 every emitter adds `payloadV2` for payloadVersion 2 hooks
+// (hook-payloads-v2.test.ts); the v1 payloads below are unchanged.
+const WITH_ORG = ["emailContext", "eventType", "organizationId", "payload", "payloadV2"];
+const WITHOUT_ORG = ["emailContext", "eventType", "payload", "payloadV2"];
 
 function omit<V extends Record<string, Shape>>(shape: V, ...keys: string[]): Record<string, Shape> {
   return Object.fromEntries(Object.entries(shape).filter(([key]) => !keys.includes(key)));
@@ -301,7 +309,7 @@ const TRANSITION_PINS: Record<string, Emitted[]> = {
   "transitionBookingState provisional -> confirmed": [{ eventType: "booking.confirmed", envelope: WITH_ORG, payload: TRANSITION(MODERN) }],
   "transitionBookingState provisional -> pending": [{ eventType: "booking.pending", envelope: WITH_ORG, payload: TRANSITION(MODERN) }],
   // No notification for completion, so no emailContext either.
-  "transitionBookingState confirmed -> completed": [{ eventType: "booking.completed", envelope: ["eventType", "organizationId", "payload"], payload: TRANSITION(MODERN) }],
+  "transitionBookingState confirmed -> completed": [{ eventType: "booking.completed", envelope: ["eventType", "organizationId", "payload", "payloadV2"], payload: TRANSITION(MODERN) }],
 };
 
 // ============================================
@@ -395,7 +403,7 @@ describe("booking.rescheduled", () => {
 test("transitionBookingState: declined, confirmed, pending and completed", async () => {
   const { t } = setup();
   const world = await seedWorld(t);
-  const transition = (booking: Doc<"bookings">, toStatus: string, reason?: string) =>
+  const transition = (booking: Doc<"bookings">, toStatus: BookingStatus, reason?: string) =>
     emittedBy(t, () => t.mutation(api.hooks.transitionBookingState, { bookingId: booking._id, toStatus, reason }));
   const [declinable, approvable] = [await world.pending("09:00"), await world.pending("10:00")];
   const [confirmable, requestable] = [await world.provisional("11:00"), await world.provisional("12:00")];
@@ -474,11 +482,12 @@ function hookPayloadsDoc(): string {
     "",
     "<!-- Generated from the pins in src/component/hook-payloads-v1.test.ts. Do not edit by hand; after a deliberate change run `npx vitest run src/component/hook-payloads-v1.test.ts -u`. -->",
     "",
-    "A hook registered with `registerHook` runs its function handle with the event's payload as the",
-    "function's arguments. The payload depends on the function that emitted the event, not only on",
-    "the event type: `booking.cancelled` has four shapes. A handler with an argument validator must",
-    "accept every shape of its event, and an added key fails such a validator just like a missing one,",
-    "so each emitter keeps the shape below within version 1.",
+    "A hook registered with `registerHook` without `payloadVersion` runs its function handle with the",
+    "event's payload as the function's arguments. The payload depends on the function that emitted the",
+    "event, not only on the event type: `booking.cancelled` has four shapes. A handler with an argument",
+    "validator must accept every shape of its event, and an added key fails such a validator just like",
+    "a missing one, so each emitter keeps the shape below within version 1. Register with",
+    "`payloadVersion: 2` for one shape per event ([version 2](hook-payloads-v2.md)).",
     "",
     "Payloads contain booker contact details and, where shown, the booking's management token.",
     "Register hooks only from trusted server code.",
@@ -489,7 +498,10 @@ function hookPayloadsDoc(): string {
     "  call passes one. `?` marks the keys the pinned calls show both ways; treat `managementToken` and",
     "  `organizationId` as optional for every emitter, and `reason` for `transitionBookingState`.",
     "- Hooks registered without `organizationId` receive every event of their type. Hooks registered",
-    "  for an organization receive the events of that organization's bookings only.",
+    "  for an organization receive the events of that organization's bookings only. A booking belongs",
+    "  to its event type's organization when that has one; a booking stored before 0.5.0 with another",
+    "  one or none is given it before its next event when every resource it occupies belongs to it,",
+    "  and otherwise keeps the stored one.",
     "- `createBooking` for an event type that requires confirmation emits `booking.created` with",
     "  `status: \"pending\"`. `booking.pending` comes only from `transitionBookingState`.",
     "- `createProvisionalBooking` and `expireProvisionalBooking` emit no event. `presence.timeout` is",
@@ -511,8 +523,9 @@ function hookPayloadsDoc(): string {
     "## StoredBooking",
     "",
     "`booking` is the stored booking document as it was before the change, with `status` set to the",
-    "new status. Besides the keys below it carries `bookerPhone`, `bookerNotes` and `eventDescription`",
-    "when the booking has them.",
+    "new status and, when the change gave the booking its event type's organization, that",
+    "`organizationId`. Besides the keys below it carries `bookerPhone`, `bookerNotes` and",
+    "`eventDescription` when the booking has them.",
     "",
     "```ts",
     render(merge(Object.values(STORED))),

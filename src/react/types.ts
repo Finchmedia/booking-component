@@ -1,3 +1,5 @@
+import type { BookingStatus } from "../shared/booking-status.js";
+
 // Core booking step states
 export type BookingStep = "event-meta" | "booking-form" | "success";
 
@@ -15,7 +17,8 @@ export interface BookingFormData {
   notes?: string;
 }
 
-// Complete booking object (matches extended DB schema)
+// A booking as the React components use it. The component's booking documents
+// fit it; they carry more fields.
 export interface Booking {
   _id: string;
   uid: string;
@@ -24,15 +27,13 @@ export interface Booking {
   start: number;
   end: number;
   timezone: string;
-  /** "rescheduled" is deprecated: it is never stored; a moved booking is "cancelled". */
-  status:
-    | "provisional"
-    | "pending"
-    | "confirmed"
-    | "cancelled"
-    | "completed"
-    | "declined"
-    | "rescheduled";
+  /**
+   * The stored status, the component's {@link BookingStatus}: "provisional",
+   * "pending", "confirmed", "cancelled", "declined" or "completed". A moved
+   * booking is "cancelled". The deprecated "rescheduled", which was never
+   * stored, is no longer part of the type.
+   */
+  status: BookingStatus;
   bookerName: string;
   bookerEmail: string;
   bookerPhone?: string;

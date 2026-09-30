@@ -73,7 +73,7 @@ const writers = {
         timezone: patch.timezone,
         ...(patch.name !== undefined ? { title: patch.name } : {}),
       }),
-    read: async (t: T, id: string) => (await t.query(api.public.getEventType, { eventTypeId: id })).timezone,
+    read: async (t: T, id: string) => (await t.query(api.public.getEventType, { eventTypeId: id }))!.timezone,
     list: async (t: T) => (await t.query(api.public.listEventTypes, { organizationId: ORG })).length,
   },
 };

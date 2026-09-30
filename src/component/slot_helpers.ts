@@ -24,7 +24,7 @@ export async function releaseBookingSlots(
   for (const [date, slots] of slotsToFree.entries()) {
     const availability = await ctx.db
       .query("daily_availability")
-      .withIndex("by_resource_date", (q) =>
+      .withIndex("by_resourceId_and_date", (q) =>
         q.eq("resourceId", resourceId).eq("date", date)
       )
       .unique();
@@ -53,16 +53,14 @@ export async function releaseQuantitySlots(
   for (const [date, slots] of slotsToFree.entries()) {
     const quantityDoc = await ctx.db
       .query("quantity_availability")
-      .withIndex("by_resource_date", (q) =>
+      .withIndex("by_resourceId_and_date", (q) =>
         q.eq("resourceId", resourceId).eq("date", date)
       )
       .unique();
 
     if (!quantityDoc) continue;
 
-    const bookedQuantities = {
-      ...(quantityDoc.slotQuantities as Record<string, number>),
-    };
+    const bookedQuantities = { ...quantityDoc.slotQuantities };
     for (const slot of slots) {
       bookedQuantities[slot.toString()] = Math.max(
         0,
@@ -96,7 +94,7 @@ export async function releaseAllSlotsForBooking(
 
   const items = await ctx.db
     .query("booking_items")
-    .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+    .withIndex("by_bookingId", (q) => q.eq("bookingId", booking._id))
     .collect();
 
   if (items.length === 0) {

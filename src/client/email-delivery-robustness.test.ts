@@ -11,6 +11,11 @@
  *
  * N4: a stored zone that Intl rejects renders the mail in UTC instead of
  * failing the job.
+ *
+ * Since 0.5.0 createBooking rejects both at creation, so the bookings with
+ * a malformed address or zone are rows stored before 0.5.0: created valid,
+ * then rewritten with storeLegacyValues. Jobs queued by 0.4.x call the email
+ * mutations directly.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
@@ -62,6 +67,16 @@ const inspectJobs = queryGeneric({
   args: {}, returns: v.any(),
   handler: async (ctx) => ctx.db.system.query("_scheduled_functions").collect(),
 });
+// Rewrites a stored booking the way a row created before 0.5.0 can hold it.
+const storeLegacyValues = mutationGeneric({
+  args: { uid: v.string(), bookerEmail: v.optional(v.string()), timezone: v.optional(v.string()) }, returns: v.null(),
+  handler: async (ctx, { uid, ...fields }) => {
+    const row = await ctx.db.query("bookings").withIndex("by_uid", (q) => q.eq("uid", uid)).unique();
+    if (!row) throw new Error(`No booking ${uid}`);
+    await ctx.db.patch(row._id, fields);
+    return null;
+  },
+});
 // Enqueues directly into the nested Resend component, past Booking's recipient screen.
 const enqueueUnscreened = mutationGeneric({
   args: { to: v.string() }, returns: v.null(),
@@ -79,7 +94,7 @@ function setup() {
   });
   t.registerComponent("booking", bookingComponent.schema, {
     ...bookingComponent.modules,
-    "./component/testInspect.ts": async () => ({ inspectEmails, inspectJobs, enqueueUnscreened }),
+    "./component/testInspect.ts": async () => ({ inspectEmails, inspectJobs, enqueueUnscreened, storeLegacyValues }),
   });
   t.registerComponent("booking/resend", resendComponent.schema, {
     ...resendComponent.modules,
@@ -131,13 +146,27 @@ async function seed() {
   });
   await t.mutation(booking.resource_event_types.linkResourceToEventType, { resourceId: "resource", eventTypeId: "event" });
 }
-function create(email: string, { hour = 0, timezone = "Europe/Berlin", resendOptions = DELIVERY as Record<string, unknown> } = {}) {
+function create(
+  email: string,
+  { hour = 0, timezone = "Europe/Berlin", resendOptions = DELIVERY as Record<string, unknown> | null } = {}
+) {
   const start = START + hour * 3_600_000;
   return t.mutation(booking.public.createBooking, {
     resourceId: "resource", eventTypeId: "event", start, end: start + 3_600_000,
-    timezone, booker: { name: "Ada", email }, location: { type: "address", value: "Room 1" }, resendOptions,
+    timezone, booker: { name: "Ada", email }, location: { type: "address", value: "Room 1" },
+    ...(resendOptions ? { resendOptions } : {}),
   });
 }
+/** A booking stored before 0.5.0 with these values; creating it sends no mail. */
+async function createLegacy(values: { bookerEmail?: string; timezone?: string }, hour = 0) {
+  const created = await create("ada@example.com", { hour, resendOptions: null });
+  await t.mutation(booking.testInspect.storeLegacyValues, { uid: created.uid, ...values });
+  return created;
+}
+const cancelByToken = (created: { uid: string; managementToken: string }, resendOptions: Record<string, unknown> = DELIVERY) =>
+  t.mutation(booking.public.cancelBookingByToken, {
+    uid: created.uid, token: created.managementToken, reason: "Changed plans", resendOptions,
+  });
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -230,14 +259,27 @@ describe("a malformed recipient is skipped before enqueue (N5)", () => {
     })).resolves.toEqual({ success: false, error: "No API key provided" });
   });
 
-  test("with a strict provider, a malformed booking in the same batch window no longer fails a valid one", async () => {
+  test("createBooking rejects a malformed address and writes nothing (0.5.0)", async () => {
     await seed();
-    const bad = await create("x@");
-    const good = await create("ada@example.com", { hour: 1 });
-    expect([bad.status, good.status]).toEqual(["confirmed", "confirmed"]); // bookings are unaffected
+    await expect(create("x@")).rejects.toThrow("Invalid booker email: expected an address such as name@example.com");
     await drainBookingJobs();
-    const emailJobs = (await jobs()).filter((job) => job.name === "emails:sendBookingConfirmation");
-    expect(emailJobs.map((job) => job.state.kind)).toEqual(["success", "success"]);
+    expect(await t.query(booking.public.listBookings, {})).toEqual([]);
+    expect(await queued()).toEqual([]);
+  });
+
+  test("with a strict provider, a stored malformed booking in the same batch window no longer fails a valid one", async () => {
+    await seed();
+    const bad = await createLegacy({ bookerEmail: "x@" });
+    await cancelByToken(bad); // mails the stored address
+    const good = await create("ada@example.com", { hour: 1 });
+    expect(good.status).toBe("confirmed");
+    await drainBookingJobs();
+    const emailJobs = (await jobs()).filter((job) => String(job.name).startsWith("emails:"));
+    expect(emailJobs.map((job) => [job.name, job.state.kind])).toEqual([
+      ["emails:sendBookingConfirmation", "success"], // the legacy row's creation, without an API key
+      ["emails:sendBookingCancellation", "success"],
+      ["emails:sendBookingConfirmation", "success"],
+    ]);
     await runWorker(1);
     expect(calls).toEqual([{ to: ["ada@example.com"] }]);
     expect((await queued()).map((email) => [email.to, email.status])).toEqual([[["ada@example.com"], "sent"]]);
@@ -265,18 +307,27 @@ describe("a malformed recipient is skipped before enqueue (N5)", () => {
 });
 
 describe("a stored zone that Intl rejects renders in UTC (N4)", () => {
-  test.each(["Mars/Olympus_Mons", ""])("zone %j: confirmation and token cancellation are queued in UTC", async (timezone) => {
+  test.each(["Mars/Olympus_Mons", ""])("zone %j: createBooking rejects it and writes nothing (0.5.0)", async (timezone) => {
     await seed();
-    const created = await create("ada@example.com", { timezone });
-    expect(created.timezone).toBe(timezone);
+    await expect(create("ada@example.com", { timezone })).rejects.toThrow(`Invalid time zone "${timezone}"`);
     await drainBookingJobs();
-    await t.mutation(booking.public.cancelBookingByToken, {
-      uid: created.uid, token: created.managementToken, reason: "Changed plans", resendOptions: DELIVERY,
+    expect(await t.query(booking.public.listBookings, {})).toEqual([]);
+    expect(await queued()).toEqual([]);
+  });
+
+  test.each(["Mars/Olympus_Mons", ""])("zone %j: a queued confirmation and a stored booking's cancellation render in UTC", async (timezone) => {
+    await seed();
+    // A confirmation job queued by 0.4.x with the zone, and a booking stored with it.
+    await t.mutation(booking.emails.sendBookingConfirmation, {
+      to: "bob@example.com", bookerName: "Bob", eventTitle: "Consultation", start: START, end: END, timezone,
+      resendApiKey: DELIVERY.apiKey, resendFromEmail: DELIVERY.fromEmail,
     });
+    const created = await createLegacy({ timezone });
+    await cancelByToken(created);
     await drainBookingJobs();
     const emailJobs = (await jobs()).filter((job) => String(job.name).startsWith("emails:"));
     expect(emailJobs.map((job) => [job.name, job.state.kind])).toEqual([
-      ["emails:sendBookingConfirmation", "success"],
+      ["emails:sendBookingConfirmation", "success"], // the legacy row's creation, without an API key
       ["emails:sendBookingCancellation", "success"],
     ]);
     const mails = await queued();
@@ -299,7 +350,7 @@ describe("a stored zone that Intl rejects renders in UTC (N4)", () => {
   test("a custom renderer still receives the stored zone unchanged", async () => {
     await seed();
     const custom = await t.run(() => createBookingEmailOptions({ ...DELIVERY, renderer: fixtureApi.renderContext as BookingEmailRenderer }));
-    await create("ada@example.com", { timezone: "Mars/Olympus_Mons", resendOptions: custom });
+    await cancelByToken(await createLegacy({ timezone: "Mars/Olympus_Mons" }), custom);
     await drainBookingJobs();
     const [mail] = await queued();
     expect((JSON.parse(mail.html) as BookingEmailContext).timezone).toBe("Mars/Olympus_Mons");

@@ -1,6 +1,32 @@
-import { type DatabaseReader } from "./_generated/server";
+import { type DatabaseReader, type MutationCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 /** Whether the pair is linked; tolerates duplicate rows and writes nothing. */
 export declare function isLinked(db: DatabaseReader, resourceId: string, eventTypeId: string): Promise<boolean>;
+/**
+ * Whether a resource may serve an event type's bookings as far as
+ * organizations go: an event type with an organization takes only that
+ * organization's resources; one without (a global or legacy event type) takes
+ * any. Links and every booking check use this rule.
+ */
+export declare function sharesOrganization(resource: Doc<"resources">, eventType: Doc<"event_types">): boolean;
+/**
+ * Before an event type without organization is adopted into
+ * `organizationId` (createEventType on its id): the links stay, so every
+ * linked resource must belong to that organization, as the link mutations
+ * require. Links whose resource no longer exists do not count
+ * (link_integrity lists them).
+ */
+export declare function assertLinksAdoptable(db: DatabaseReader, eventTypeId: string, organizationId: string): Promise<void>;
+/**
+ * Deletes every link row of a resource or of an event type and returns how
+ * many there were. deleteResource and deleteEventType call it, so an id
+ * created again later starts unlinked.
+ */
+export declare function deleteLinks(ctx: MutationCtx, of: {
+    resourceId: string;
+} | {
+    eventTypeId: string;
+}): Promise<number>;
 /**
  * Get all event types linked to a resource
  * Usage: User selects Studio A → show available event types
@@ -11,16 +37,16 @@ export declare const getEventTypesForResource: import("convex/server").Registere
     _id: import("convex/values").GenericId<"event_types">;
     _creationTime: number;
     organizationId?: string | undefined;
-    bufferAfter?: number | undefined;
+    lengthInMinutesOptions?: number[] | undefined;
+    slotInterval?: number | undefined;
     bufferBefore?: number | undefined;
+    bufferAfter?: number | undefined;
+    minNoticeMinutes?: number | undefined;
+    maxFutureMinutes?: number | undefined;
+    scheduleId?: string | undefined;
     description?: string | undefined;
     isActive?: boolean | undefined;
-    lengthInMinutesOptions?: number[] | undefined;
-    maxFutureMinutes?: number | undefined;
-    minNoticeMinutes?: number | undefined;
     requiresConfirmation?: boolean | undefined;
-    scheduleId?: string | undefined;
-    slotInterval?: number | undefined;
     createdAt?: number | undefined;
     updatedAt?: number | undefined;
     id: string;
@@ -116,7 +142,8 @@ export declare const setEventTypesForResource: import("convex/server").Registere
     success: boolean;
 }>>;
 /**
- * Delete all links for a resource (used when deleting a resource)
+ * Delete all links for a resource. deleteResource does this itself since
+ * 0.5.0; this removes link rows that earlier deletes left behind.
  */
 export declare const deleteAllLinksForResource: import("convex/server").RegisteredMutation<"public", {
     resourceId: string;
@@ -124,7 +151,8 @@ export declare const deleteAllLinksForResource: import("convex/server").Register
     deleted: number;
 }>>;
 /**
- * Delete all links for an event type (used when deleting an event type)
+ * Delete all links for an event type. deleteEventType does this itself since
+ * 0.5.0; this removes link rows that earlier deletes left behind.
  */
 export declare const deleteAllLinksForEventType: import("convex/server").RegisteredMutation<"public", {
     eventTypeId: string;

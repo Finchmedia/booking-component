@@ -1,5 +1,6 @@
 import { type CurrentUser } from "../form/booking-form.js";
 import type { Booking } from "../../types.js";
+import type { BookingView } from "../../contract.js";
 type BookingPhase = "create" | "reschedule";
 export interface BookerProps {
     /** Event type ID to book */
@@ -19,10 +20,12 @@ export interface BookerProps {
     /** Current logged-in user for prefilling name/email in the form */
     currentUser?: CurrentUser;
     /**
-     * Callback when booking is successfully created. An error it throws is
-     * logged; the booking is not reported as failed.
+     * Callback when a booking is created or moved. Receives the result of your
+     * createBooking or rescheduleBookingByToken function, typed as the fields
+     * the contract requires (`BookingView`). An error it throws is logged; the
+     * booking is not reported as failed.
      */
-    onBookingComplete?: (booking: Booking) => void;
+    onBookingComplete?: (booking: BookingView) => void;
     /**
      * Callback to reset event type selection (for embedded Booker). Used when the
      * event type is deleted or deactivated or the resource is unlinked.
@@ -55,6 +58,9 @@ export interface BookerProps {
     /**
      * Reschedule mode: Provide the original booking to modify
      * When present, the Booker will call rescheduleBookingByToken instead of createBooking
+     * With BookingProvider's `availabilityContext` on, its `uid` and
+     * `managementToken` also go to getDaySlots and getMonthAvailability as
+     * `rescheduleContext`, so times overlapping it can be offered.
      */
     originalBooking?: Booking;
     /**

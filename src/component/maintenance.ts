@@ -28,8 +28,23 @@ import {
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { parseCivilDate } from "../shared/time.js";
+import { throwBookingError } from "../shared/booking-errors.js";
+import { bookingStatusValidator, isBookingStatus } from "../shared/booking-status.js";
+import {
+  LEGACY_EVENT_TYPE_ID,
+  bookingRuleProblems,
+  corroboratedOrganization,
+  isLegacyReservation,
+} from "./booking_lifecycle";
 import { holdsActiveInventory } from "./inventory_helpers";
-import { isValidTimeZone } from "./input_validation";
+import {
+  isLengthOutsideOptions,
+  isNonNegativeMinutes,
+  isPositiveMinutes,
+  isValidTimeZone,
+  isWholePositiveMinutes,
+} from "./input_validation";
+import { isLinked, sharesOrganization } from "./resource_event_types";
 import { getOrganizationDefaultSchedule, getScheduleByExternalId, getWeeklySlots } from "./schedules";
 import { getLocalDateAndSlot } from "./utils";
 
@@ -159,7 +174,7 @@ export const getDailyAvailability = query({
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("daily_availability")
-      .withIndex("by_resource_date", (q) =>
+      .withIndex("by_resourceId_and_date", (q) =>
         q.eq("resourceId", args.resourceId).eq("date", args.date)
       )
       .unique();
@@ -175,10 +190,11 @@ export const getDailyAvailability = query({
 // rows themselves. `audit` reports one check per call, one page at a time.
 
 /**
- * Largest `limit` of one audit call. A booking costs one override read, plus,
- * once per page, its event type, its schedule and its organization's default
- * schedule (at most two single-document reads); an event type costs nothing
- * more.
+ * Largest `limit` of one audit call. A row costs at most one read of its own
+ * (an override, its link pair) or, for a booking, its items (one per bundle
+ * item) or history rows (one per status change), plus lookups of the event
+ * types, resources, schedules and links it names, each once per page (an
+ * organization's default schedule: at most two single-document reads).
  */
 const MAX_AUDIT_LIMIT = 500;
 
@@ -192,7 +208,13 @@ function memoized<V>(cache: Map<string, Promise<V>>, key: string, load: () => Pr
   return value;
 }
 
-type AuditTable = "bookings" | "event_types";
+type AuditTable =
+  | "bookings"
+  | "event_types"
+  | "schedules"
+  | "resources"
+  | "date_overrides"
+  | "resource_event_types";
 
 /**
  * A row's complete by_creation_time index key. Creation times can tie
@@ -222,7 +244,7 @@ function parseAuditCursor<T extends AuditTable>(
     const id = db.normalizeId(table, key[1]);
     if (id) return { creationTime: key[0], id };
   }
-  throw new Error(`Invalid ${name} cursor`);
+  throwBookingError("INVALID_INPUT", `Invalid ${name} cursor`);
 }
 
 /**
@@ -237,8 +259,11 @@ type CreationTimeIndex<T extends AuditTable> = {
       eq(field: "_creationTime", value: number): { gt(field: "_id", value: Id<T>): IndexRange };
       gt(field: "_creationTime", value: number): IndexRange;
     }) => IndexRange
-  ): { take(n: number): Promise<Doc<T>[]> };
+  ): { take(n: number): Promise<AuditRow<T>[]> };
 };
+
+/** A row with its system fields spelled out (Doc<T> of a generic T does not resolve them). */
+type AuditRow<T extends AuditTable> = Doc<T> & { _creationTime: number; _id: Id<T> };
 
 /**
  * Up to `limit` rows after `cursor`, in by_creation_time order: the rest of
@@ -251,7 +276,7 @@ async function rowsAfter<T extends AuditTable>(
   table: T,
   cursor: AuditCursor<T> | null,
   limit: number
-): Promise<Doc<T>[]> {
+): Promise<AuditRow<T>[]> {
   const rows = () => db.query(table) as unknown as CreationTimeIndex<T>;
   if (!cursor) {
     return await rows().withIndex("by_creation_time").take(limit);
@@ -268,6 +293,9 @@ async function rowsAfter<T extends AuditTable>(
   return [...tieGroup, ...later];
 }
 
+const problems = <P extends string>(...names: [P, ...P[]]) =>
+  v.array(v.union(...names.map((name) => v.literal(name))));
+
 const auditIssue = v.union(
   v.object({
     check: v.literal("f10_weekday"),
@@ -281,6 +309,75 @@ const auditIssue = v.union(
     eventTypeId: v.string(),
     lengthInMinutes: v.number(),
     lengthInMinutesOptions: v.optional(v.array(v.number())),
+  }),
+  v.object({
+    check: v.literal("event_type_config"),
+    eventTypeId: v.string(),
+    problems: problems(
+      "id",
+      "lengthInMinutes",
+      "lengthInMinutesOptions",
+      "lengthNotInOptions",
+      "slotInterval",
+      "bufferBefore",
+      "bufferAfter",
+      "minNoticeMinutes",
+      "maxFutureMinutes",
+      "timezone",
+      "scheduleId"
+    ),
+  }),
+  v.object({
+    check: v.literal("schedule_config"),
+    scheduleId: v.string(),
+    problems: problems("timezone"),
+  }),
+  v.object({
+    check: v.literal("resource_config"),
+    resourceId: v.string(),
+    problems: problems("timezone"),
+  }),
+  v.object({
+    check: v.literal("date_override_config"),
+    overrideId: v.string(),
+    date: v.string(),
+    type: v.string(),
+    problems: problems("type", "customHours", "date"),
+  }),
+  v.object({
+    check: v.literal("link_integrity"),
+    resourceId: v.string(),
+    eventTypeId: v.string(),
+    problems: problems("resourceMissing", "eventTypeMissing", "crossOrganization", "duplicate"),
+  }),
+  v.object({
+    check: v.literal("booking_integrity"),
+    uid: v.string(),
+    problems: problems("organizationMissing", "organizationMismatch", "poolWithoutItems"),
+  }),
+  v.object({
+    check: v.literal("booking_eligibility"),
+    uid: v.string(),
+    status: bookingStatusValidator,
+    start: v.number(),
+    eventTypeId: v.string(),
+    resourceIds: v.array(v.string()),
+    problems: problems(
+      "eventTypeMissing",
+      "eventTypeInactive",
+      "resourceMissing",
+      "resourceInactive",
+      "resourceNotLinked",
+      "crossOrganization",
+      "noStandalone"
+    ),
+  }),
+  v.object({
+    check: v.literal("booking_status_invalid"),
+    uid: v.string(),
+    // The stored value, which may be outside BOOKING_STATUSES.
+    status: v.string(),
+    problems: problems("status", "historyStatus"),
   })
 );
 type AuditIssue = typeof auditIssue.type;
@@ -343,7 +440,7 @@ async function f10WeekdayIssue(
 
   const override = await ctx.db
     .query("date_overrides")
-    .withIndex("by_schedule_date", (q) =>
+    .withIndex("by_scheduleId_and_date", (q) =>
       q.eq("scheduleId", schedule._id).eq("date", local.date)
     )
     .first();
@@ -373,23 +470,278 @@ function eventLengthIssue(eventType: Doc<"event_types">): AuditIssue | null {
   };
 }
 
+function isCanonicalDate(value: string): boolean {
+  try {
+    return parseCivilDate(value) === value;
+  } catch {
+    return false;
+  }
+}
+
+/** `load` runs once per key within one audit page. */
+function perPage<V>(load: (key: string) => Promise<V>): (key: string) => Promise<V> {
+  const cache = new Map<string, Promise<V>>();
+  return (key) => memoized(cache, key, () => load(key));
+}
+
+/** Configuration rows by external id, tolerant of duplicates (`first`). */
+function lookups(db: DatabaseReader) {
+  const linkedPair = perPage((pair) => {
+    const [resourceId, eventTypeId] = JSON.parse(pair) as [string, string];
+    return isLinked(db, resourceId, eventTypeId);
+  });
+  return {
+    eventType: perPage((id) => db.query("event_types").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
+    resource: perPage((id) => db.query("resources").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
+    schedule: perPage((id) => db.query("schedules").withIndex("by_external_id", (q) => q.eq("id", id)).first()),
+    linked: (resourceId: string, eventTypeId: string) => linkedPair(JSON.stringify([resourceId, eventTypeId])),
+  };
+}
+
+/** A booking's items (bundles); none for a single-resource booking. */
+function bookingItems(db: DatabaseReader, bookingId: Id<"bookings">): Promise<Doc<"booking_items">[]> {
+  return db
+    .query("booking_items")
+    .withIndex("by_bookingId", (q) => q.eq("bookingId", bookingId))
+    .collect();
+}
+
+/** The resources a booking holds: its booking_items, else its resource. */
+function heldResourceIds(booking: Doc<"bookings">, items: Doc<"booking_items">[]): string[] {
+  return items.length > 0 ? items.map((item) => item.resourceId) : [booking.resourceId];
+}
+
+type Lookups = ReturnType<typeof lookups>;
+type ProblemsOf<C extends AuditIssue["check"]> = Extract<AuditIssue, { check: C; problems: unknown }>["problems"];
+
 /**
- * Read-only upgrade audit, one check and one page of rows per call:
- * - "f10_weekday": upcoming pending, confirmed or provisional bookings that
- *   0.4.2 admitted on a weekday without opening hours (schedules at UTC+12
- *   or beyond used the next weekday's hours). The schedule is the booking's
- *   event type's, else its organization's default, as in the reference host.
- * - "event_length_invalid": event types whose lengthInMinutes or
+ * event_type_config: stored values the 0.5.0 event-type writes reject (the
+ * predicates of input_validation.ts): the reserved ID "legacy" (the
+ * eventTypeId of createReservation rows, which then lose their exemption
+ * from the booking rules; see isLegacyReservation), lengths, options and
+ * slot interval that are not whole minutes greater than 0, a length missing
+ * from non-empty options, buffers and notice that are negative or not
+ * finite, a horizon that is not greater than 0, a zone Intl rejects, a
+ * scheduleId naming no schedule.
+ */
+async function eventTypeConfigIssue(eventType: Doc<"event_types">, find: Lookups): Promise<AuditIssue | null> {
+  const found: ProblemsOf<"event_type_config"> = [];
+  if (eventType.id === LEGACY_EVENT_TYPE_ID) found.push("id");
+  const options = eventType.lengthInMinutesOptions;
+  if (!isWholePositiveMinutes(eventType.lengthInMinutes)) found.push("lengthInMinutes");
+  if (options?.some((option) => !isWholePositiveMinutes(option))) found.push("lengthInMinutesOptions");
+  if (isLengthOutsideOptions(eventType.lengthInMinutes, options)) found.push("lengthNotInOptions");
+  if (eventType.slotInterval !== undefined && !isWholePositiveMinutes(eventType.slotInterval)) found.push("slotInterval");
+  for (const key of ["bufferBefore", "bufferAfter", "minNoticeMinutes"] as const) {
+    const value = eventType[key];
+    if (value !== undefined && !isNonNegativeMinutes(value)) found.push(key);
+  }
+  if (eventType.maxFutureMinutes !== undefined && !isPositiveMinutes(eventType.maxFutureMinutes)) {
+    found.push("maxFutureMinutes");
+  }
+  if (!isValidTimeZone(eventType.timezone)) found.push("timezone");
+  if (eventType.scheduleId && !(await find.schedule(eventType.scheduleId))) found.push("scheduleId");
+  return found.length > 0 ? { check: "event_type_config", eventTypeId: eventType.id, problems: found } : null;
+}
+
+/** date_override_config: an unknown type, "custom" without hours, a date that is not a canonical calendar day. */
+function dateOverrideIssue(override: Doc<"date_overrides">): AuditIssue | null {
+  const found: ProblemsOf<"date_override_config"> = [];
+  if (override.type !== "unavailable" && override.type !== "custom") found.push("type");
+  if (override.type === "custom" && !override.customHours?.length) found.push("customHours");
+  if (!isCanonicalDate(override.date)) found.push("date");
+  return found.length > 0
+    ? { check: "date_override_config", overrideId: override._id, date: override.date, type: override.type, problems: found }
+    : null;
+}
+
+/**
+ * link_integrity: a link whose resource or event type no longer exists, one
+ * across organizations (the event type has one and the resource another),
+ * or a second row of the same pair (the first row of a pair is not one).
+ */
+async function linkIssue(
+  db: DatabaseReader,
+  link: Doc<"resource_event_types">,
+  find: Lookups
+): Promise<AuditIssue | null> {
+  const found: ProblemsOf<"link_integrity"> = [];
+  const resource = await find.resource(link.resourceId);
+  const eventType = await find.eventType(link.eventTypeId);
+  if (!resource) found.push("resourceMissing");
+  if (!eventType) found.push("eventTypeMissing");
+  if (resource && eventType && !sharesOrganization(resource, eventType)) found.push("crossOrganization");
+  const firstOfPair = await db
+    .query("resource_event_types")
+    .withIndex("by_resourceId_and_eventTypeId", (q) =>
+      q.eq("resourceId", link.resourceId).eq("eventTypeId", link.eventTypeId)
+    )
+    .first();
+  if (firstOfPair && firstOfPair._id !== link._id) found.push("duplicate");
+  return found.length > 0
+    ? { check: "link_integrity", resourceId: link.resourceId, eventTypeId: link.eventTypeId, problems: found }
+    : null;
+}
+
+/**
+ * booking_integrity, for bookings of an event type with an organization
+ * (legacy rows have no event type): `organizationMissing`, no
+ * organizationId while every resource the booking occupies (its resourceId
+ * and each item) belongs to the event type's organization
+ * (backfillBookingOrganizations fills it); `organizationMismatch`, another
+ * organizationId, or none while a resource is missing or belongs to another
+ * organization (the backfill lists these in `needsReview` or `mismatches`
+ * and leaves them; the booking's next move, transition, cancellation or
+ * expiry gives it the event type's organization only when every resource
+ * it occupies belongs to it, see withEventTypeOrganization, so the others
+ * stay listed here). Also `poolWithoutItems`: an active booking
+ * without items on a pool (isFungible), which moves reject.
+ */
+async function bookingIntegrityIssue(
+  db: DatabaseReader,
+  booking: Doc<"bookings">,
+  find: Lookups
+): Promise<AuditIssue | null> {
+  const found: ProblemsOf<"booking_integrity"> = [];
+  let items: Doc<"booking_items">[] | undefined;
+  const loadItems = async () => (items ??= await bookingItems(db, booking._id));
+  // A legacy row names no event type (unless one was created with the
+  // reserved ID, whose rules it then follows).
+  const eventType = await find.eventType(booking.eventTypeId);
+  const eventTypeOrganizationId = eventType?.organizationId;
+  if (eventTypeOrganizationId !== undefined && booking.organizationId !== eventTypeOrganizationId) {
+    const fillable =
+      booking.organizationId === undefined &&
+      "organizationId" in (await corroboratedOrganization(db, booking, eventType, find.resource, loadItems));
+    found.push(fillable ? "organizationMissing" : "organizationMismatch");
+  }
+  if (holdsActiveInventory(booking.status) && (await find.resource(booking.resourceId))?.isFungible === true) {
+    if ((await loadItems()).length === 0) found.push("poolWithoutItems");
+  }
+  return found.length > 0 ? { check: "booking_integrity", uid: booking.uid, problems: found } : null;
+}
+
+/**
+ * booking_eligibility: an active booking (pending, confirmed or
+ * provisional; legacy rows are exempt, see isLegacyReservation) that fails
+ * the booking rules today, so moving it, confirming it or submitting a hold
+ * as a request is rejected (see bookingRuleProblems). The issue names the
+ * event type and the resources the booking holds.
+ */
+async function bookingEligibilityIssue(
+  db: DatabaseReader,
+  booking: Doc<"bookings">,
+  find: Lookups
+): Promise<AuditIssue | null> {
+  if (!holdsActiveInventory(booking.status) || (await isLegacyReservation(find.eventType, booking))) return null;
+  const resourceIds = heldResourceIds(booking, await bookingItems(db, booking._id));
+  const found = await bookingRuleProblems(find, booking, resourceIds);
+  if (found.length === 0) return null;
+  return {
+    check: "booking_eligibility",
+    uid: booking.uid,
+    status: booking.status,
+    start: booking.start,
+    eventTypeId: booking.eventTypeId,
+    resourceIds,
+    problems: found,
+  };
+}
+
+/**
+ * booking_status_invalid: a status outside BOOKING_STATUSES on the booking
+ * (`status`) or on one of its history rows (`historyStatus`; a history
+ * `fromStatus` may also be "", the creation entry). The component writes
+ * only these values; other ones come from dashboard edits or imports, and
+ * Convex refuses to deploy the 0.5.0 schema while any row holds one.
+ */
+async function bookingStatusIssue(db: DatabaseReader, booking: Doc<"bookings">): Promise<AuditIssue | null> {
+  const found: ProblemsOf<"booking_status_invalid"> = [];
+  // Read as stored: the rows this check exists for do not match the schema's type.
+  const status: unknown = booking.status;
+  if (!isBookingStatus(status)) found.push("status");
+  const history = await db
+    .query("booking_history")
+    .withIndex("by_bookingId", (q) => q.eq("bookingId", booking._id))
+    .collect();
+  if (history.some(({ fromStatus, toStatus }) => !(fromStatus === "" || isBookingStatus(fromStatus)) || !isBookingStatus(toStatus))) {
+    found.push("historyStatus");
+  }
+  return found.length > 0
+    ? { check: "booking_status_invalid", uid: booking.uid, status: String(status), problems: found }
+    : null;
+}
+
+/** schedule_config / resource_config: a zone Intl rejects. */
+function zoneIssue(row: Doc<"schedules"> | Doc<"resources">, check: "schedule_config" | "resource_config"): AuditIssue | null {
+  if (isValidTimeZone(row.timezone)) return null;
+  return check === "schedule_config"
+    ? { check, scheduleId: row.id, problems: ["timezone"] }
+    : { check, resourceId: row.id, problems: ["timezone"] };
+}
+
+/** One page of `table` after the cursor, checked row by row. */
+async function auditPage<T extends AuditTable>(
+  db: DatabaseReader,
+  table: T,
+  args: { cursor?: string | null; limit: number },
+  issueOf: (row: Doc<T>) => AuditIssue | null | Promise<AuditIssue | null>
+) {
+  const cursor = typeof args.cursor === "string" ? parseAuditCursor(db, table, args.cursor) : null;
+  const rows = await rowsAfter(db, table, cursor, args.limit);
+  const issues: AuditIssue[] = [];
+  for (const row of rows) {
+    const issue = await issueOf(row);
+    if (issue) issues.push(issue);
+  }
+  const last = rows[rows.length - 1];
+  return {
+    issues,
+    scanned: rows.length,
+    continueCursor: last ? encodeAuditCursor(last) : (args.cursor ?? null),
+    isDone: rows.length < args.limit,
+  };
+}
+
+/**
+ * Read-only upgrade audit, one check and one page of rows per call. Run
+ * every check before upgrading to 0.5.0: each reports stored rows that
+ * 0.5.0 rejects on write, reads differently or cannot move or confirm.
+ * - "f10_weekday" (bookings): upcoming pending, confirmed or provisional
+ *   bookings that 0.4.2 admitted on a weekday without opening hours
+ *   (schedules at UTC+12 or beyond used the next weekday's hours). The
+ *   schedule is the booking's event type's, else its organization's
+ *   default, as in the reference host.
+ * - "event_length_invalid" (event types): lengthInMinutes or
  *   lengthInMinutesOptions hold a value that is not a positive number. The
  *   availability queries reject such lengths since 0.4.3.
+ * - "event_type_config" (event types), "schedule_config" (schedules),
+ *   "resource_config" (resources), "date_override_config" (date overrides),
+ *   "link_integrity" (resource ↔ event type links), "booking_integrity",
+ *   "booking_eligibility" (bookings, with their items) and
+ *   "booking_status_invalid" (bookings, with their history rows): each
+ *   issue lists its `problems`; see the functions above.
  *
- * Start without a cursor and pass `continueCursor` back until `isDone`.
- * `scanned` counts the rows read; `issues` lists the ones that failed the
- * check. Call it from a host internal function.
+ * Start without a cursor and pass `continueCursor` back until `isDone`; the
+ * cursor is the complete by_creation_time key, so rows with equal creation
+ * times are neither skipped nor repeated, and rows created during a run are
+ * visited too. `scanned` counts the rows read; `issues` lists the ones that
+ * failed the check. Call it from a host internal function.
  */
 export const audit = query({
   args: {
-    check: v.union(v.literal("f10_weekday"), v.literal("event_length_invalid")),
+    check: v.union(
+      v.literal("f10_weekday"),
+      v.literal("event_length_invalid"),
+      v.literal("event_type_config"),
+      v.literal("schedule_config"),
+      v.literal("resource_config"),
+      v.literal("date_override_config"),
+      v.literal("link_integrity"),
+      v.literal("booking_integrity"),
+      v.literal("booking_eligibility"),
+      v.literal("booking_status_invalid")
+    ),
     cursor: v.optional(v.union(v.string(), v.null())),
     limit: v.number(),
   },
@@ -401,40 +753,34 @@ export const audit = query({
   }),
   handler: async (ctx, args) => {
     if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_AUDIT_LIMIT) {
-      throw new Error(`limit must be an integer from 1 to ${MAX_AUDIT_LIMIT}`);
+      throwBookingError("INVALID_INPUT", `limit must be an integer from 1 to ${MAX_AUDIT_LIMIT}`);
     }
-    const issues: AuditIssue[] = [];
-    let rows: Array<Doc<"bookings"> | Doc<"event_types">>;
-
-    if (args.check === "f10_weekday") {
-      const cursor =
-        typeof args.cursor === "string" ? parseAuditCursor(ctx.db, "bookings", args.cursor) : null;
-      const bookings = await rowsAfter(ctx.db, "bookings", cursor, args.limit);
-      const now = Date.now();
-      const schedules: ScheduleCache = { resolved: new Map(), defaults: new Map() };
-      for (const booking of bookings) {
-        const issue = await f10WeekdayIssue(ctx, booking, now, schedules);
-        if (issue) issues.push(issue);
+    const find = lookups(ctx.db);
+    switch (args.check) {
+      case "f10_weekday": {
+        const now = Date.now();
+        const schedules: ScheduleCache = { resolved: new Map(), defaults: new Map() };
+        return await auditPage(ctx.db, "bookings", args, (booking) => f10WeekdayIssue(ctx, booking, now, schedules));
       }
-      rows = bookings;
-    } else {
-      const cursor =
-        typeof args.cursor === "string" ? parseAuditCursor(ctx.db, "event_types", args.cursor) : null;
-      const eventTypes = await rowsAfter(ctx.db, "event_types", cursor, args.limit);
-      for (const eventType of eventTypes) {
-        const issue = eventLengthIssue(eventType);
-        if (issue) issues.push(issue);
-      }
-      rows = eventTypes;
+      case "event_length_invalid":
+        return await auditPage(ctx.db, "event_types", args, eventLengthIssue);
+      case "event_type_config":
+        return await auditPage(ctx.db, "event_types", args, (eventType) => eventTypeConfigIssue(eventType, find));
+      case "schedule_config":
+        return await auditPage(ctx.db, "schedules", args, (schedule) => zoneIssue(schedule, "schedule_config"));
+      case "resource_config":
+        return await auditPage(ctx.db, "resources", args, (resource) => zoneIssue(resource, "resource_config"));
+      case "date_override_config":
+        return await auditPage(ctx.db, "date_overrides", args, dateOverrideIssue);
+      case "link_integrity":
+        return await auditPage(ctx.db, "resource_event_types", args, (link) => linkIssue(ctx.db, link, find));
+      case "booking_integrity":
+        return await auditPage(ctx.db, "bookings", args, (booking) => bookingIntegrityIssue(ctx.db, booking, find));
+      case "booking_eligibility":
+        return await auditPage(ctx.db, "bookings", args, (booking) => bookingEligibilityIssue(ctx.db, booking, find));
+      case "booking_status_invalid":
+        return await auditPage(ctx.db, "bookings", args, (booking) => bookingStatusIssue(ctx.db, booking));
     }
-
-    const last = rows[rows.length - 1];
-    return {
-      issues,
-      scanned: rows.length,
-      continueCursor: last ? encodeAuditCursor(last) : (args.cursor ?? null),
-      isDone: rows.length < args.limit,
-    };
   },
 });
 
@@ -443,9 +789,9 @@ export const audit = query({
 // ============================================
 
 /**
- * Largest `limit` of one backfill call. A booking costs at most one patch and
- * one read of its booking items, plus its event type and each of its
- * resources once per page.
+ * Largest `limit` of one backfill call. A booking costs at most one patch
+ * and, without organization, one read of its booking items, plus its event
+ * type and each of its resources once per page.
  */
 const MAX_BACKFILL_LIMIT = 500;
 
@@ -457,7 +803,8 @@ const organizationMismatch = v.object({
 
 /**
  * A booking left without organization because the stored rows do not
- * corroborate one. `resourceId` names the first resource that fails.
+ * corroborate one (corroboratedOrganization). `resourceId` names the first
+ * resource that fails.
  */
 const organizationReview = v.object({
   uid: v.string(),
@@ -475,54 +822,6 @@ const organizationReview = v.object({
 type OrganizationReview = typeof organizationReview.type;
 
 /**
- * The organization a booking without one can take, or why it cannot: its
- * event type must exist and have an organization, and every resource the
- * booking occupies (its resourceId and each booking item) must exist and
- * belong to that organization too. Nothing records the organization a
- * booking was made for, and an event type can move to another organization
- * later; the resources, owners of the booked inventory, corroborate it.
- */
-async function corroboratedOrganization(
-  db: DatabaseReader,
-  booking: Doc<"bookings">,
-  eventType: Doc<"event_types"> | null,
-  resourceOrganizations: Map<string, Promise<string | null>>
-): Promise<{ organizationId: string } | OrganizationReview> {
-  const review = { uid: booking.uid, eventTypeId: booking.eventTypeId };
-  if (!eventType) return { ...review, reason: "event_type_missing" };
-  const organizationId = eventType.organizationId;
-  if (organizationId === undefined) return { ...review, reason: "event_type_without_organization" };
-
-  const items = await db
-    .query("booking_items")
-    .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
-    .collect();
-  for (const resourceId of new Set([booking.resourceId, ...items.map((item) => item.resourceId)])) {
-    // null: no resource document.
-    const resourceOrganizationId = await memoized(resourceOrganizations, resourceId, async () => {
-      const resource = await db
-        .query("resources")
-        .withIndex("by_external_id", (q) => q.eq("id", resourceId))
-        .first();
-      return resource?.organizationId ?? null;
-    });
-    if (resourceOrganizationId === null) {
-      return { ...review, reason: "resource_missing", eventTypeOrganizationId: organizationId, resourceId };
-    }
-    if (resourceOrganizationId !== organizationId) {
-      return {
-        ...review,
-        reason: "resource_organization_differs",
-        eventTypeOrganizationId: organizationId,
-        resourceId,
-        resourceOrganizationId,
-      };
-    }
-  }
-  return { organizationId };
-}
-
-/**
  * Fills a missing booking organizationId, one page of bookings per call,
  * where the stored rows corroborate it. Until 0.4.3 bundles created without
  * `organizationId` stored none (and single bookings before 0.3.0), so they
@@ -530,20 +829,24 @@ async function corroboratedOrganization(
  *
  * A booking takes its event type's organization only when every resource it
  * occupies (its resourceId and each booking item) exists and belongs to that
- * organization as well. The event type alone is no evidence: it may have
- * moved to another organization since the booking was made, which would then
- * receive the booker's details and management token in its booking list.
+ * organization as well (corroboratedOrganization). The event type alone is
+ * no evidence: it may have moved to another organization since the booking
+ * was made, which would then receive the booker's details and management
+ * token in its booking list.
  *
  * - `updated` counts the rows given their event type's organization
  *   (with `dryRun`, the rows that would be; nothing is written).
  * - `skipped` counts rows that stay without one: legacy createReservation
- *   rows and the rows in `needsReview`.
+ *   rows (see isLegacyReservation) and the rows in `needsReview`.
  * - `needsReview` lists the rows the stored data cannot assign, with the
  *   reason: event type deleted or without organization, a resource missing or
  *   in another organization. They keep no organization, so they stay out of
  *   organization lists and hooks as before; check them against your records.
  * - `mismatches` lists rows whose organization differs from their event
- *   type's. They are reported, never rewritten.
+ *   type's. The backfill reports them and never rewrites them in bulk; the
+ *   booking's next move, transition, cancellation or expiry gives it the
+ *   event type's organization before anyone is notified, under the same
+ *   rule (withEventTypeOrganization).
  *
  * Idempotent: a second run updates nothing. Start without a cursor and pass
  * `continueCursor` back until `isDone`; call it from a host internal mutation.
@@ -566,7 +869,7 @@ export const backfillBookingOrganizations = mutation({
   }),
   handler: async (ctx, args) => {
     if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_BACKFILL_LIMIT) {
-      throw new Error(`limit must be an integer from 1 to ${MAX_BACKFILL_LIMIT}`);
+      throwBookingError("INVALID_INPUT", `limit must be an integer from 1 to ${MAX_BACKFILL_LIMIT}`);
     }
     const cursor =
       typeof args.cursor === "string"
@@ -574,23 +877,16 @@ export const backfillBookingOrganizations = mutation({
         : null;
     const bookings = await rowsAfter(ctx.db, "bookings", cursor, args.limit);
 
-    // Lookups shared by the page: event type by id, resource organization by id.
-    const eventTypes = new Map<string, Promise<Doc<"event_types"> | null>>();
-    const resourceOrganizations = new Map<string, Promise<string | null>>();
+    // Event types and resources by id, each read once per page.
+    const find = lookups(ctx.db);
     let updated = 0;
     let skipped = 0;
     const mismatches: Array<typeof organizationMismatch.type> = [];
     const needsReview: OrganizationReview[] = [];
     for (const booking of bookings) {
-      const eventType =
-        booking.eventTypeId === "legacy"
-          ? null
-          : await memoized(eventTypes, booking.eventTypeId, () =>
-              ctx.db
-                .query("event_types")
-                .withIndex("by_external_id", (q) => q.eq("id", booking.eventTypeId))
-                .first()
-            );
+      // A legacy row names no event type (unless one was created with the
+      // reserved ID, whose rules it then follows).
+      const eventType = await find.eventType(booking.eventTypeId);
 
       if (booking.organizationId !== undefined) {
         const eventTypeOrganizationId = eventType?.organizationId;
@@ -603,14 +899,14 @@ export const backfillBookingOrganizations = mutation({
         }
         continue;
       }
-      if (booking.eventTypeId === "legacy") {
+      if (await isLegacyReservation(find.eventType, booking)) {
         skipped++;
         continue;
       }
-      const result = await corroboratedOrganization(ctx.db, booking, eventType, resourceOrganizations);
+      const result = await corroboratedOrganization(ctx.db, booking, eventType, find.resource);
       if ("reason" in result) {
         skipped++;
-        needsReview.push(result);
+        needsReview.push({ uid: booking.uid, eventTypeId: booking.eventTypeId, ...result });
         continue;
       }
       updated++;

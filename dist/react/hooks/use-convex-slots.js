@@ -1,7 +1,7 @@
 "use client";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
-import { useBookingAPI } from "../context.js";
+import { useAvailabilityContextEnabled, useBookingAPI } from "../context.js";
 import { getSessionId } from "../utils/session.js";
 import { formatDateInTimezone } from "../utils/date-utils.js";
 import { isCivilDate, monthGrid } from "../utils/civil-date.js";
@@ -46,8 +46,37 @@ function hasPresenceConflict(slotTime, durationMinutes, presence, currentUserId)
         return heldFrom < end && heldFrom + QUANTUM_MS > start;
     });
 }
-export const useConvexSlots = (resourceId, eventLength, slotInterval, allDurationOptions, enabled = true, timezone = Intl.DateTimeFormat().resolvedOptions().timeZone) => {
+/**
+ * Helper: The availability context keys to add to the month and day queries.
+ * None without the provider's opt-in, so the arguments stay those of 0.4.x;
+ * with it, only the keys that are defined. rescheduleContext is copied to
+ * exactly uid and token: a validator rejects surplus nested keys.
+ */
+function availabilityContextArgs(optedIn, context) {
+    if (!optedIn || !context)
+        return {};
+    const { eventTypeId, rescheduleContext } = context;
+    return {
+        ...(eventTypeId !== undefined ? { eventTypeId } : {}),
+        ...(rescheduleContext
+            ? { rescheduleContext: { uid: rescheduleContext.uid, token: rescheduleContext.token } }
+            : {}),
+    };
+}
+/**
+ * Loads the month availability, the free slots of the selected date and the
+ * presence holds for one resource.
+ *
+ * @param context - The availability context for getMonthAvailability and
+ * getDaySlots: the selected `eventTypeId` and, when rescheduling, the
+ * `rescheduleContext` of the booking being moved. Sent only when the
+ * surrounding BookingProvider has `availabilityContext` on; otherwise the
+ * queries receive the 0.4.x arguments. Presence queries never receive it.
+ */
+export const useConvexSlots = (resourceId, eventLength, slotInterval, allDurationOptions, enabled = true, timezone = Intl.DateTimeFormat().resolvedOptions().timeZone, context) => {
     const api = useBookingAPI();
+    const optedIn = useAvailabilityContextEnabled();
+    const contextArgs = availabilityContextArgs(optedIn, context);
     // Refresh time outside render so an open calendar drops elapsed slots even
     // when neither inventory nor presence changes.
     const [now, setNow] = useState(() => Date.now());
@@ -74,6 +103,7 @@ export const useConvexSlots = (resourceId, eventLength, slotInterval, allDuratio
             dateTo: dateRange.to,
             eventLength,
             slotInterval: effectiveInterval,
+            ...contextArgs,
         }
         : "skip");
     const daySlots = useQuery(api.getDaySlots, enabled && selectedDateStr
@@ -82,6 +112,7 @@ export const useConvexSlots = (resourceId, eventLength, slotInterval, allDuratio
             date: selectedDateStr,
             eventLength,
             slotInterval: effectiveInterval,
+            ...contextArgs,
         }
         : "skip");
     // Get current user's session ID (stable across renders)

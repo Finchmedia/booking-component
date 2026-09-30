@@ -365,9 +365,7 @@ describe("maintenance: wipeAllData", () => {
     expect(await t.query(api.schedules.getSchedule, { id: roomB.scheduleId })).toBeNull();
     expect(await t.query(api.schedules.getDefaultSchedule, { organizationId: ORG })).toBeNull();
     expect(await t.query(api.public.listEventTypes, {})).toEqual([]);
-    await expect(
-      t.query(api.public.getEventType, { eventTypeId: roomA.eventTypeId })
-    ).rejects.toThrow(`Event type not found: ${roomA.eventTypeId}`);
+    expect(await t.query(api.public.getEventType, { eventTypeId: roomA.eventTypeId })).toBeNull();
     expect(await t.query(api.hooks.listHooks, {})).toEqual([]);
     expect(
       await t.query(api.schedules.listDateOverrides, { scheduleId: roomA.scheduleDocId })

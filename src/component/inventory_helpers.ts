@@ -1,6 +1,7 @@
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { assertValidRange, getRequiredSlots } from "./utils";
+import { throwBookingError } from "../shared/booking-errors.js";
 
 /** Only these states may release or move an inventory reservation. */
 export function holdsActiveInventory(status: string): boolean {
@@ -9,7 +10,7 @@ export function holdsActiveInventory(status: string): boolean {
 
 export function assertPositiveInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${label} must be a positive safe integer`);
+    throwBookingError("INVALID_INPUT", `${label} must be a positive safe integer`);
   }
 }
 
@@ -24,7 +25,7 @@ export function validateResourceCapacity(resource: Capacity): void {
   const quantity = resource.quantity ?? 1;
   assertPositiveInteger(quantity, "Resource capacity");
   if (!resource.isFungible && quantity !== 1) {
-    throw new Error("Non-fungible resources must have capacity one");
+    throwBookingError("INVALID_INPUT", "Non-fungible resources must have capacity one");
   }
 }
 
@@ -32,11 +33,11 @@ export type ResourceRequest = { resourceId: string; quantity?: number };
 
 export function validateResourceRequests(resources: ResourceRequest[]): void {
   if (resources.length === 0)
-    throw new Error("At least one resource is required");
+    throwBookingError("INVALID_INPUT", "At least one resource is required");
   const seen = new Set<string>();
   for (const resource of resources) {
     if (seen.has(resource.resourceId)) {
-      throw new Error(`Duplicate resource ID: "${resource.resourceId}"`);
+      throwBookingError("INVALID_INPUT", `Duplicate resource ID: "${resource.resourceId}"`);
     }
     seen.add(resource.resourceId);
     assertPositiveInteger(resource.quantity ?? 1, "Requested quantity");
@@ -50,7 +51,7 @@ export function validateRequestedQuantity(
   assertPositiveInteger(quantity, "Requested quantity");
   if (resource) validateResourceCapacity(resource);
   if (!resource?.isFungible && quantity !== 1) {
-    throw new Error("Non-fungible resources require quantity one");
+    throwBookingError("INVALID_INPUT", "Non-fungible resources require quantity one");
   }
 }
 
@@ -70,7 +71,8 @@ export async function assertSingleResourceSupported(
   resourceId: string,
 ): Promise<void> {
   if (await isFungibleResource(ctx, resourceId)) {
-    throw new Error(
+    throwBookingError(
+      "POOL_REQUIRES_BUNDLE",
       "Fungible resources require createMultiResourceBooking with an explicit quantity",
     );
   }
@@ -98,18 +100,16 @@ export async function reserveResourceSlots(
       if (usesQuantityInventory(resource)) {
         const row = await ctx.db
           .query("quantity_availability")
-          .withIndex("by_resource_date", (q) =>
+          .withIndex("by_resourceId_and_date", (q) =>
             q.eq("resourceId", request.resourceId).eq("date", date),
           )
           .unique();
-        const quantities = { ...(row?.slotQuantities ?? {}) } as Record<
-          string,
-          number
-        >;
+        const quantities: Record<string, number> = { ...row?.slotQuantities };
         for (const slot of slots) {
           const booked = quantities[slot] ?? 0;
           if (booked + quantity > capacity) {
-            throw new Error(
+            throwBookingError(
+              "QUANTITY_UNAVAILABLE",
               `Resource "${request.resourceId}" is not available for the requested quantity`,
             );
           }
@@ -125,7 +125,7 @@ export async function reserveResourceSlots(
       } else {
         const row = await ctx.db
           .query("daily_availability")
-          .withIndex("by_resource_date", (q) =>
+          .withIndex("by_resourceId_and_date", (q) =>
             q.eq("resourceId", request.resourceId).eq("date", date),
           )
           .unique();
@@ -133,7 +133,8 @@ export async function reserveResourceSlots(
           quantity > capacity ||
           slots.some((slot) => row?.busySlots.includes(slot))
         ) {
-          throw new Error(
+          throwBookingError(
+            "SLOT_UNAVAILABLE",
             `Resource "${request.resourceId}" is not available for the selected time`,
           );
         }

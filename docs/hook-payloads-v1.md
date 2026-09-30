@@ -2,11 +2,12 @@
 
 <!-- Generated from the pins in src/component/hook-payloads-v1.test.ts. Do not edit by hand; after a deliberate change run `npx vitest run src/component/hook-payloads-v1.test.ts -u`. -->
 
-A hook registered with `registerHook` runs its function handle with the event's payload as the
-function's arguments. The payload depends on the function that emitted the event, not only on
-the event type: `booking.cancelled` has four shapes. A handler with an argument validator must
-accept every shape of its event, and an added key fails such a validator just like a missing one,
-so each emitter keeps the shape below within version 1.
+A hook registered with `registerHook` without `payloadVersion` runs its function handle with the
+event's payload as the function's arguments. The payload depends on the function that emitted the
+event, not only on the event type: `booking.cancelled` has four shapes. A handler with an argument
+validator must accept every shape of its event, and an added key fails such a validator just like
+a missing one, so each emitter keeps the shape below within version 1. Register with
+`payloadVersion: 2` for one shape per event ([version 2](hook-payloads-v2.md)).
 
 Payloads contain booker contact details and, where shown, the booking's management token.
 Register hooks only from trusted server code.
@@ -17,7 +18,10 @@ Register hooks only from trusted server code.
   call passes one. `?` marks the keys the pinned calls show both ways; treat `managementToken` and
   `organizationId` as optional for every emitter, and `reason` for `transitionBookingState`.
 - Hooks registered without `organizationId` receive every event of their type. Hooks registered
-  for an organization receive the events of that organization's bookings only.
+  for an organization receive the events of that organization's bookings only. A booking belongs
+  to its event type's organization when that has one; a booking stored before 0.5.0 with another
+  one or none is given it before its next event when every resource it occupies belongs to it,
+  and otherwise keeps the stored one.
 - `createBooking` for an event type that requires confirmation emits `booking.created` with
   `status: "pending"`. `booking.pending` comes only from `transitionBookingState`.
 - `createProvisionalBooking` and `expireProvisionalBooking` emit no event. `presence.timeout` is
@@ -294,8 +298,9 @@ Reaches global hooks only: these bookings have no organization.
 ## StoredBooking
 
 `booking` is the stored booking document as it was before the change, with `status` set to the
-new status. Besides the keys below it carries `bookerPhone`, `bookerNotes` and `eventDescription`
-when the booking has them.
+new status and, when the change gave the booking its event type's organization, that
+`organizationId`. Besides the keys below it carries `bookerPhone`, `bookerNotes` and
+`eventDescription` when the booking has them.
 
 ```ts
 {

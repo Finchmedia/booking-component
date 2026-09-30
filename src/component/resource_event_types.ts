@@ -1,4 +1,5 @@
-import { mutation, query, type DatabaseReader } from "./_generated/server";
+import { mutation, query, type DatabaseReader, type MutationCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
   deletedCount,
@@ -6,6 +7,7 @@ import {
   resourceDoc,
   successResult,
 } from "./validators";
+import { throwBookingError } from "../shared/booking-errors.js";
 
 // ============================================
 // RESOURCE ↔ EVENT TYPE MAPPING
@@ -21,7 +23,7 @@ import {
 function linkRows(db: DatabaseReader, resourceId: string, eventTypeId: string) {
   return db
     .query("resource_event_types")
-    .withIndex("by_resource_event_type", (q) =>
+    .withIndex("by_resourceId_and_eventTypeId", (q) =>
       q.eq("resourceId", resourceId).eq("eventTypeId", eventTypeId)
     );
 }
@@ -40,6 +42,82 @@ function unique(ids: string[]): string[] {
   return [...new Set(ids)];
 }
 
+/**
+ * Whether a resource may serve an event type's bookings as far as
+ * organizations go: an event type with an organization takes only that
+ * organization's resources; one without (a global or legacy event type) takes
+ * any. Links and every booking check use this rule.
+ */
+export function sharesOrganization(
+  resource: Doc<"resources">,
+  eventType: Doc<"event_types">
+): boolean {
+  return eventType.organizationId === undefined || resource.organizationId === eventType.organizationId;
+}
+
+/** Rejects a link across organizations (see sharesOrganization). */
+function assertLinkable(resource: Doc<"resources">, eventType: Doc<"event_types">): void {
+  if (!sharesOrganization(resource, eventType)) {
+    throwBookingError(
+      "ORGANIZATION_MISMATCH",
+      `Resource "${resource.id}" of organization "${resource.organizationId}" cannot be linked to event type "${eventType.id}" of organization "${eventType.organizationId}"`
+    );
+  }
+}
+
+/**
+ * Before an event type without organization is adopted into
+ * `organizationId` (createEventType on its id): the links stay, so every
+ * linked resource must belong to that organization, as the link mutations
+ * require. Links whose resource no longer exists do not count
+ * (link_integrity lists them).
+ */
+export async function assertLinksAdoptable(
+  db: DatabaseReader,
+  eventTypeId: string,
+  organizationId: string
+): Promise<void> {
+  const links = await db
+    .query("resource_event_types")
+    .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", eventTypeId))
+    .collect();
+  for (const resourceId of unique(links.map((link) => link.resourceId))) {
+    const resource = await db
+      .query("resources")
+      .withIndex("by_external_id", (q) => q.eq("id", resourceId))
+      .first();
+    if (resource && resource.organizationId !== organizationId) {
+      throwBookingError(
+        "ORGANIZATION_MISMATCH",
+        `Event type "${eventTypeId}" cannot join organization "${organizationId}": its linked resource "${resource.id}" belongs to organization "${resource.organizationId}". Unlink it first`
+      );
+    }
+  }
+}
+
+/**
+ * Deletes every link row of a resource or of an event type and returns how
+ * many there were. deleteResource and deleteEventType call it, so an id
+ * created again later starts unlinked.
+ */
+export async function deleteLinks(
+  ctx: MutationCtx,
+  of: { resourceId: string } | { eventTypeId: string }
+): Promise<number> {
+  const links = await ("resourceId" in of
+    ? ctx.db
+        .query("resource_event_types")
+        .withIndex("by_resourceId", (q) => q.eq("resourceId", of.resourceId))
+    : ctx.db
+        .query("resource_event_types")
+        .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", of.eventTypeId))
+  ).collect();
+  for (const link of links) {
+    await ctx.db.delete(link._id);
+  }
+  return links.length;
+}
+
 // ============================================
 // QUERIES
 // ============================================
@@ -55,7 +133,7 @@ export const getEventTypesForResource = query({
     // Get all mappings for this resource
     const mappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+      .withIndex("by_resourceId", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
     // Fetch event types (each once, even over duplicate link rows)
@@ -87,7 +165,7 @@ export const getResourcesForEventType = query({
     // Get all mappings for this event type
     const mappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+      .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
     // Fetch resources (each once, even over duplicate link rows)
@@ -129,7 +207,7 @@ export const getResourceIdsForEventType = query({
   handler: async (ctx, args) => {
     const mappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+      .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
     return unique(mappings.map((m) => m.resourceId));
@@ -145,7 +223,7 @@ export const getEventTypeIdsForResource = query({
   handler: async (ctx, args) => {
     const mappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+      .withIndex("by_resourceId", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
     return unique(mappings.map((m) => m.eventTypeId));
@@ -173,7 +251,7 @@ export const linkResourceToEventType = mutation({
       .unique();
 
     if (!resource) {
-      throw new Error(`Resource "${args.resourceId}" not found`);
+      throwBookingError("RESOURCE_NOT_FOUND", `Resource "${args.resourceId}" not found`);
     }
 
     // Check if event type exists
@@ -183,8 +261,10 @@ export const linkResourceToEventType = mutation({
       .unique();
 
     if (!eventType) {
-      throw new Error(`Event type "${args.eventTypeId}" not found`);
+      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.eventTypeId}" not found`);
     }
+
+    assertLinkable(resource, eventType);
 
     // Check if link already exists
     const [existing, ...duplicates] = await linkRows(
@@ -252,16 +332,31 @@ export const setResourcesForEventType = mutation({
       .unique();
 
     if (!eventType) {
-      throw new Error(`Event type "${args.eventTypeId}" not found`);
+      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.eventTypeId}" not found`);
+    }
+
+    // Every requested resource that exists must share the event type's
+    // organization; one that does not rejects the whole call. Unknown ids are
+    // skipped, as before.
+    const newResourceIds = new Set(args.resourceIds);
+    const existingResourceIds = new Set<string>();
+    for (const resourceId of newResourceIds) {
+      const resource = await ctx.db
+        .query("resources")
+        .withIndex("by_external_id", (q) => q.eq("id", resourceId))
+        .unique();
+      if (resource) {
+        assertLinkable(resource, eventType);
+        existingResourceIds.add(resourceId);
+      }
     }
 
     // Get current links
     const existingMappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+      .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.eventTypeId))
       .collect();
 
-    const newResourceIds = new Set(args.resourceIds);
     const keptResourceIds = new Set<string>();
 
     // Delete removed links, and duplicate rows of kept ones
@@ -273,21 +368,13 @@ export const setResourcesForEventType = mutation({
       }
     }
 
-    // Add new links (a repeated id only once)
-    for (const resourceId of newResourceIds) {
+    // Add new links (a repeated id only once; unknown ids skipped)
+    for (const resourceId of existingResourceIds) {
       if (!keptResourceIds.has(resourceId)) {
-        // Verify resource exists
-        const resource = await ctx.db
-          .query("resources")
-          .withIndex("by_external_id", (q) => q.eq("id", resourceId))
-          .unique();
-
-        if (resource) {
-          await ctx.db.insert("resource_event_types", {
-            resourceId,
-            eventTypeId: args.eventTypeId,
-          });
-        }
+        await ctx.db.insert("resource_event_types", {
+          resourceId,
+          eventTypeId: args.eventTypeId,
+        });
       }
     }
 
@@ -313,16 +400,31 @@ export const setEventTypesForResource = mutation({
       .unique();
 
     if (!resource) {
-      throw new Error(`Resource "${args.resourceId}" not found`);
+      throwBookingError("RESOURCE_NOT_FOUND", `Resource "${args.resourceId}" not found`);
+    }
+
+    // Every requested event type that exists must accept the resource's
+    // organization; one that does not rejects the whole call. Unknown ids are
+    // skipped, as before.
+    const newEventTypeIds = new Set(args.eventTypeIds);
+    const existingEventTypeIds = new Set<string>();
+    for (const eventTypeId of newEventTypeIds) {
+      const eventType = await ctx.db
+        .query("event_types")
+        .withIndex("by_external_id", (q) => q.eq("id", eventTypeId))
+        .unique();
+      if (eventType) {
+        assertLinkable(resource, eventType);
+        existingEventTypeIds.add(eventTypeId);
+      }
     }
 
     // Get current links
     const existingMappings = await ctx.db
       .query("resource_event_types")
-      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+      .withIndex("by_resourceId", (q) => q.eq("resourceId", args.resourceId))
       .collect();
 
-    const newEventTypeIds = new Set(args.eventTypeIds);
     const keptEventTypeIds = new Set<string>();
 
     // Delete removed links, and duplicate rows of kept ones
@@ -334,21 +436,13 @@ export const setEventTypesForResource = mutation({
       }
     }
 
-    // Add new links (a repeated id only once)
-    for (const eventTypeId of newEventTypeIds) {
+    // Add new links (a repeated id only once; unknown ids skipped)
+    for (const eventTypeId of existingEventTypeIds) {
       if (!keptEventTypeIds.has(eventTypeId)) {
-        // Verify event type exists
-        const eventType = await ctx.db
-          .query("event_types")
-          .withIndex("by_external_id", (q) => q.eq("id", eventTypeId))
-          .unique();
-
-        if (eventType) {
-          await ctx.db.insert("resource_event_types", {
-            resourceId: args.resourceId,
-            eventTypeId,
-          });
-        }
+        await ctx.db.insert("resource_event_types", {
+          resourceId: args.resourceId,
+          eventTypeId,
+        });
       }
     }
 
@@ -357,41 +451,25 @@ export const setEventTypesForResource = mutation({
 });
 
 /**
- * Delete all links for a resource (used when deleting a resource)
+ * Delete all links for a resource. deleteResource does this itself since
+ * 0.5.0; this removes link rows that earlier deletes left behind.
  */
 export const deleteAllLinksForResource = mutation({
   args: { resourceId: v.string() },
   returns: deletedCount,
   handler: async (ctx, args) => {
-    const mappings = await ctx.db
-      .query("resource_event_types")
-      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
-      .collect();
-
-    for (const mapping of mappings) {
-      await ctx.db.delete(mapping._id);
-    }
-
-    return { deleted: mappings.length };
+    return { deleted: await deleteLinks(ctx, { resourceId: args.resourceId }) };
   },
 });
 
 /**
- * Delete all links for an event type (used when deleting an event type)
+ * Delete all links for an event type. deleteEventType does this itself since
+ * 0.5.0; this removes link rows that earlier deletes left behind.
  */
 export const deleteAllLinksForEventType = mutation({
   args: { eventTypeId: v.string() },
   returns: deletedCount,
   handler: async (ctx, args) => {
-    const mappings = await ctx.db
-      .query("resource_event_types")
-      .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
-      .collect();
-
-    for (const mapping of mappings) {
-      await ctx.db.delete(mapping._id);
-    }
-
-    return { deleted: mappings.length };
+    return { deleted: await deleteLinks(ctx, { eventTypeId: args.eventTypeId }) };
   },
 });

@@ -11,6 +11,7 @@ import {
   makeFunctionReference,
   mutationGeneric,
   queryGeneric,
+  type FunctionReference,
 } from "convex/server";
 import { v } from "convex/values";
 import { convexTest } from "convex-test";
@@ -41,7 +42,8 @@ function resolved(props: { publicApi: PublicBookingAPI; adminApi?: Partial<Admin
   return result.current;
 }
 
-const nameOf = (api: BookingAPI, key: keyof BookingAPI) => getFunctionName(api[key]!);
+const nameOf = (api: BookingAPI, key: keyof BookingAPI) =>
+  getFunctionName(api[key] as FunctionReference<"query" | "mutation">);
 
 function stubClient() {
   const sent: string[] = [];
@@ -71,6 +73,16 @@ describe("operation lists", () => {
   });
 });
 
+const BOOKING_ARGS = {
+  eventTypeId: "e",
+  resourceId: "r",
+  start: 0,
+  end: 3_600_000,
+  timezone: "UTC",
+  booker: { name: "Ada", email: "ada@example.com" },
+  location: { type: "address" },
+};
+
 describe("generated publicApi and adminApi", () => {
   it("resolves every admin operation to admin:<name> and every public one to public:<name>", () => {
     // The generated proxies report no members; routing must not depend on it
@@ -84,6 +96,8 @@ describe("generated publicApi and adminApi", () => {
     expect(PUBLIC_OPERATIONS.map((key) => nameOf(merged, key))).toEqual(
       PUBLIC_OPERATIONS.map((key) => `public:${key}`)
     );
+    // Nothing else: the resolved API holds exactly the listed operations
+    expect(Object.keys(merged).sort()).toEqual([...PUBLIC_OPERATIONS, ...ADMIN_OPERATIONS].sort());
   });
 
   it("sends admin:createResource and public:createBooking through the Convex client", async () => {
@@ -94,7 +108,7 @@ describe("generated publicApi and adminApi", () => {
       const createBooking = useMutation(bookingApi.createBooking);
       return createElement("div", null,
         createElement("button", { onClick: () => void createResource({ id: "room" }) }, "resource"),
-        createElement("button", { onClick: () => void createBooking({}) }, "booking"));
+        createElement("button", { onClick: () => void createBooking(BOOKING_ARGS) }, "booking"));
     }
     render(createElement(ConvexProvider, { client },
       createElement(BookingProvider, {
@@ -112,7 +126,11 @@ describe("generated publicApi and adminApi", () => {
     const host = convexTest(defineSchema({}), {
       "./host/_generated/api.js": async () => ({}),
       "./host/public.ts": async () => ({
-        getEventType: queryGeneric({ args: {}, returns: v.string(), handler: async () => "public getEventType" }),
+        getEventType: queryGeneric({
+          args: { eventTypeId: v.string() },
+          returns: v.string(),
+          handler: async () => "public getEventType",
+        }),
       }),
       "./host/admin.ts": async () => ({
         createResource: mutationGeneric({
@@ -121,13 +139,17 @@ describe("generated publicApi and adminApi", () => {
           handler: async () => "admin createResource",
         }),
         // Same name as a public operation: must not be picked for public calls
-        getEventType: queryGeneric({ args: {}, returns: v.string(), handler: async () => "admin getEventType" }),
+        getEventType: queryGeneric({
+          args: { eventTypeId: v.string() },
+          returns: v.string(),
+          handler: async () => "admin getEventType",
+        }),
       }),
     });
     const merged = resolved({ publicApi: api.public, adminApi: api.admin });
 
     await expect(host.mutation(merged.createResource!, { id: "room" })).resolves.toBe("admin createResource");
-    await expect(host.query(merged.getEventType, {})).resolves.toBe("public getEventType");
+    await expect(host.query(merged.getEventType, { eventTypeId: "e" })).resolves.toBe("public getEventType");
   });
 
   it("routes admin operations to a generated adminApi next to a plain-object publicApi", () => {
@@ -137,11 +159,13 @@ describe("generated publicApi and adminApi", () => {
     const merged = resolved({ publicApi: plainPublic, adminApi: api.admin });
     expect(nameOf(merged, "createResource")).toBe("admin:createResource");
     expect(nameOf(merged, "getEventType")).toBe("public:getEventType");
+    // An operation the plain publicApi lacks is not taken from adminApi
+    expect(merged.createBooking).toBeUndefined();
   });
 });
 
 describe("plain-object adminApi", () => {
-  it("resolves its operations and falls back to publicApi for missing admin names (deprecated)", () => {
+  it("resolves its operations; admin operations it lacks are undefined, not taken from publicApi", () => {
     const plainAdmin: Partial<AdminBookingAPI> = {
       createResource: makeFunctionReference<"mutation">("admin:createResource"),
       listBookings: makeFunctionReference<"query">("admin:listBookings"),
@@ -149,47 +173,66 @@ describe("plain-object adminApi", () => {
     const merged = resolved({ publicApi: api.public, adminApi: plainAdmin });
     expect(nameOf(merged, "createResource")).toBe("admin:createResource");
     expect(nameOf(merged, "listBookings")).toBe("admin:listBookings");
-    expect(nameOf(merged, "deleteResource")).toBe("public:deleteResource");
+    // CONTROL: the generated publicApi would return public:deleteResource
+    expect(getFunctionName((api.public as unknown as AdminBookingAPI).deleteResource)).toBe("public:deleteResource");
+    expect(merged.deleteResource).toBeUndefined();
   });
 
-  it("still overrides a public operation it defines itself, as before", () => {
+  it("never overrides a public operation, even one it defines", () => {
     // Non-literal object, so the public name passes the Partial<AdminBookingAPI> type
     const adminLike = {
       createResource: makeFunctionReference<"mutation">("admin:createResource"),
       getEventType: makeFunctionReference<"query">("admin:getEventType"),
     };
     const merged = resolved({ publicApi: api.public, adminApi: adminLike });
-    expect(nameOf(merged, "getEventType")).toBe("admin:getEventType");
-    // Control: public names it does not define, and its admin operation
+    expect(nameOf(merged, "getEventType")).toBe("public:getEventType");
+    // Control: the other public names and its admin operation
     expect(nameOf(merged, "createBooking")).toBe("public:createBooking");
     expect(nameOf(merged, "createResource")).toBe("admin:createResource");
   });
 
-  it("passes names outside both interfaces through as before", () => {
+  it("does not pass names outside both interfaces through", () => {
     const customAdmin = {
       createResource: makeFunctionReference<"mutation">("admin:createResource"),
       exportBookings: makeFunctionReference<"query">("admin:exportBookings"),
     };
     const withPlain = resolved({ publicApi: api.public, adminApi: customAdmin }) as BookingAPI &
-      Record<string, never>;
-    expect(getFunctionName(withPlain.exportBookings)).toBe("admin:exportBookings");
+      Record<string, unknown>;
+    expect(withPlain.exportBookings).toBeUndefined();
+    expect(nameOf(withPlain, "createResource")).toBe("admin:createResource");
 
     const withGenerated = resolved({ publicApi: api.public, adminApi: api.admin }) as BookingAPI &
-      Record<string, never>;
-    expect(getFunctionName(withGenerated.exportBookings)).toBe("public:exportBookings");
+      Record<string, unknown>;
+    expect(withGenerated.exportBookings).toBeUndefined();
   });
 });
 
 describe("without adminApi", () => {
-  it("resolves admin names from publicApi (deprecated) and returns publicApi itself", () => {
+  it("leaves every admin operation undefined and resolves public ones from publicApi", () => {
     const merged = resolved({ publicApi: api.public });
-    expect(nameOf(merged, "createResource")).toBe("public:createResource");
-    expect(nameOf(merged, "getEventType")).toBe("public:getEventType");
+    expect(ADMIN_OPERATIONS.map((key) => merged[key])).toEqual(ADMIN_OPERATIONS.map(() => undefined));
+    expect(PUBLIC_OPERATIONS.map((key) => nameOf(merged, key))).toEqual(
+      PUBLIC_OPERATIONS.map((key) => `public:${key}`)
+    );
+    expect(Object.keys(merged).sort()).toEqual([...PUBLIC_OPERATIONS].sort());
 
     const plainPublic = { getEventType: makeFunctionReference<"query">("public:getEventType") } as unknown as PublicBookingAPI;
     const plain = resolved({ publicApi: plainPublic });
-    expect(plain).toBe(plainPublic);
+    expect(nameOf(plain, "getEventType")).toBe("public:getEventType");
     expect(plain.createResource).toBeUndefined();
+    expect(plain.getBooking).toBeUndefined();
+  });
+
+  it("keeps one API object across renders with the same gateways", () => {
+    // Each property read of a generated api returns a new proxy: hold one
+    const publicApi = api.public;
+    const { result, rerender } = renderHook(() => useBookingAPI(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(BookingProvider, { publicApi, children }),
+    });
+    const first = result.current;
+    rerender();
+    expect(result.current).toBe(first);
   });
 });
 

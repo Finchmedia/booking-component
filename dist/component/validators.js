@@ -14,11 +14,13 @@
 // every stored row.
 //
 // Field-level decisions:
-// - `bookings.status` stays `v.string()` (as in the schema). Do NOT narrow it
-//   to a literal union here: a returns validator is enforced at runtime, so a
-//   row outside the union would throw on read.
-// - `quantity_availability.slotQuantities` is `v.any()` in the schema; anything
-//   returning it must stay `v.any()`.
+// - `bookings.status` and the history statuses are narrowed in the schema
+//   itself (src/shared/booking-status.ts), never only here: a returns
+//   validator is enforced at runtime, and the schema is what guarantees that
+//   no stored row is outside the union.
+// - `quantity_availability.slotQuantities` is `v.record(v.string(), v.number())`
+//   in the schema (booked units per slot index); results that return it use
+//   the same record.
 //
 // Note: `.extend()` runs at module load inside the HOST app's convex runtime
 // and exists since convex 1.29.0 — the package's peer floor must stay >= 1.29.

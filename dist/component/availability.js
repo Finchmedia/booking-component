@@ -21,7 +21,7 @@ export async function isAvailable(ctx, resourceId, start, end, excludeSlots) {
     for (const [date, slots] of requiredSlotsByDate(start, end)) {
         const availability = await ctx.db
             .query("daily_availability")
-            .withIndex("by_resource_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
+            .withIndex("by_resourceId_and_date", (q) => q.eq("resourceId", resourceId).eq("date", date))
             .unique();
         if (availability) {
             const excluded = excludeSlots?.get(date) ?? [];

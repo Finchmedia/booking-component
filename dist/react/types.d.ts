@@ -1,3 +1,4 @@
+import type { BookingStatus } from "../shared/booking-status.js";
 export type BookingStep = "event-meta" | "booking-form" | "success";
 export interface BookingSlot {
     time: string;
@@ -17,8 +18,13 @@ export interface Booking {
     start: number;
     end: number;
     timezone: string;
-    /** "rescheduled" is deprecated: it is never stored; a moved booking is "cancelled". */
-    status: "provisional" | "pending" | "confirmed" | "cancelled" | "completed" | "declined" | "rescheduled";
+    /**
+     * The stored status, the component's {@link BookingStatus}: "provisional",
+     * "pending", "confirmed", "cancelled", "declined" or "completed". A moved
+     * booking is "cancelled". The deprecated "rescheduled", which was never
+     * stored, is no longer part of the type.
+     */
+    status: BookingStatus;
     bookerName: string;
     bookerEmail: string;
     bookerPhone?: string;

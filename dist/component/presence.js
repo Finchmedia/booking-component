@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query, internalMutation, } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { presenceDoc } from "./validators";
+import { throwBookingError } from "../shared/booking-errors.js";
 const TIMEOUT_MS = 10_000; // Users are considered "gone" after 10 seconds
 function scheduleCleanup(ctx, key) {
     return ctx.scheduler.runAfter(TIMEOUT_MS, internal.presence.cleanup, {
@@ -44,7 +45,7 @@ export const heartbeat = mutation({
             // 1. Update or create the presence record
             const existingPresence = await ctx.db
                 .query("presence")
-                .withIndex("by_user_slot_resource", (q) => q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId))
+                .withIndex("by_user_and_slot_and_resourceId", (q) => q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId))
                 .first();
             if (existingPresence) {
                 await ctx.db.patch(existingPresence._id, {
@@ -66,7 +67,7 @@ export const heartbeat = mutation({
             // 2. Ensure a cleanup job is scheduled
             const existingHeartbeat = await ctx.db
                 .query("presence_heartbeats")
-                .withIndex("by_user_slot_resource", (q) => q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId))
+                .withIndex("by_user_and_slot_and_resourceId", (q) => q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId))
                 .first();
             // A new hold gets its cleanup job here. An existing marker keeps its job
             // while that job can still run; a marker whose job was cancelled, failed
@@ -105,11 +106,11 @@ export const leave = mutation({
         for (const slot of args.slots) {
             const presence = await ctx.db
                 .query("presence")
-                .withIndex("by_user_slot_resource", (q) => q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId))
+                .withIndex("by_user_and_slot_and_resourceId", (q) => q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId))
                 .first();
             const heartbeatDoc = await ctx.db
                 .query("presence_heartbeats")
-                .withIndex("by_user_slot_resource", (q) => q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId))
+                .withIndex("by_user_and_slot_and_resourceId", (q) => q.eq("user", args.user).eq("slot", slot).eq("resourceId", args.resourceId))
                 .first();
             if (presence)
                 await ctx.db.delete(presence._id);
@@ -147,7 +148,7 @@ export const list = query({
         const now = Date.now();
         return await ctx.db
             .query("presence")
-            .withIndex("by_resource_slot_updated", (q) => q
+            .withIndex("by_resourceId_and_slot_and_updated", (q) => q
             .eq("resourceId", args.resourceId)
             .eq("slot", args.slot)
             .gte("updated", now - TIMEOUT_MS))
@@ -180,7 +181,7 @@ export const getDatePresence = query({
         // Using \u{FFFF} (char 65535) as upper bound ensures we capture all timestamps on that date
         const allPresence = await ctx.db
             .query("presence")
-            .withIndex("by_resource_slot_updated", (q) => q
+            .withIndex("by_resourceId_and_slot_and_updated", (q) => q
             .eq("resourceId", args.resourceId)
             .gte("slot", args.date)
             .lt("slot", args.date + "\u{FFFF}"))
@@ -222,14 +223,14 @@ export const getActivePresenceCount = query({
             // Get all presence for this resource
             presenceRecords = await ctx.db
                 .query("presence")
-                .withIndex("by_resource_slot_updated", (q) => q.eq("resourceId", args.resourceId))
+                .withIndex("by_resourceId_and_slot_and_updated", (q) => q.eq("resourceId", args.resourceId))
                 .collect();
         }
         else if (args.eventTypeId) {
             // Get all presence for this event type
             presenceRecords = await ctx.db
                 .query("presence")
-                .withIndex("by_event_type", (q) => q.eq("eventTypeId", args.eventTypeId))
+                .withIndex("by_eventTypeId", (q) => q.eq("eventTypeId", args.eventTypeId))
                 .collect();
         }
         else {
@@ -261,11 +262,11 @@ export const cleanup = internalMutation({
     handler: async (ctx, args) => {
         const presence = await ctx.db
             .query("presence")
-            .withIndex("by_user_slot_resource", (q) => q.eq("user", args.user).eq("slot", args.slot).eq("resourceId", args.resourceId))
+            .withIndex("by_user_and_slot_and_resourceId", (q) => q.eq("user", args.user).eq("slot", args.slot).eq("resourceId", args.resourceId))
             .first();
         const heartbeatDoc = await ctx.db
             .query("presence_heartbeats")
-            .withIndex("by_user_slot_resource", (q) => q.eq("user", args.user).eq("slot", args.slot).eq("resourceId", args.resourceId))
+            .withIndex("by_user_and_slot_and_resourceId", (q) => q.eq("user", args.user).eq("slot", args.slot).eq("resourceId", args.resourceId))
             .first();
         if (!presence || !heartbeatDoc) {
             // Data missing, clean up whatever remains
@@ -315,7 +316,7 @@ function parseSweepCursor(db, cursor) {
         if (id)
             return { creationTime: key[0], id };
     }
-    throw new Error("Invalid sweep cursor");
+    throwBookingError("INVALID_INPUT", "Invalid sweep cursor");
 }
 /**
  * Up to `limit` markers after `cursor`, in by_creation_time order: the rest of
@@ -369,7 +370,7 @@ export const sweepOrphanedHolds = mutation({
     }),
     handler: async (ctx, args) => {
         if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_SWEEP_LIMIT) {
-            throw new Error(`limit must be an integer from 1 to ${MAX_SWEEP_LIMIT}`);
+            throwBookingError("INVALID_INPUT", `limit must be an integer from 1 to ${MAX_SWEEP_LIMIT}`);
         }
         const cursor = typeof args.cursor === "string" ? parseSweepCursor(ctx.db, args.cursor) : null;
         const markers = await markersAfter(ctx.db, cursor, args.limit);
@@ -381,7 +382,7 @@ export const sweepOrphanedHolds = mutation({
                 continue;
             const presence = await ctx.db
                 .query("presence")
-                .withIndex("by_user_slot_resource", (q) => q.eq("user", marker.user).eq("slot", marker.slot).eq("resourceId", marker.resourceId))
+                .withIndex("by_user_and_slot_and_resourceId", (q) => q.eq("user", marker.user).eq("slot", marker.slot).eq("resourceId", marker.resourceId))
                 .first();
             if (!presence || now - presence.updated > TIMEOUT_MS) {
                 deleted++;

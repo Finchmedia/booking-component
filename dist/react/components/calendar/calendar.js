@@ -29,14 +29,12 @@ export const Calendar = (props) => {
     return _jsx(CalendarContent, { ...props, eventType: eventType });
 };
 // Inner component: all hooks called unconditionally (no early return before hooks)
-const CalendarContent = ({ resourceId, 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- F13: slot queries do not send the event type yet (0.5.0)
-eventTypeId: _eventTypeId, onSlotSelect, title, description, showHeader, organizerName, organizerAvatar, 
+const CalendarContent = ({ resourceId, eventTypeId, onSlotSelect, title, description, showHeader, organizerName, organizerAvatar, 
 // Controlled state
-selectedDate, onDateChange, currentMonth, onMonthChange, selectedDuration, onDurationChange, timezone, onTimezoneChange, timeFormat, onTimeFormatChange, disabled, 
+selectedDate, onDateChange, currentMonth, onMonthChange, selectedDuration, onDurationChange, timezone, onTimezoneChange, timeFormat, onTimeFormatChange, disabled, rescheduleContext, 
 // Loaded data
 eventType, }) => {
-    const isTimezoneLocked = eventType?.lockTimeZoneToggle || false;
+    const isTimezoneLocked = eventType.lockTimeZoneToggle || false;
     // Use controlled duration from props
     const eventLength = selectedDuration;
     // One slot grid for every selected duration (the event's slotInterval or its
@@ -49,8 +47,9 @@ eventType, }) => {
     });
     // Use Convex hook for slots data - only enabled when visible
     const { monthSlots, availableSlots, reservedSlots, isLoading, fetchMonthSlotsFor, fetchSlotsForDate, } = useConvexSlots(resourceId, eventLength, slotInterval, undefined, // allDurationOptions: only used without a slotInterval
-    hasIntersected, timezone // Days are civil dates; only the deprecated fetchSlots reads the zone
-    );
+    hasIntersected, timezone, // Days are civil dates; only the deprecated fetchSlots reads the zone
+    // Sent only with the provider's availabilityContext opt-in
+    { eventTypeId, rescheduleContext });
     // Handle date selection: the clicked cell's label is the day queried
     const handleDateSelect = (date) => {
         onDateChange(date);

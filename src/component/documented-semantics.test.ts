@@ -1,16 +1,16 @@
 /**
- * Current behaviour the README documents as a host duty or as the contract
- * (plan PR-08b); change only deliberately, together with the README.
+ * Behaviour the README documents as the contract or as a host duty (plan
+ * PR-08b); change only deliberately, together with the README.
  *
- * - Eligibility (F6, N13): only createBooking and createProvisionalBooking
- *   check that the event type and resource exist, are active and are linked.
- *   Bundles, both moves and confirmations do not, and no path compares
- *   organizations.
+ * - Eligibility (F6, N13; component-enforced since 0.5.0): every creation,
+ *   both moves and confirmations check that the event type and every
+ *   resource exist, are active, are linked and share the event type's
+ *   organization. Cancelling and declining never check.
  * - `scheduleId: ""` means no schedule (F12).
  * - Updates (N25): an omitted field is unchanged, so no field can be removed;
  *   strings and lists can be set to "" and [].
  *
- * Pinned elsewhere: link rows survive deletes (resource-metadata-and-links),
+ * Pinned elsewhere: deletes remove link rows (link-organization),
  * listBookings' resourceId is the primary resource (list-bookings-stream) and
  * the other schedule-argument shapes (schedule-arguments).
  */
@@ -57,11 +57,19 @@ async function apply(t: T, seed: SeededResource, condition: Condition) {
 }
 
 describe("eligibility per entry point", () => {
+  // Since 0.5.0 every creation, both moves and confirmations follow the same
+  // booking rules; the texts differ between single bookings and bundles.
   const SINGLE = {
     eligible: "ok: confirmed",
     "event type inactive": "Event type is no longer active",
     "resource inactive": "Resource is no longer active",
     "not linked": "Resource is not available for this event type",
+  };
+  const BUNDLE = {
+    eligible: "ok: confirmed",
+    "event type inactive": 'Event type "et-1" is no longer active',
+    "resource inactive": 'Resource "res-1" is no longer active',
+    "not linked": 'Resource "res-1" is not available for this event type',
   };
 
   test.each(Object.keys(SINGLE) as Condition[])("%s", async (condition) => {
@@ -71,9 +79,12 @@ describe("eligibility per entry point", () => {
     // Existing bookings, made while everything was eligible.
     const movable = await book(t, seed, at(8), at(9));
     const tokenMovable = await book(t, seed, at(9), at(10));
+    const cancellable = await book(t, seed, at(10), at(11));
     const pending = await book(t, approval, at(8), at(9));
+    const declinable = await book(t, approval, at(9), at(10));
     await apply(t, seed, condition);
     await apply(t, approval, condition);
+    const approvalText = SINGLE[condition];
 
     expect({
       createBooking: await outcome(() => book(t, seed, at(11), at(12))),
@@ -94,21 +105,39 @@ describe("eligibility per entry point", () => {
       "transitionBookingState pending -> confirmed": await outcome(() => t.mutation(api.hooks.transitionBookingState, {
         bookingId: pending._id, toStatus: "confirmed",
       })),
+      "transitionBookingState pending -> declined": await outcome(() => t.mutation(api.hooks.transitionBookingState, {
+        bookingId: declinable._id, toStatus: "declined",
+      })),
+      cancelBookingByToken: await outcome(() => t.mutation(api.public.cancelBookingByToken, {
+        uid: cancellable.uid, token: cancellable.managementToken!,
+      })),
     }).toEqual({
       createBooking: SINGLE[condition],
       createProvisionalBooking: SINGLE[condition].replace("confirmed", "provisional"),
-      createMultiResourceBooking: "ok: confirmed",
-      rescheduleBooking: "ok: confirmed",
-      rescheduleBookingByToken: "ok: confirmed",
-      "transitionBookingState pending -> confirmed": "ok",
+      createMultiResourceBooking: BUNDLE[condition],
+      rescheduleBooking: SINGLE[condition],
+      rescheduleBookingByToken: SINGLE[condition],
+      "transitionBookingState pending -> confirmed": condition === "eligible" ? "ok" : approvalText.replace("res-1", "res-2"),
+      // Ending a booking is always allowed.
+      "transitionBookingState pending -> declined": "ok",
+      cancelBookingByToken: "ok",
     });
+    // Configuration changes never end existing bookings; a refused move keeps
+    // the original as it was.
+    if (condition !== "eligible") {
+      for (const booking of [movable, tokenMovable]) {
+        expect((await t.query(api.public.getBooking, { bookingId: booking._id }))?.status).toBe("confirmed");
+      }
+      expect((await t.query(api.public.getBooking, { bookingId: pending._id }))?.status).toBe("pending");
+    }
   });
 
-  test("bundles take unknown resources as one-unit standalone ones; no path compares organizations", async () => {
+  test("bundles reject unknown resources; every booking path compares organizations", async () => {
     const { t } = setup();
     const seed = await seedResource(t); // organization org-1
     await seedResource(t, { resourceId: "res-other", eventTypeId: "et-other", organizationId: "org-2" });
-    await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: "res-other", eventTypeId: seed.eventTypeId });
+    // A cross-organization link as 0.4.x stored it (linkResourceToEventType rejects it since 0.5.0).
+    await t.run((ctx) => ctx.db.insert("resource_event_types", { resourceId: "res-other", eventTypeId: seed.eventTypeId }));
     const bundle = (resourceId: string, hour: number) => outcome(() => t.mutation(api.multi_resource.createMultiResourceBooking, {
       eventTypeId: seed.eventTypeId, resources: [{ resourceId }], start: at(hour), end: at(hour) + HOUR,
       timezone: "UTC", booker: BOOKER, location: LOCATION,
@@ -116,18 +145,18 @@ describe("eligibility per entry point", () => {
 
     expect({
       "bundle, unknown resource": await bundle("no-such-resource", 9),
-      "bundle, unknown resource, same time again": await bundle("no-such-resource", 9),
       "createBooking, unknown resource": await outcome(() => book(t, { ...seed, resourceId: "no-such-resource" }, at(10), at(11))),
       "createBooking, org-1 event type on a linked org-2 resource": await outcome(() =>
         book(t, { ...seed, resourceId: "res-other" }, at(11), at(12))),
       "bundle, org-1 event type on an org-2 resource": await bundle("res-other", 12),
     }).toEqual({
-      "bundle, unknown resource": "ok: confirmed",
-      "bundle, unknown resource, same time again": 'Resource "no-such-resource" is not available for the selected time',
+      "bundle, unknown resource": 'Resource "no-such-resource" not found',
       "createBooking, unknown resource": "Resource not found",
-      "createBooking, org-1 event type on a linked org-2 resource": "ok: confirmed",
-      "bundle, org-1 event type on an org-2 resource": "ok: confirmed",
+      "createBooking, org-1 event type on a linked org-2 resource": "Resource belongs to another organization than the event type",
+      "bundle, org-1 event type on an org-2 resource": 'Resource "res-other" belongs to another organization than the event type',
     });
+    // Nothing was reserved for the unknown id.
+    expect(await t.query(api.maintenance.getDailyAvailability, { resourceId: "no-such-resource", date: TUESDAY })).toBeNull();
   });
 });
 
@@ -155,12 +184,16 @@ test('scheduleId "" is no schedule: the legacy 09:00–17:00 UTC window', async 
 describe("updates: an omitted field is unchanged", () => {
   test("event types: \"\" and [] are stored; scheduleId and numbers cannot be removed", async () => {
     const { t } = setup();
+    // Since 0.5.0 an event type's scheduleId must name an existing schedule.
+    await t.mutation(api.schedules.createSchedule, {
+      id: "sch-1", organizationId: "org-1", name: "Hours", timezone: "UTC", weeklyHours: [],
+    });
     const seed = await seedResource(t, {
       scheduleId: "sch-1",
       eventType: { description: "Intro call", lengthInMinutesOptions: [30, 60], bufferBefore: 10 },
     });
     const read = async () => {
-      const eventType = await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId });
+      const eventType = (await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId }))!;
       return {
         description: eventType.description,
         lengthInMinutesOptions: eventType.lengthInMinutesOptions,
