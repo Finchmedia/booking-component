@@ -190,8 +190,9 @@ endpoints to authorized host wrappers.
 - **Bundles and pools:** reserve several resources atomically through the
   [multi-resource API](https://convexbooking.dev/docs/guides#multi-resource-booking).
   Pool quantities use this API; ordinary single-resource flows reject pools.
-  A bundle created without `organizationId` belongs to its event type's
-  organization. After upgrading from 0.4.2 or earlier, run
+  A bundle belongs to its event type's organization: an `organizationId` that
+  differs is rejected, and for an event type without organization the
+  argument is used. After upgrading from 0.4.2 or earlier, run
   `maintenance.backfillBookingOrganizations` once to fill that organization on
   older bundles; see the CHANGELOG.
 - **Lifecycle:** confirmation, decline, cancellation and atomic rescheduling.
@@ -215,6 +216,19 @@ endpoints to authorized host wrappers.
 
 ## Details to rely on
 
+- **Booking rules:** `createBooking`, `createProvisionalBooking`,
+  `createMultiResourceBooking` (for every item), `rescheduleBooking`,
+  `rescheduleBookingByToken` and confirmations through
+  `transitionBookingState` (a provisional hold or a pending request to
+  `confirmed`) check the current configuration: the event type and every
+  resource exist and are active, each resource is linked to the event type
+  and belongs to its organization when it has one, and one resource is not
+  an add-on (`isStandalone: false`). A bundle's primary resource is its first
+  item and may be an add-on. There is no administrator override: to move or
+  confirm after deactivating or unlinking, reactivate or relink first.
+  Cancelling, declining and expiring are always allowed, and deactivating
+  never ends an existing booking. The legacy `createReservation` path checks
+  none of this, and its bookings keep that exemption when moved.
 - **Schedule arguments:** pass `scheduleId` to `getMonthAvailability` and
   `getDaySlots` and omit `resourceTimezone` and `availableSlots`. The
   component then reads the schedule's hours, date overrides included, in the
@@ -258,14 +272,6 @@ endpoints to authorized host wrappers.
 
 ## Host responsibilities
 
-- **Booking eligibility:** `createBooking` and `createProvisionalBooking`
-  check that the event type and resource exist, are active and are linked.
-  `createMultiResourceBooking` checks only that the event type exists and
-  counts an unknown resource ID as a one-unit standalone resource.
-  `rescheduleBooking`, `rescheduleBookingByToken` and confirmations through
-  `transitionBookingState` check none of this again, and no function compares
-  the organizations of event type and resource. If your host offers bundles,
-  moves or approvals, check these rules before calling the component.
 - **Policy:** resource visibility, opening-hours policy, notice periods and
   abuse limits. The quickstart gateway implements common defaults. Buffer
   fields are stored settings; enforce any required gaps in your host's reads

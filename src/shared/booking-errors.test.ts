@@ -71,11 +71,11 @@ const CODE_DOCS: Record<BookingErrorCode, { meaning: string; thrownBy: string }>
   },
   EVENT_TYPE_NOT_FOUND: {
     meaning: "No event type has this ID.",
-    thrownBy: "`getEventType`, `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `updateEventType`, `deleteEventType`, `toggleEventTypeActive`, `linkResourceToEventType`, `setResourcesForEventType`",
+    thrownBy: "`getEventType`, `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`), `updateEventType`, `deleteEventType`, `toggleEventTypeActive`, `linkResourceToEventType`, `setResourcesForEventType`",
   },
   EVENT_TYPE_INACTIVE: {
     meaning: "The event type is deactivated.",
-    thrownBy: "`createBooking`, `createProvisionalBooking`",
+    thrownBy: "`createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`)",
   },
   EVENT_TYPE_IN_USE: {
     meaning: "The event type has bookings, so it cannot be deleted. Deactivate it instead.",
@@ -83,19 +83,19 @@ const CODE_DOCS: Record<BookingErrorCode, { meaning: string; thrownBy: string }>
   },
   RESOURCE_NOT_FOUND: {
     meaning: "No resource has this ID.",
-    thrownBy: "`createBooking`, `createProvisionalBooking`, `updateResource`, `deleteResource`, `toggleResourceActive`, `linkResourceToEventType`, `setEventTypesForResource`",
+    thrownBy: "`createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`), `updateResource`, `deleteResource`, `toggleResourceActive`, `linkResourceToEventType`, `setEventTypesForResource`",
   },
   RESOURCE_INACTIVE: {
     meaning: "The resource is deactivated.",
-    thrownBy: "`createBooking`, `createProvisionalBooking`",
+    thrownBy: "`createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`)",
   },
   RESOURCE_NOT_LINKED: {
     meaning: "The resource is not linked to the event type.",
-    thrownBy: "`createBooking`, `createProvisionalBooking`",
+    thrownBy: "`createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`)",
   },
   RESOURCE_NOT_STANDALONE: {
     meaning: "An add-on (`isStandalone: false`) is booked without a standalone resource.",
-    thrownBy: "`createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`",
+    thrownBy: "`createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`)",
   },
   RESOURCE_ALREADY_EXISTS: {
     meaning: "A resource with this ID exists.",
@@ -113,8 +113,8 @@ const CODE_DOCS: Record<BookingErrorCode, { meaning: string; thrownBy: string }>
   },
   ORGANIZATION_MISMATCH: {
     meaning:
-      "Organizations do not match: a resource of another organization than an organization-scoped event type.",
-    thrownBy: "`linkResourceToEventType`, `setResourcesForEventType`, `setEventTypesForResource`",
+      "Organizations do not match: a resource of another organization than an organization-scoped event type, or a bundle's `organizationId` that differs from its event type's.",
+    thrownBy: "`createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`), `linkResourceToEventType`, `setResourcesForEventType`, `setEventTypesForResource`",
   },
   SCHEDULE_NOT_FOUND: {
     meaning: "No schedule has this ID.",

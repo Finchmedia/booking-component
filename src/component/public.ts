@@ -18,7 +18,7 @@ import {
     getScheduleByExternalId,
     getScheduleDaySlots,
 } from "./schedules";
-import { assertSingleBookable, terminateBooking } from "./booking_lifecycle";
+import { assertSingleBookable, assertStillBookable, terminateBooking } from "./booking_lifecycle";
 import { deleteLinks } from "./resource_event_types";
 import { generateManagementToken } from "./tokens";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
@@ -1411,6 +1411,11 @@ async function moveBooking(
   // A legacy single-resource record never used quantity counters. Do not silently
   // reinterpret it after a host has changed the resource into a pool.
   if (items.length === 0) await assertSingleResourceSupported(ctx, original.resourceId);
+
+  // The destination follows the current booking rules, for every item, before
+  // anything is released: a move after deactivation, unlinking or a change of
+  // organization is rejected, by token and by id alike (no admin override).
+  await assertStillBookable(ctx, original, items);
 
   // The original ends first: read-your-writes lets overlapping moves reuse
   // only its inventory. Any destination conflict aborts this mutation and

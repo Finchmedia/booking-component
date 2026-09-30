@@ -6,9 +6,10 @@
  * organization. createMultiResourceBooking stored only its optional
  * `organizationId` argument, so bundles created as the documented recipe does
  * (without it) were missing from organization lists and reached only global
- * hooks. It now falls back to the event type's organization. An explicit
- * argument is still stored as given (a mismatch is a later contract decision,
- * D6 / PR-52).
+ * hooks. It now falls back to the event type's organization. Since 0.5.0
+ * (D6, PR-52) an explicit argument that differs from the event type's
+ * organization is rejected; for an event type without organization the
+ * argument is the fallback.
  */
 import { describe, expect, test } from "vitest";
 import { api, internal } from "./_generated/api.js";
@@ -111,14 +112,35 @@ describe("createMultiResourceBooking organization", () => {
     expect(await t.query(api.public.listBookings, { organizationId: "org-1" })).toHaveLength(2);
   });
 
-  test("explicit: a matching and a mismatching organization are stored as given", async () => {
+  test("explicit: a matching organization is stored; a mismatching one is rejected and nothing is written", async () => {
     const { t } = setup();
     const seed = await seedResource(t);
+    for (const organizationId of ["org-1", "org-2"]) {
+      await t.mutation(api.hooks.registerHook, {
+        eventType: "booking.created",
+        functionHandle: `function://;probe:${organizationId}`,
+        organizationId,
+      });
+    }
     const matching = await bundle(t, seed.eventTypeId, 10, "org-1");
-    // Pinned until the organization contract (D6 / PR-52) decides otherwise.
-    const foreign = await bundle(t, seed.eventTypeId, 12, "org-2");
-    expect([matching.organizationId, foreign.organizationId]).toEqual(["org-1", "org-2"]);
-    expect((await hookJob(t, foreign._id, "booking.created")).organizationId).toBe("org-2");
+    expect(matching.organizationId).toBe("org-1");
+
+    // 0.4.x stored "org-2" and routed the booking (and its management
+    // token) to org-2's hooks (lc-skeptic LCS-F7-TOKEN).
+    const jobsBefore = await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect());
+    await expect(bundle(t, seed.eventTypeId, 12, "org-2")).rejects.toMatchObject({
+      data: {
+        code: "ORGANIZATION_MISMATCH",
+        message: 'Organization "org-2" does not match the organization of event type "et-1"',
+      },
+    });
+    expect((await t.query(api.public.listBookings, { resourceId: seed.resourceId })).map((b) => b._id)).toEqual([
+      matching._id,
+    ]);
+    expect(await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).toHaveLength(
+      jobsBefore.length
+    );
+    expect(await t.query(api.public.listBookings, { organizationId: "org-2" })).toEqual([]);
   });
 
   test("an event type without organization: the argument is kept, and without one none is stored", async () => {

@@ -77,6 +77,11 @@ async function seedWorld(t: T) {
   await resource("addon-unlinked", { isStandalone: false });
   await resource("res-unlinked");
   for (const id of ["res-off", "addon-1"]) await link(id);
+  // Another organization's room, linked as 0.4.x allowed (linking rejects it since 0.5.0).
+  await t.mutation(api.resources.createResource, {
+    id: "res-org2", organizationId: "org-2", name: "res-org2", type: "room", timezone: "UTC",
+  });
+  await t.run((ctx) => ctx.db.insert("resource_event_types", { resourceId: "res-org2", eventTypeId: seed.eventTypeId }));
   await seedFungibleResource(t, { eventTypeId: seed.eventTypeId }); // pool-1, capacity 3
   await t.mutation(api.public.createEventType, {
     id: "et-off", slug: "et-off", title: "Retired", lengthInMinutes: 60, timezone: "UTC",
@@ -163,6 +168,21 @@ describe("error texts per entry point", () => {
       ...both("add-on alone", seed.eventTypeId, "addon-1"),
       "createMultiResourceBooking: add-on alone": () => bundle([{ resourceId: "addon-1" }], "16:00"),
       ...both("not linked", seed.eventTypeId, "res-unlinked"),
+      ...both("other organization", seed.eventTypeId, "res-org2"),
+      "createMultiResourceBooking: inactive event": () =>
+        t.mutation(api.multi_resource.createMultiResourceBooking, {
+          eventTypeId: "et-off", resources: [{ resourceId: seed.resourceId }], ...hour("16:00"),
+          timezone: "UTC", booker: BOOKER,
+        }),
+      "createMultiResourceBooking: other organization argument": () =>
+        t.mutation(api.multi_resource.createMultiResourceBooking, {
+          eventTypeId: seed.eventTypeId, organizationId: "org-2", resources: [{ resourceId: seed.resourceId }],
+          ...hour("16:00"), timezone: "UTC", booker: BOOKER,
+        }),
+      "createMultiResourceBooking: missing resource": () => bundle([{ resourceId: seed.resourceId }, { resourceId: "ghost-res" }], "16:00"),
+      "createMultiResourceBooking: inactive resource": () => bundle([{ resourceId: seed.resourceId }, { resourceId: "res-off" }], "16:00"),
+      "createMultiResourceBooking: not linked": () => bundle([{ resourceId: seed.resourceId }, { resourceId: "res-unlinked" }], "16:00"),
+      "createMultiResourceBooking: other organization": () => bundle([{ resourceId: seed.resourceId }, { resourceId: "res-org2" }], "16:00"),
       ...both("pool on the single-resource path", seed.eventTypeId, "pool-1"),
       "createReservation: pool on the single-resource path": () =>
         t.mutation(api.public.createReservation, { resourceId: "pool-1", actorId: "x@example.com", ...hour("16:00") }),
@@ -188,6 +208,16 @@ describe("error texts per entry point", () => {
         coded("RESOURCE_NOT_STANDALONE", 'Resource "addon-1" cannot be booked alone (isStandalone: false): add a standalone resource to the booking'),
       "createBooking: not linked": coded("RESOURCE_NOT_LINKED", "Resource is not available for this event type"),
       "createProvisionalBooking: not linked": coded("RESOURCE_NOT_LINKED", "Resource is not available for this event type"),
+      "createBooking: other organization": coded("ORGANIZATION_MISMATCH", "Resource belongs to another organization than the event type"),
+      "createProvisionalBooking: other organization": coded("ORGANIZATION_MISMATCH", "Resource belongs to another organization than the event type"),
+      "createMultiResourceBooking: inactive event": coded("EVENT_TYPE_INACTIVE", 'Event type "et-off" is no longer active'),
+      "createMultiResourceBooking: other organization argument":
+        coded("ORGANIZATION_MISMATCH", 'Organization "org-2" does not match the organization of event type "et-1"'),
+      "createMultiResourceBooking: missing resource": coded("RESOURCE_NOT_FOUND", 'Resource "ghost-res" not found'),
+      "createMultiResourceBooking: inactive resource": coded("RESOURCE_INACTIVE", 'Resource "res-off" is no longer active'),
+      "createMultiResourceBooking: not linked": coded("RESOURCE_NOT_LINKED", 'Resource "res-unlinked" is not available for this event type'),
+      "createMultiResourceBooking: other organization":
+        coded("ORGANIZATION_MISMATCH", 'Resource "res-org2" belongs to another organization than the event type'),
       "createBooking: pool on the single-resource path":
         coded("POOL_REQUIRES_BUNDLE", "Fungible resources require createMultiResourceBooking with an explicit quantity"),
       "createProvisionalBooking: pool on the single-resource path":
@@ -286,7 +316,7 @@ describe("check order: a request with several problems reports the first check",
     const { t } = setup();
     const { seed } = await seedWorld(t);
     // range → pool → event exists → event active → resource exists → resource
-    // active → standalone → linked → slot free
+    // active → standalone → linked → organization → slot free
     const requests: Record<string, { eventTypeId: string; resourceId: string; start: number; end: number }> = {
       "empty range, pool and missing event": { eventTypeId: "ghost", resourceId: "pool-1", start: at("15:00"), end: at("15:00") },
       "pool and missing event": { eventTypeId: "ghost", resourceId: "pool-1", ...hour("15:00") },
@@ -296,6 +326,7 @@ describe("check order: a request with several problems reports the first check",
       "inactive add-on, not linked": { eventTypeId: seed.eventTypeId, resourceId: "addon-off", ...hour("15:00") },
       "add-on, not linked": { eventTypeId: seed.eventTypeId, resourceId: "addon-unlinked", ...hour("15:00") },
       "not linked and slot taken": { eventTypeId: seed.eventTypeId, resourceId: "res-unlinked", ...hour("09:00") },
+      "other organization and slot taken": { eventTypeId: seed.eventTypeId, resourceId: "res-org2", ...hour("09:00") },
     };
     const expected = {
       "empty range, pool and missing event": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
@@ -306,6 +337,7 @@ describe("check order: a request with several problems reports the first check",
       "inactive add-on, not linked": coded("RESOURCE_INACTIVE", "Resource is no longer active"),
       "add-on, not linked": coded("RESOURCE_NOT_STANDALONE", 'Resource "addon-unlinked" cannot be booked alone (isStandalone: false)'),
       "not linked and slot taken": coded("RESOURCE_NOT_LINKED", "Resource is not available for this event type"),
+      "other organization and slot taken": coded("ORGANIZATION_MISMATCH", "Resource belongs to another organization than the event type"),
     };
     for (const mutation of [api.public.createBooking, api.public.createProvisionalBooking]) {
       const cases = Object.fromEntries(
@@ -318,34 +350,65 @@ describe("check order: a request with several problems reports the first check",
     }
   });
 
-  test("createMultiResourceBooking: range → request list → event → per-resource capacity → standalone", async () => {
+  // 0.5.0: the booking rules (every item, then the add-on rule) come before
+  // capacity, as on the single paths; 0.4.x checked capacity first, so an
+  // add-on alone on a taken slot reported the conflict.
+  test("createMultiResourceBooking: range → request list → event → organization → each item → standalone → capacity", async () => {
     const { t } = setup();
     const { seed, bundle } = await seedWorld(t);
-    const bundleOf = (eventTypeId: string, resources: Array<{ resourceId: string; quantity?: number }>, start: number, end: number) =>
+    const bundleOf = (
+      eventTypeId: string,
+      resources: Array<{ resourceId: string; quantity?: number }>,
+      start: number,
+      end: number,
+      organizationId?: string,
+    ) =>
       t.mutation(api.multi_resource.createMultiResourceBooking, {
-        eventTypeId, resources, start, end, timezone: "UTC", booker: BOOKER,
+        eventTypeId, organizationId, resources, start, end, timezone: "UTC", booker: BOOKER,
       });
     expect(await failuresOf({
       "empty range and missing event": () => bundleOf("ghost", [{ resourceId: seed.resourceId }], at("15:00"), at("15:00")),
       "duplicate resource and missing event": () =>
         bundleOf("ghost", [{ resourceId: seed.resourceId }, { resourceId: seed.resourceId }], at("15:00"), at("16:00")),
       "missing event and slot taken": () => bundleOf("ghost", [{ resourceId: seed.resourceId }], at("09:00"), at("10:00")),
+      "inactive event and other organization argument": () =>
+        bundleOf("et-off", [{ resourceId: seed.resourceId }], at("15:00"), at("16:00"), "org-2"),
+      "other organization argument and missing resource": () =>
+        bundleOf(seed.eventTypeId, [{ resourceId: "ghost-res" }], at("15:00"), at("16:00"), "org-2"),
+      "items in the order given": () => bundle([{ resourceId: "res-unlinked" }, { resourceId: "ghost-res" }], "15:00"),
+      "inactive add-on, not linked": () => bundle([{ resourceId: "addon-off" }], "15:00"),
+      "add-on, not linked": () => bundle([{ resourceId: "addon-unlinked" }], "15:00"),
+      "add-on with an ineligible room": () => bundle([{ resourceId: "addon-1" }, { resourceId: "res-off" }], "15:00"),
       "add-on alone on a taken slot": () => bundle([{ resourceId: "addon-1" }], "13:00"),
     })).toEqual({
       "empty range and missing event": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
       "duplicate resource and missing event": coded("INVALID_INPUT", 'Duplicate resource ID: "res-1"'),
       "missing event and slot taken": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),
-      "add-on alone on a taken slot": coded("SLOT_UNAVAILABLE", 'Resource "addon-1" is not available for the selected time'),
+      "inactive event and other organization argument": coded("EVENT_TYPE_INACTIVE", 'Event type "et-off" is no longer active'),
+      "other organization argument and missing resource":
+        coded("ORGANIZATION_MISMATCH", 'Organization "org-2" does not match the organization of event type "et-1"'),
+      "items in the order given": coded("RESOURCE_NOT_LINKED", 'Resource "res-unlinked" is not available for this event type'),
+      "inactive add-on, not linked": coded("RESOURCE_INACTIVE", 'Resource "addon-off" is no longer active'),
+      "add-on, not linked": coded("RESOURCE_NOT_LINKED", 'Resource "addon-unlinked" is not available for this event type'),
+      "add-on with an ineligible room": coded("RESOURCE_INACTIVE", 'Resource "res-off" is no longer active'),
+      "add-on alone on a taken slot":
+        coded("RESOURCE_NOT_STANDALONE", 'Resource "addon-1" cannot be booked alone (isStandalone: false): add a standalone resource to the booking'),
     });
   });
 
-  test("moves: range → booking → token → status → destination", async () => {
+  test("moves: range → booking → token → status → booking rules → destination", async () => {
     const { t } = setup();
     const { seed, movable } = await seedWorld(t);
     const cancelled = await book(t, seed, at("15:00"), at("16:00"));
     await t.mutation(api.public.cancelBookingByToken, { uid: cancelled.uid, token: cancelled.managementToken! });
     const gone = await book(t, seed, at("16:00"), at("17:00"));
     await t.run((ctx) => ctx.db.delete(gone._id));
+    // A booking 0.4.x accepted on another organization's room.
+    const onOtherOrganization = await t.run(async (ctx) => {
+      const row = await ctx.db.get(movable._id);
+      const { _id, _creationTime, ...fields } = row!;
+      return await ctx.db.insert("bookings", { ...fields, uid: "bk_org2", resourceId: "res-org2", start: at("17:00"), end: at("18:00") });
+    });
     expect(await failuresOf({
       "rescheduleBooking: empty range, unknown id": () =>
         t.mutation(api.public.rescheduleBooking, { bookingId: gone._id, newStart: at("18:00"), newEnd: at("18:00") }),
@@ -355,11 +418,15 @@ describe("check order: a request with several problems reports the first check",
         t.mutation(api.public.rescheduleBookingByToken, { uid: cancelled.uid, token: "wrong", newStart: at("09:00"), newEnd: at("10:00") }),
       "rescheduleBooking: cancelled booking onto a taken slot": () =>
         t.mutation(api.public.rescheduleBooking, { bookingId: cancelled._id, newStart: at("09:00"), newEnd: at("10:00") }),
+      "rescheduleBooking: a booking on another organization's room": () =>
+        t.mutation(api.public.rescheduleBooking, { bookingId: onOtherOrganization, newStart: at("09:00"), newEnd: at("10:00") }),
     })).toEqual({
       "rescheduleBooking: empty range, unknown id": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
       "rescheduleBookingByToken: empty range, unknown uid": coded("INVALID_RANGE", "Invalid time range: end must be after start"),
       "rescheduleBookingByToken: wrong token on a cancelled booking": coded("INVALID_TOKEN", "Invalid token"),
       "rescheduleBooking: cancelled booking onto a taken slot": coded("INVALID_STATE", "Cannot reschedule booking with status: cancelled"),
+      "rescheduleBooking: a booking on another organization's room":
+        coded("ORGANIZATION_MISMATCH", "Resource belongs to another organization than the event type"),
     });
     // CONTROL: the movable booking itself can still be moved to a free hour.
     await expect(

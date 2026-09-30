@@ -16,15 +16,42 @@
   that host change together with the upgrade. Text matching still works on
   `error.data.message`; codes also catch the bundle and move conflicts whose
   texts a needle table missed.
-- An event type with an `organizationId` is linked only to resources of that
-  organization (N13): `linkResourceToEventType`, `setResourcesForEventType`
-  and `setEventTypesForResource` reject a resource of another organization
-  with `ORGANIZATION_MISMATCH`, and the two replace mutations then change
-  nothing. Event types without organization still link any resource. Links
-  stored earlier are kept. Before upgrading, find them in a host query (for
-  each event type with an organization, compare
-  `getResourcesForEventType(...)[i].organizationId`) and unlink them or move
-  the resource.
+- One set of booking rules for every path (F6). `createBooking`,
+  `createProvisionalBooking`, `createMultiResourceBooking` (per item), both
+  reschedule mutations and `transitionBookingState` to `confirmed` require
+  an existing, active event type and existing, active resources that are
+  linked to it and belong to its organization when it has one, one of them
+  not an add-on. New for bundles: unknown resource IDs are rejected
+  (`RESOURCE_NOT_FOUND`) instead of reserving a one-unit row, pools must be
+  linked like other items, only eligible items satisfy the add-on rule, and
+  the rules come before capacity (an add-on alone on a taken slot now reports
+  `RESOURCE_NOT_STANDALONE`). New for moves, by token and by ID alike (no
+  administrator override): the destination is checked over all items before
+  anything is released. New for confirming a provisional hold or approving a
+  pending request: the same check. Cancelling, declining and expiring are
+  never checked, and deactivating never ends a booking. Legacy
+  `createReservation` and its bookings keep their exemption. Before
+  upgrading, link every resource your bundles use (pools included) to the
+  event type, create resources for IDs you booked without one, and resolve
+  pending requests and provisional holds on deactivated or unlinked
+  configuration; afterwards, moving or confirming such a booking needs
+  reactivating or relinking first. New error codes per path are in
+  [docs/errors.md](docs/errors.md).
+- No bookings across organizations (N13, F7). An event type with an
+  `organizationId` is linked only to resources of that organization:
+  `linkResourceToEventType`, `setResourcesForEventType` and
+  `setEventTypesForResource` reject another organization's resource with the
+  new code `ORGANIZATION_MISMATCH`, and the two replace mutations then change
+  nothing. Event types without organization still link any resource. The
+  booking rules above reject such a resource too, including over links stored
+  before 0.5.0. `createMultiResourceBooking` rejects an `organizationId` that
+  differs from its event type's (0.4.3 stored it); omit it or pass the same
+  one. For an event type without organization the argument is still stored.
+  Before upgrading, find cross-organization links in a host query (for each
+  event type with an organization, compare the `organizationId` of
+  `getResourcesForEventType`'s resources) and unlink them or move the
+  resource; `backfillBookingOrganizations` reports stored bundles whose
+  organization differs in `mismatches`.
 - `deleteResource` and `deleteEventType` delete the links of the deleted ID
   (N12), after their booking check and in the same transaction. A resource
   or event type created again with that ID starts unlinked; link it

@@ -446,6 +446,7 @@ describe("transitionBookingState", () => {
       quantity: 3,
       isFungible: true,
     });
+    await t.mutation(api.resource_event_types.linkResourceToEventType, { resourceId: "pool", eventTypeId: EVENT });
 
     const multi = await t.mutation(api.multi_resource.createMultiResourceBooking, {
       eventTypeId: EVENT,

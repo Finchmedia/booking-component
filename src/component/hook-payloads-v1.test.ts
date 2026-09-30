@@ -87,6 +87,10 @@ async function seedWorld(t: T) {
     id: "et-no-org", slug: "et-no-org", title: "No organization", lengthInMinutes: 60, timezone: "UTC",
     lockTimeZoneToggle: false, locations: [], minNoticeMinutes: 0, maxFutureMinutes: 365 * 24 * 60,
   });
+  // Bundle items are linked to their event type (required since 0.5.0).
+  await t.mutation(api.resource_event_types.setResourcesForEventType, {
+    eventTypeId: "et-no-org", resourceIds: [seed.resourceId, "pool-1"],
+  });
 
   const single = (time: string, location: { type: string; value?: string } = LOCATION) =>
     book(t, seed, at(time), at(time) + HOUR, { location });

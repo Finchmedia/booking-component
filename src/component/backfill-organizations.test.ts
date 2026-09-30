@@ -84,6 +84,10 @@ async function seedMixed(t: T) {
     id: "et-gone", slug: "et-gone", title: "Deleted", lengthInMinutes: 60,
     timezone: "UTC", lockTimeZoneToggle: false, locations: [], organizationId: ORG,
   });
+  // Bundle items are linked to their event type (required since 0.5.0).
+  await t.mutation(api.resource_event_types.setEventTypesForResource, {
+    resourceId: seed.resourceId, eventTypeIds: [seed.eventTypeId, "et-no-org", "et-gone"],
+  });
 
   const complete = await book(t, seed, hour(6), hour(7));
   const missing = await bundle(t, seed.eventTypeId, 7);
@@ -95,7 +99,9 @@ async function seedMixed(t: T) {
     newStart: hour(9),
     newEnd: hour(10),
   });
-  const foreign = await bundle(t, seed.eventTypeId, 10, "org-2");
+  // A foreign organization as 0.4.x stored it (rejected at creation since 0.5.0).
+  const foreign = await bundle(t, seed.eventTypeId, 10);
+  await t.run((ctx) => ctx.db.patch(foreign._id, { organizationId: "org-2" }));
   const legacyId = await t.mutation(api.public.createReservation, {
     resourceId: seed.resourceId, actorId: "ops@example.com", start: hour(11), end: hour(12),
   });

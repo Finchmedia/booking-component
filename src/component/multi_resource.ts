@@ -4,7 +4,11 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getRequiredSlots, assertValidRange } from "./utils";
-import { terminateBooking } from "./booking_lifecycle";
+import {
+  assertResourcesBookable,
+  loadBookableEventType,
+  terminateBooking,
+} from "./booking_lifecycle";
 import { generateManagementToken } from "./tokens";
 import {
   holdsActiveInventory,
@@ -177,28 +181,37 @@ export const createMultiResourceBooking = mutation({
     assertValidRange(args.start, args.end);
     validateResourceRequests(args.resources);
 
-    // 1. Get event type for metadata
-    const eventType = await ctx.db
-      .query("event_types")
-      .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
-      .unique();
-
-    if (!eventType) {
-      throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.eventTypeId}" not found`);
-    }
+    // 1. The event type exists and is active.
+    const eventType = await loadBookableEventType(ctx, args.eventTypeId, "bundle");
 
     // The bundle belongs to its event type's organization, as single bookings
-    // do, unless the caller names one (stored as given). Used for the row and
-    // for hook routing alike.
-    const organizationId = args.organizationId ?? eventType.organizationId;
+    // do. A different organizationId is rejected; for an event type without
+    // organization the argument is the fallback. Used for the row and for
+    // hook routing alike.
+    if (
+      eventType.organizationId !== undefined &&
+      args.organizationId !== undefined &&
+      args.organizationId !== eventType.organizationId
+    ) {
+      throwBookingError(
+        "ORGANIZATION_MISMATCH",
+        `Organization "${args.organizationId}" does not match the organization of event type "${args.eventTypeId}"`
+      );
+    }
+    const organizationId = eventType.organizationId ?? args.organizationId;
 
-    // 2. Check ALL resources are available (fail-fast)
+    // 2. Every item exists, is active, is linked and shares the event type's
+    // organization; at least one of them is standalone (the add-on rule
+    // counts only these eligible resources). Unknown ids are rejected.
+    await assertResourcesBookable(
+      ctx,
+      eventType,
+      args.resources.map((r) => r.resourceId),
+      "bundle"
+    );
+
+    // 3. Check ALL resources are available (fail-fast)
     const requiredSlots = getRequiredSlots(args.start, args.end);
-
-    // `isStandalone: false` marks an add-on (e.g. rental equipment) that can
-    // only be booked together with a standalone resource. Unknown resources
-    // (no document) count as standalone.
-    let hasStandaloneResource = false;
 
     for (const resourceReq of args.resources) {
       const requestedQty = resourceReq.quantity ?? 1;
@@ -211,9 +224,6 @@ export const createMultiResourceBooking = mutation({
 
       const totalQuantity = resource?.quantity ?? 1;
       validateRequestedQuantity(resource, requestedQty);
-      if (resource?.isStandalone !== false) {
-        hasStandaloneResource = true;
-      }
 
       for (const [date, slots] of requiredSlots.entries()) {
         if (usesQuantityInventory(resource)) {
@@ -262,15 +272,7 @@ export const createMultiResourceBooking = mutation({
       }
     }
 
-    if (!hasStandaloneResource) {
-      const ids = args.resources.map((r) => `"${r.resourceId}"`).join(", ");
-      throwBookingError(
-        "RESOURCE_NOT_STANDALONE",
-        `Resource ${ids} cannot be booked alone (isStandalone: false): add a standalone resource to the booking`
-      );
-    }
-
-    // 3. Create main booking record (use first resource as primary)
+    // 4. Create main booking record (use first resource as primary)
     const primaryResourceId = args.resources[0].resourceId;
     const bookingUid = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const managementToken = generateManagementToken();
@@ -298,7 +300,7 @@ export const createMultiResourceBooking = mutation({
       updatedAt: now,
     });
 
-    // 4. Create booking_items for each resource
+    // 5. Create booking_items for each resource
     for (const resourceReq of args.resources) {
       await ctx.db.insert("booking_items", {
         bookingId,
@@ -307,10 +309,10 @@ export const createMultiResourceBooking = mutation({
       });
     }
 
-    // 5. Reserve every item using the same inventory contract as rescheduling.
+    // 6. Reserve every item using the same inventory contract as rescheduling.
     await reserveResourceSlots(ctx, args.resources, args.start, args.end);
 
-    // 6. Record initial state in history
+    // 7. Record initial state in history
     await ctx.db.insert("booking_history", {
       bookingId,
       fromStatus: "",
@@ -323,7 +325,7 @@ export const createMultiResourceBooking = mutation({
     const booking = await ctx.db.get(bookingId);
     if (!booking) throw new Error("Booking not found after write");
 
-    // 7. Trigger booking.created hook
+    // 8. Trigger booking.created hook
     await ctx.scheduler.runAfter(0, internal.hooks.triggerHooks, {
       eventType: "booking.created",
       emailContext: createBookingEmailContext(eventType.requiresConfirmation ? "pending" : "confirmed", booking, args.resendOptions),
@@ -347,7 +349,7 @@ export const createMultiResourceBooking = mutation({
       resendOptions: args.resendOptions,
     });
 
-    // 8. Return the captured booking.
+    // 9. Return the captured booking.
     return booking;
   },
 });

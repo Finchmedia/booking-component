@@ -5,7 +5,7 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { FunctionHandle, WithoutSystemFields } from "convex/server";
 import type { Doc } from "./_generated/dataModel";
-import { terminateBooking } from "./booking_lifecycle";
+import { assertStillBookable, terminateBooking } from "./booking_lifecycle";
 import { throwBookingError } from "../shared/booking-errors.js";
 import {
   bookingHistoryDoc,
@@ -414,6 +414,17 @@ export const transitionBookingState = mutation({
         "INVALID_STATE",
         `Invalid state transition: ${currentStatus} -> ${args.toStatus}. Allowed: ${allowedTransitions.join(", ") || "none"}`
       );
+    }
+
+    // Confirming (a provisional hold, or approving a pending request) follows
+    // the current booking rules: after deactivation, unlinking or a change of
+    // organization it is rejected. Cancelling and declining never are.
+    if (args.toStatus === "confirmed") {
+      const items = await ctx.db
+        .query("booking_items")
+        .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+        .collect();
+      await assertStillBookable(ctx, booking, items);
     }
 
     const now = Date.now();

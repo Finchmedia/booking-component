@@ -36,17 +36,17 @@ messages. Map the codes your clients see.
 | --- | --- | --- |
 | `SLOT_UNAVAILABLE` | The time is taken on a resource that is booked by time slot (not a pool). | `createBooking`, `createProvisionalBooking`, `createReservation`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken` |
 | `QUANTITY_UNAVAILABLE` | A pool has fewer free units than requested during part of the time. | `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken` |
-| `EVENT_TYPE_NOT_FOUND` | No event type has this ID. | `getEventType`, `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `updateEventType`, `deleteEventType`, `toggleEventTypeActive`, `linkResourceToEventType`, `setResourcesForEventType` |
-| `EVENT_TYPE_INACTIVE` | The event type is deactivated. | `createBooking`, `createProvisionalBooking` |
+| `EVENT_TYPE_NOT_FOUND` | No event type has this ID. | `getEventType`, `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`), `updateEventType`, `deleteEventType`, `toggleEventTypeActive`, `linkResourceToEventType`, `setResourcesForEventType` |
+| `EVENT_TYPE_INACTIVE` | The event type is deactivated. | `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`) |
 | `EVENT_TYPE_IN_USE` | The event type has bookings, so it cannot be deleted. Deactivate it instead. | `deleteEventType` |
-| `RESOURCE_NOT_FOUND` | No resource has this ID. | `createBooking`, `createProvisionalBooking`, `updateResource`, `deleteResource`, `toggleResourceActive`, `linkResourceToEventType`, `setEventTypesForResource` |
-| `RESOURCE_INACTIVE` | The resource is deactivated. | `createBooking`, `createProvisionalBooking` |
-| `RESOURCE_NOT_LINKED` | The resource is not linked to the event type. | `createBooking`, `createProvisionalBooking` |
-| `RESOURCE_NOT_STANDALONE` | An add-on (`isStandalone: false`) is booked without a standalone resource. | `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking` |
+| `RESOURCE_NOT_FOUND` | No resource has this ID. | `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`), `updateResource`, `deleteResource`, `toggleResourceActive`, `linkResourceToEventType`, `setEventTypesForResource` |
+| `RESOURCE_INACTIVE` | The resource is deactivated. | `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`) |
+| `RESOURCE_NOT_LINKED` | The resource is not linked to the event type. | `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`) |
+| `RESOURCE_NOT_STANDALONE` | An add-on (`isStandalone: false`) is booked without a standalone resource. | `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`) |
 | `RESOURCE_ALREADY_EXISTS` | A resource with this ID exists. | `createResource` |
 | `RESOURCE_IN_USE` | Bookings or reserved slots prevent the change: deleting a resource with bookings, switching between slot and pool inventory while it holds reservations, or lowering a pool's capacity below its reserved units. | `createResource`, `updateResource`, `deleteResource` |
 | `POOL_REQUIRES_BUNDLE` | A pool (`isFungible: true`) is booked through a single-resource function. Book it with `createMultiResourceBooking` and a quantity. Moves throw it for a single-resource booking whose resource became a pool. | `createBooking`, `createProvisionalBooking`, `createReservation`, `rescheduleBooking`, `rescheduleBookingByToken` |
-| `ORGANIZATION_MISMATCH` | Organizations do not match: a resource of another organization than an organization-scoped event type. | `linkResourceToEventType`, `setResourcesForEventType`, `setEventTypesForResource` |
+| `ORGANIZATION_MISMATCH` | Organizations do not match: a resource of another organization than an organization-scoped event type, or a bundle's `organizationId` that differs from its event type's. | `createBooking`, `createProvisionalBooking`, `createMultiResourceBooking`, `rescheduleBooking`, `rescheduleBookingByToken`, `transitionBookingState` (to `confirmed`), `linkResourceToEventType`, `setResourcesForEventType`, `setEventTypesForResource` |
 | `SCHEDULE_NOT_FOUND` | No schedule has this ID. | `updateSchedule`, `deleteSchedule` |
 | `SCHEDULE_ALREADY_EXISTS` | A schedule with this ID exists. | `createSchedule` |
 | `DATE_OVERRIDE_NOT_FOUND` | The date override no longer exists. | `updateDateOverride`, `deleteDateOverride` |
