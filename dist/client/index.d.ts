@@ -1,4 +1,5 @@
 import type { ComponentApi } from "../component/_generated/component.js";
+export { allowedDurations, effectiveSlotInterval, type EventTypeDurations, } from "../shared/durations.js";
 /**
  * Creates server-only helpers for the booking component.
  *
@@ -42,6 +43,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         updatedAt?: number;
     }>>;
     getEventTypeBySlug: import("convex/server").RegisteredQuery<"internal", {
+        organizationId?: string | undefined;
         slug: string;
     }, Promise<{
         _creationTime: number;
@@ -177,6 +179,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         dateTo: string;
     }, Promise<Record<string, boolean>>>;
     getDaySlots: import("convex/server").RegisteredQuery<"internal", {
+        scheduleId?: string | undefined;
         slotInterval?: number | undefined;
         availableSlots?: number[] | undefined;
         excludeBookingUid?: string | undefined;
@@ -243,6 +246,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         managementToken?: string;
         organizationId?: string;
         rescheduleUid?: string;
+        rescheduledToUid?: string;
         resourceId: string;
         start: number;
         status: string;
@@ -288,6 +292,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         managementToken?: string;
         organizationId?: string;
         rescheduleUid?: string;
+        rescheduledToUid?: string;
         resourceId: string;
         start: number;
         status: string;
@@ -319,6 +324,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         managementToken?: string;
         organizationId?: string;
         rescheduleUid?: string;
+        rescheduledToUid?: string;
         resourceId: string;
         start: number;
         status: string;
@@ -350,6 +356,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         managementToken?: string;
         organizationId?: string;
         rescheduleUid?: string;
+        rescheduledToUid?: string;
         resourceId: string;
         start: number;
         status: string;
@@ -361,9 +368,9 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         organizationId?: string | undefined;
         resourceId?: string | undefined;
         eventTypeId?: string | undefined;
+        limit?: number | undefined;
         dateFrom?: number | undefined;
         dateTo?: number | undefined;
-        limit?: number | undefined;
         status?: string | undefined;
     }, Promise<{
         _creationTime: number;
@@ -387,6 +394,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         managementToken?: string;
         organizationId?: string;
         rescheduleUid?: string;
+        rescheduledToUid?: string;
         resourceId: string;
         start: number;
         status: string;
@@ -395,12 +403,14 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         updatedAt: number;
     }[]>>;
     cancelReservation: import("convex/server").RegisteredMutation<"internal", {
+        reason?: string | undefined;
         resendOptions?: {
             fromEmail?: string | undefined;
             baseUrl?: string | undefined;
             renderer?: string | undefined;
             apiKey: string;
         } | undefined;
+        cancelledBy?: string | undefined;
         reservationId: string;
     }, Promise<{
         alreadyCancelled: boolean;
@@ -754,6 +764,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         managementToken?: string;
         organizationId?: string;
         rescheduleUid?: string;
+        rescheduledToUid?: string;
         resourceId: string;
         start: number;
         status: string;
@@ -809,6 +820,7 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         managementToken?: string;
         organizationId?: string;
         rescheduleUid?: string;
+        rescheduledToUid?: string;
         resourceId: string;
         start: number;
         status: string;
@@ -905,6 +917,17 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         count: number;
         users: Array<string>;
     }>>;
+    sweepOrphanedHolds: import("convex/server").RegisteredMutation<"internal", {
+        cursor?: string | null | undefined;
+        limit: number;
+        dryRun: boolean;
+    }, Promise<{
+        continueCursor: string | null;
+        deleted: number;
+        isDone: boolean;
+        rescheduled: number;
+        scanned: number;
+    }>>;
     wipeAllBookingData: import("convex/server").RegisteredMutation<"internal", {}, Promise<{
         bookingHistory: number;
         bookingItems: number;
@@ -929,5 +952,50 @@ export declare function makeInternalBookingAPI(component: ComponentApi): {
         resourceId: string;
         date: string;
     }, Promise<number[] | null>>;
+    audit: import("convex/server").RegisteredQuery<"internal", {
+        cursor?: string | null | undefined;
+        check: "f10_weekday" | "event_length_invalid";
+        limit: number;
+    }, Promise<{
+        continueCursor: string | null;
+        isDone: boolean;
+        issues: Array<{
+            check: "f10_weekday";
+            date: string;
+            scheduleId: string;
+            start: number;
+            uid: string;
+        } | {
+            check: "event_length_invalid";
+            eventTypeId: string;
+            lengthInMinutes: number;
+            lengthInMinutesOptions?: Array<number>;
+        }>;
+        scanned: number;
+    }>>;
+    backfillBookingOrganizations: import("convex/server").RegisteredMutation<"internal", {
+        cursor?: string | null | undefined;
+        limit: number;
+        dryRun: boolean;
+    }, Promise<{
+        continueCursor: string | null;
+        isDone: boolean;
+        mismatches: Array<{
+            eventTypeOrganizationId: string;
+            organizationId: string;
+            uid: string;
+        }>;
+        needsReview: Array<{
+            eventTypeId: string;
+            eventTypeOrganizationId?: string;
+            reason: "event_type_missing" | "event_type_without_organization" | "resource_missing" | "resource_organization_differs";
+            resourceId?: string;
+            resourceOrganizationId?: string;
+            uid: string;
+        }>;
+        scanned: number;
+        skipped: number;
+        updated: number;
+    }>>;
 };
 //# sourceMappingURL=index.d.ts.map

@@ -1,4 +1,6 @@
 import type { QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import { type CivilDate } from "../shared/time.js";
 export declare const getSchedule: import("convex/server").RegisteredQuery<"public", {
     id: string;
 }, Promise<{
@@ -70,7 +72,13 @@ export declare const getDefaultSchedule: import("convex/server").RegisteredQuery
     }[];
     createdAt: number;
     updatedAt: number;
-}>>;
+} | null>>;
+/**
+ * An organization's default schedule: the first one created that is marked
+ * default, else its first schedule, else null. At most two indexed reads of
+ * one document each, however many schedules the organization has.
+ */
+export declare function getOrganizationDefaultSchedule(ctx: QueryCtx, organizationId: string): Promise<Doc<"schedules"> | null>;
 export declare const createSchedule: import("convex/server").RegisteredMutation<"public", {
     isDefault?: boolean | undefined;
     id: string;
@@ -150,14 +158,28 @@ export declare const deleteDateOverride: import("convex/server").RegisteredMutat
 }, Promise<{
     success: boolean;
 }>>;
+/** The schedule with this external id, or null. */
+export declare function getScheduleByExternalId(ctx: QueryCtx, scheduleId: string): Promise<Doc<"schedules"> | null>;
 /**
- * Plain async helper that computes effective available slots for a scheduleId + date.
- * Exported so other component files (e.g. public.ts) can call it directly with ctx.db
- * instead of going through ctx.runQuery.
+ * Effective LOCAL slot indices (0–95, in the schedule's zone) of a schedule on
+ * a calendar day: the date override when one exists, otherwise the weekly
+ * hours of that day's own weekday. The weekday is the calendar day's, not the
+ * weekday some instant of it has in the zone — reading `${date}T12:00Z` in the
+ * zone used the NEXT day's hours in zones at UTC+12 and beyond (New Zealand,
+ * Fiji, Tonga, Samoa, Kiribati; Norfolk Island in summer).
+ * A missing schedule yields the default business hours 09:00–17:00.
+ * `overridesByDate` (from getDateOverridesByDate) replaces the per-day
+ * override read when a caller walks a range of days.
  */
-export declare function computeAvailabilityForDate(ctx: QueryCtx, scheduleId: string, date: string): Promise<{
-    availableSlots: number[];
-}>;
+export declare function getScheduleDaySlots(ctx: QueryCtx, schedule: Doc<"schedules"> | null, date: CivilDate, overridesByDate?: Map<string, Doc<"date_overrides">>): Promise<number[]>;
+/**
+ * A schedule's date overrides from `dateFrom` to `dateTo`, by date, read with
+ * one index range. Of several rows for one date the first stored wins, as in
+ * getScheduleDaySlots' own lookup.
+ */
+export declare function getDateOverridesByDate(ctx: QueryCtx, schedule: Doc<"schedules">, dateFrom: CivilDate, dateTo: CivilDate): Promise<Map<string, Doc<"date_overrides">>>;
+/** Local slot indices of a schedule's weekly hours on the weekday of `date` (overrides ignored). */
+export declare function getWeeklySlots(schedule: Doc<"schedules">, date: CivilDate): number[];
 /**
  * Get the effective available slots for a resource on a specific date.
  * This considers the schedule's weekly hours and any date overrides.

@@ -9,7 +9,7 @@
   "bugs": {
     "url": "https://github.com/Finchmedia/booking-component/issues"
   },
-  "version": "0.4.2",
+  "version": "0.4.3",
   "license": "Apache-2.0",
   "keywords": [
     "convex",
@@ -26,7 +26,7 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "build": "tsc --project ./tsconfig.build.json",
     "typecheck": "tsc --noEmit && tsc -p example && tsc -p example/convex",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "all": "run-p -r 'dev:*' 'test:watch'",
     "test": "vitest run --typecheck",
     "test:watch": "vitest --typecheck --clearScreen false",

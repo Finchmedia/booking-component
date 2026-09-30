@@ -86,4 +86,28 @@ export declare const cleanup: import("convex/server").RegisteredMutation<"intern
     user: string;
     slot: string;
 }, Promise<null>>;
+/**
+ * Repairs presence holds whose cleanup job can no longer run (cancelled,
+ * failed or gone), one page of markers per call. A stale orphan loses its
+ * presence row and marker; a fresh one gets one replacement cleanup job.
+ * Markers with a live job are left alone. Only presence tables are touched.
+ *
+ * Steady-state operation creates no orphans; they need an external failure
+ * such as a cancelled job. Run it once after upgrading from 0.4.2 or earlier,
+ * from a host internalMutation: start without a cursor and pass
+ * `continueCursor` back until `isDone`. `dryRun` counts without writing.
+ * Markers created during a sweep sort after the cursor and are visited too;
+ * they come with a live job, so they are left alone.
+ */
+export declare const sweepOrphanedHolds: import("convex/server").RegisteredMutation<"public", {
+    cursor?: string | null | undefined;
+    limit: number;
+    dryRun: boolean;
+}, Promise<{
+    scanned: number;
+    deleted: number;
+    rescheduled: number;
+    continueCursor: string | null;
+    isDone: boolean;
+}>>;
 //# sourceMappingURL=presence.d.ts.map

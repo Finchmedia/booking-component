@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.3 — Unreleased
+## 0.4.3 — 30 September 2026
 
 ### Upgrading
 
@@ -47,6 +47,23 @@
   `by_organizationId_and_isDefault`, so `getDefaultSchedule` and the audit read one
   schedule, not all of an organization's. Booking documents can carry the new optional
   `rescheduledToUid`; host validators of booking fields must accept it.
+- The Booker now shows booking errors itself; hosts that also toast them (for example by
+  wrapping mutations) show two messages, so drop that or move it to `onBookingError`.
+  Throw `ConvexError({ code, message })` from host functions for a specific message.
+- Pass `onEventTypeReset` and `onNavigate` for a way back from configuration errors. For
+  the event-deleted recovery, render the Booker in an error boundary and have the public
+  `getEventType` return `null` for `Event type not found` (see the README).
+- The Booker stores the first configured location's address, or `{ type: "address" }`
+  without a value instead of "Studio A": render a location by `location.value`, not by
+  `booking.location &&`. Existing bookings keep what they stored.
+- Markup for CSS and selectors: durations are radio inputs in a `fieldset`, not `li`s;
+  `BookingErrorDialog` is a native `dialog` (`showModal()`) or an inline `role="alert"`
+  instead of a fixed overlay; the Booker's steps sit in a `display: contents` wrapper.
+- `Calendar` (`selectedDate`, `onDateChange`, `currentMonth`) and `generateCalendarDays`
+  use day carriers whose local fields name the day; the automatic selection is local
+  midnight of today in the display zone. Replace your own `fetchSlots(date)` calls with
+  `fetchSlotsForDate(day.civilDate)`.
+- Pass `adminApi` to `BookingProvider` wherever admin operations are used.
 
 ### Security
 
@@ -82,6 +99,42 @@
   host checks must accept both formats.
 - `listBookings` with a `limit` stops reading once enough rows match, with unchanged
   results. `makeInternalBookingAPI`'s `getEventTypeBySlug` accepts `organizationId`.
+- The Booker shows failed bookings and reschedules in an announced alert with the host's
+  `ConvexError` text (`data.message` or string data), else a generic message instead of
+  transport text; `UNAUTHENTICATED` without `onAuthRequired` asks the user to sign in.
+  A missing management token or `rescheduleBookingByToken` is a configuration error.
+- Configuration errors no longer trap users: with their recovery callback they are a
+  modal alert dialog (focus on the action, Escape runs it), without it an inline alert
+  instead of a full-screen overlay whose button did nothing. They stop a new booking but
+  no longer cover the success screen; during a reschedule they are an inline notice
+  above the calendar that does not block the move.
+- Repeated submits or slot clicks send one mutation; slots are disabled during a
+  one-click reschedule; the slot hold ends after a successful booking or reschedule and
+  a failed one-click reschedule. A new `eventTypeId`, `resourceId` or
+  `originalBooking.uid` starts a fresh flow, which shows the confirmation of a
+  submission still pending then unless a newer one was sent: only the submission
+  sent last is shown, older ones reach `onBookingComplete`. A late
+  `originalBooking` uses its own duration and zone. A completed reschedule offers no
+  "Book Another"; `reuseBookerInfo={false}` shows the original contact details
+  read-only; confirmation and success follow the 12h/24h choice and the browser locale.
+- Accessibility: durations are a native radio group; form fields are labelled and expose
+  required, invalid and error state; reserved slots keep their time in their name; day
+  buttons expose the full date, `aria-pressed` and `aria-current="date"`; the 12h/24h
+  toggles expose `aria-pressed`; focus moves to each new step's heading.
+- Calendar days no longer shift when the display zone differs from the browser's (one
+  west of it queried and booked the previous day and disabled today). Today and past
+  days follow the display zone; `fetchMonthSlots` no longer depends on the browser's.
+- A slot is "Reserved" exactly when another session holds an overlapping 15-minute
+  quantum, read for each UTC date the slots cover (up to three, else a warning and
+  `presenceIncomplete`); `useSlotPresence` no longer flickers for a slot held twice.
+- `getSessionId` no longer throws (crashing Booker and Calendar) when `sessionStorage`
+  is blocked, `null` or full; the id then lives in memory and changes on reload.
+- `@mrfinch/booking/react` uses `.js` relative imports, so it loads with Node's ESM
+  loader, Vitest's defaults and plain webpack 5 or Rspack and keeps its types under
+  `nodenext` (all `any` before). Next.js and Vite were not affected.
+- `BookingProvider` resolves admin operations from `adminApi`; with
+  `adminApi={api.admin}` they resolved to the public module. `Calendar` shows its "event
+  type has been deleted" notice when `getEventType` resolves to `null`.
 
 ### Added
 
@@ -91,6 +144,25 @@
 - `rescheduledToUid`, set on a moved original to the new booking's uid (from 0.4.3 on).
 - `cancelReservation` takes optional `reason` and `cancelledBy`, `rescheduleBooking` an
   optional `changedBy`; `isSendableAddress` is exported from `@mrfinch/booking/emails`.
+- Optional `onBookingError(error, { phase })` on `Booker`, called besides its alert;
+  `submitError`, `readOnlyDetails`, `timeFormat` and `locale` on `BookingForm`, the last
+  two on `BookingSuccess`, `disabled` on `Calendar`, `TimeSlotsPanel`, `TimeSlotButton`;
+  a locale on `formatDate`, `formatTimeDisplay` and `formatDateTime` (plus time format).
+- `ValidationError.recovery` and `ValidationRecovery`; `CalendarDay.civilDate`;
+  `useConvexSlots`'s `presenceIncomplete`, `fetchSlotsForDate("YYYY-MM-DD")` and
+  `fetchMonthSlotsFor(year, month)` (1–12), which throw a `RangeError` for impossible
+  input, as `generateCalendarDays` and `fetchMonthSlots` now do for an invalid `Date`.
+- `allowedDurations` and `effectiveSlotInterval` (type `EventTypeDurations`) from
+  `@mrfinch/booking` and `/react`: the Booker's durations and the Calendar's unchanged
+  slot grid, importable by host Convex functions without React.
+
+### Deprecated
+
+- `ValidationError.recoveryPath` (demo routes; map `recovery` instead), the unused
+  `BookingValidationError` and `BookingValidationResult` types, the never-stored
+  `"rescheduled"` status, and `useConvexSlots().fetchSlots(date)` and
+  `fetchMonthSlots(date)` (use `fetchSlotsForDate` and `fetchMonthSlotsFor`).
+- Falling back to `publicApi` for admin operations `adminApi` lacks (may go in 0.5.0).
 
 ### Documentation
 
@@ -98,6 +170,8 @@
   [hook payload reference](docs/hook-payloads-v1.md) lists the v1 payloads and the
   [custom email guide](docs/custom-emails.md) covers key rotation and Resend accounts.
   The 0.3.1 entry no longer misstates `cancelReservation`'s result.
+- The README covers the Booker's errors, recovery, accessibility, time zones and module
+  loading; `BookingProvider` docs no longer present references as authorization.
 
 ### Still the host's job
 
@@ -114,6 +188,9 @@
   documented host duties; time-dependent suites run under several process time zones.
 - The npm package omits test files and `src/testing/`. Internal refactors (shared cancel
   path, typed patches, `hooks:triggerHooks` returning `null`) change no behaviour.
+- `npm run lint` runs with `--max-warnings=0` and fails on unused bindings in package
+  sources, `_`-prefixed ones included (tests keep the escape); three unused props carry
+  tracked exceptions. Packaging tests import and type-check the compiled `/react` entry.
 
 ## 0.4.2 — 23 September 2026
 

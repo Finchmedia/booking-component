@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { anyApi, type ApiFromModules } from "convex/server";
-import { makeInternalBookingAPI } from "./index.js";
+import {
+  allowedDurations,
+  effectiveSlotInterval,
+  makeInternalBookingAPI,
+  type EventTypeDurations,
+} from "./index.js";
 import { components, initConvexTest } from "./setup.test.js";
 
 // The wrappers are exported so convex-test can address them as the app module
@@ -256,5 +261,20 @@ describe("client wrappers (makeInternalBookingAPI)", () => {
     await expect(
       t.mutation(testApi.sweepOrphanedHolds, { limit: 0, dryRun: true })
     ).rejects.toThrow("limit must be an integer from 1 to 500");
+  });
+});
+
+describe("duration helpers from the root entry (N17)", () => {
+  // Host Convex functions import these without the React entry
+  test("give the Booker's durations and the Calendar's slot grid", () => {
+    const eventType: EventTypeDurations = {
+      lengthInMinutes: 30,
+      lengthInMinutesOptions: [60, 90],
+    };
+    expect(allowedDurations(eventType)).toEqual([60, 90]);
+    expect(effectiveSlotInterval(eventType)).toBe(30);
+    // CONTROL: an explicit slotInterval wins, and no options means the length
+    expect(effectiveSlotInterval({ ...eventType, slotInterval: 15 })).toBe(15);
+    expect(allowedDurations({ lengthInMinutes: 45 })).toEqual([45]);
   });
 });

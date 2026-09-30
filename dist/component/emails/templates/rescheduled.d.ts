@@ -1,3 +1,4 @@
+import type { BookingEmailContext } from "../../../emails.js";
 export interface BookingRescheduledDetails {
     bookerName: string;
     eventTitle: string;
@@ -6,9 +7,8 @@ export interface BookingRescheduledDetails {
     newStart: number;
     newEnd: number;
     timezone: string;
-    bookingUid?: string;
-    managementToken?: string;
-    baseUrl?: string;
+    /** From bookingEmailLinks; without links the mail asks the guest to get in touch instead. */
+    links?: BookingEmailContext["links"];
 }
 export declare function generateBookingRescheduledHTML(details: BookingRescheduledDetails): string;
 //# sourceMappingURL=rescheduled.d.ts.map

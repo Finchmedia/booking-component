@@ -1,5 +1,6 @@
 /**
- * Checks if a specific slot is currently held by another user.
+ * Checks if a specific slot is currently held by another user: isLocked is
+ * true while any other session holds it, even if this session holds it too.
  * @param resourceId - The resource ID (e.g. "studio-a")
  * @param slotId - The ID of the slot to check
  */
@@ -9,8 +10,8 @@ export declare function useSlotPresence(resourceId: string, slotId: string): {
     isLoading: boolean;
     holderCount?: undefined;
 } | {
-    isLocked: boolean;
-    isHeldByMe: boolean;
+    isLocked: any;
+    isHeldByMe: any;
     holderCount: any;
     isLoading: boolean;
 };

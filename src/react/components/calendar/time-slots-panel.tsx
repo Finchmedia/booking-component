@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import type { BookingSlot } from "../../types";
-import { TimeSlotButton } from "./time-slot-button";
+import type { BookingSlot } from "../../types.js";
+import { TimeSlotButton } from "./time-slot-button.js";
 
 interface TimeSlotsPanelProps {
   selectedDate: Date | null;
@@ -13,6 +13,7 @@ interface TimeSlotsPanelProps {
   onTimeFormatChange: (format: "12h" | "24h") => void;
   onSlotSelect: (slotTime: string) => void;
   timezone: string; // User's selected/locked timezone for display
+  disabled?: boolean; // Pause slot selection, e.g. while a reschedule is being sent
 }
 
 export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
@@ -24,6 +25,7 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
   onTimeFormatChange,
   onSlotSelect,
   timezone,
+  disabled = false,
 }) => {
   // Use passed timezone for displaying slot times (may be locked to event type TZ)
   const displayTimezone = timezone;
@@ -56,6 +58,8 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
         <div className="mb-3 flex justify-center">
           <div className="flex overflow-hidden rounded-md border border-border bg-muted">
             <button
+              type="button"
+              aria-pressed={timeFormat === "12h"}
               onClick={() => onTimeFormatChange("12h")}
               className={`px-2 py-1 text-xs font-medium transition-colors ${
                 timeFormat === "12h"
@@ -66,6 +70,8 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
               12h
             </button>
             <button
+              type="button"
+              aria-pressed={timeFormat === "24h"}
               onClick={() => onTimeFormatChange("24h")}
               className={`px-2 py-1 text-xs font-medium transition-colors ${
                 timeFormat === "24h"
@@ -112,6 +118,7 @@ export const TimeSlotsPanel: React.FC<TimeSlotsPanelProps> = ({
                   timezone={displayTimezone}
                   onSlotSelect={onSlotSelect}
                   isReserved={slot.isReserved}
+                  disabled={disabled}
                 />
               ))
             )}

@@ -1,10 +1,10 @@
 "use client";
 
 import React from "react";
-import { CalendarNavigation } from "./calendar-navigation";
-import { CalendarDayButton } from "./calendar-day-button";
-import { DAYS, generateCalendarDays } from "../../utils/date-utils";
-import type { MonthSlots } from "../../types";
+import { CalendarNavigation } from "./calendar-navigation.js";
+import { CalendarDayButton } from "./calendar-day-button.js";
+import { DAYS, generateCalendarDays } from "../../utils/date-utils.js";
+import type { MonthSlots } from "../../types.js";
 
 interface CalendarGridProps {
   currentDate: Date;

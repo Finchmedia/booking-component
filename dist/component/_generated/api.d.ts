@@ -7,10 +7,13 @@
  * @module
  */
 import type * as availability from "../availability.js";
+import type * as booking_lifecycle from "../booking_lifecycle.js";
 import type * as emails from "../emails.js";
 import type * as emails_context from "../emails/context.js";
 import type * as emails_helpers from "../emails/helpers.js";
+import type * as emails_html from "../emails/html.js";
 import type * as emails_mutations from "../emails/mutations.js";
+import type * as emails_recipient from "../emails/recipient.js";
 import type * as emails_renderer from "../emails/renderer.js";
 import type * as emails_styles from "../emails/styles.js";
 import type * as emails_templates_approved from "../emails/templates/approved.js";
@@ -21,6 +24,7 @@ import type * as emails_templates_index from "../emails/templates/index.js";
 import type * as emails_templates_pending from "../emails/templates/pending.js";
 import type * as emails_templates_rescheduled from "../emails/templates/rescheduled.js";
 import type * as hooks from "../hooks.js";
+import type * as input_validation from "../input_validation.js";
 import type * as inventory_helpers from "../inventory_helpers.js";
 import type * as maintenance from "../maintenance.js";
 import type * as multi_resource from "../multi_resource.js";
@@ -30,15 +34,19 @@ import type * as resource_event_types from "../resource_event_types.js";
 import type * as resources from "../resources.js";
 import type * as schedules from "../schedules.js";
 import type * as slot_helpers from "../slot_helpers.js";
+import type * as tokens from "../tokens.js";
 import type * as utils from "../utils.js";
 import type * as validators from "../validators.js";
 import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server";
 declare const fullApi: ApiFromModules<{
     availability: typeof availability;
+    booking_lifecycle: typeof booking_lifecycle;
     emails: typeof emails;
     "emails/context": typeof emails_context;
     "emails/helpers": typeof emails_helpers;
+    "emails/html": typeof emails_html;
     "emails/mutations": typeof emails_mutations;
+    "emails/recipient": typeof emails_recipient;
     "emails/renderer": typeof emails_renderer;
     "emails/styles": typeof emails_styles;
     "emails/templates/approved": typeof emails_templates_approved;
@@ -49,6 +57,7 @@ declare const fullApi: ApiFromModules<{
     "emails/templates/pending": typeof emails_templates_pending;
     "emails/templates/rescheduled": typeof emails_templates_rescheduled;
     hooks: typeof hooks;
+    input_validation: typeof input_validation;
     inventory_helpers: typeof inventory_helpers;
     maintenance: typeof maintenance;
     multi_resource: typeof multi_resource;
@@ -58,6 +67,7 @@ declare const fullApi: ApiFromModules<{
     resources: typeof resources;
     schedules: typeof schedules;
     slot_helpers: typeof slot_helpers;
+    tokens: typeof tokens;
     utils: typeof utils;
     validators: typeof validators;
 }>;

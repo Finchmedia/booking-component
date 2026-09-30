@@ -1,5 +1,5 @@
 import React from "react";
-import type { MonthSlots } from "../../types";
+import type { MonthSlots } from "../../types.js";
 interface CalendarGridProps {
     currentDate: Date;
     selectedDate: Date | null;

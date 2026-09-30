@@ -1,8 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useId } from "react";
 import { Clock, MapPin, Globe, User } from "lucide-react";
-import { getTimezoneDisplayName } from "../../utils/timezone-utils";
+import { getTimezoneDisplayName } from "../../utils/timezone-utils.js";
 
 interface EventType {
   title: string;
@@ -35,12 +35,16 @@ export const EventMetaPanel: React.FC<EventMetaPanelProps> = ({
   selectedDuration,
   onDurationChange,
   userTimezone,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- timezone lock not implemented yet (later feature)
   onTimezoneChange: _onTimezoneChange,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- timezone lock not implemented yet (later feature)
   timezoneLocked: _timezoneLocked,
   organizerName = "Organizer",
   organizerAvatar,
   readOnly = false,
 }) => {
+  const durationName = useId();
+
   if (!eventType) {
     return (
       <div className="w-full p-4 border-b border-border md:w-60 lg:w-72 md:border-b-0 md:border-r">
@@ -91,9 +95,13 @@ export const EventMetaPanel: React.FC<EventMetaPanelProps> = ({
           </p>
         </div>
 
-        {/* Event Title */}
+        {/* Event Title (the calendar step's heading) */}
         <div>
-          <h1 className="text-lg font-semibold text-foreground break-words leading-tight">
+          <h1
+            data-step-heading={readOnly ? undefined : ""}
+            tabIndex={readOnly ? undefined : -1}
+            className="text-lg font-semibold text-foreground break-words leading-tight outline-none"
+          >
             {eventType.title}
           </h1>
         </div>
@@ -112,27 +120,35 @@ export const EventMetaPanel: React.FC<EventMetaPanelProps> = ({
             {!readOnly &&
             eventType.lengthInMinutesOptions &&
             eventType.lengthInMinutesOptions.length > 1 ? (
-              <div className="relative max-w-full">
+              <fieldset className="relative max-w-full min-w-0">
+                <legend className="sr-only">Duration</legend>
                 <div className="border border-border rounded-md bg-card/50 p-1">
-                  <ul className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
                     {eventType.lengthInMinutesOptions.map((duration) => (
-                      <li
-                        key={duration}
-                        onClick={() => onDurationChange(duration)}
-                        className={`flex-1 cursor-pointer text-center rounded px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
-                          selectedDuration === duration
-                            ? "bg-accent text-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                        }`}
-                      >
-                        <div className="whitespace-nowrap">
+                      <label key={duration} className="flex-1 cursor-pointer">
+                        {/* Native radios: Tab reaches the group, arrow keys choose */}
+                        <input
+                          type="radio"
+                          name={durationName}
+                          value={duration}
+                          checked={selectedDuration === duration}
+                          onChange={() => onDurationChange(duration)}
+                          className="peer sr-only"
+                        />
+                        <span
+                          className={`block whitespace-nowrap text-center rounded px-3 py-1.5 text-xs font-medium transition-all duration-200 peer-focus-visible:ring-2 peer-focus-visible:ring-ring ${
+                            selectedDuration === duration
+                              ? "bg-accent text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                          }`}
+                        >
                           {formatDuration(duration)}
-                        </div>
-                      </li>
+                        </span>
+                      </label>
                     ))}
-                  </ul>
+                  </div>
                 </div>
-              </div>
+              </fieldset>
             ) : (
               <span className="text-xs">{formatDuration(selectedDuration)}</span>
             )}
@@ -149,7 +165,7 @@ export const EventMetaPanel: React.FC<EventMetaPanelProps> = ({
 
         {/* Timezone display */}
         {userTimezone && (
-          <div className="flex items-center text-xs text-muted-foreground cursor-pointer hover:text-foreground transition">
+          <div className="flex items-center text-xs text-muted-foreground">
             <Globe className="mr-2 h-3.5 w-3.5 flex-shrink-0" />
             <span className="font-medium text-foreground text-xs">
               {getTimezoneDisplayName(userTimezone)}

@@ -1,3 +1,5 @@
+import { fromLocalFields, monthGrid, toLocalMidnight, todayIn } from "./civil-date.js";
+
 export const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 export const MONTHS = [
   "January",
@@ -15,16 +17,6 @@ export const MONTHS = [
 ];
 
 /**
- * Get today's date string in a specific timezone
- * @param timezone - IANA timezone (e.g., "Europe/Berlin")
- * @returns Date string "YYYY-MM-DD"
- */
-export const getTodayInTimezone = (timezone: string): string => {
-  const now = new Date();
-  return now.toLocaleDateString("sv-SE", { timeZone: timezone });
-};
-
-/**
  * Format a Date object as "YYYY-MM-DD" in a specific timezone
  * This prevents off-by-one errors for UTC+ timezone users
  * @param date - JavaScript Date object
@@ -33,24 +25,6 @@ export const getTodayInTimezone = (timezone: string): string => {
  */
 export const formatDateInTimezone = (date: Date, timezone: string): string => {
   return date.toLocaleDateString("sv-SE", { timeZone: timezone });
-};
-
-/**
- * Check if two dates represent the same calendar day in a timezone
- * @param date1 - First date
- * @param date2 - Second date
- * @param timezone - IANA timezone
- * @returns true if same calendar day
- */
-export const isSameDayInTimezone = (
-  date1: Date,
-  date2: Date,
-  timezone: string
-): boolean => {
-  return (
-    formatDateInTimezone(date1, timezone) ===
-    formatDateInTimezone(date2, timezone)
-  );
 };
 
 // Helper function to get date string in local timezone
@@ -80,7 +54,13 @@ export const formatTime = (
 };
 
 export interface CalendarDay {
+  /** Carrier for the day: local midnight, so its local fields name `civilDate` */
   date: Date;
+  /**
+   * The day as "YYYY-MM-DD". It is the cell's label, its availability key and
+   * the date to query. Always set by generateCalendarDays.
+   */
+  civilDate?: string;
   day: number;
   isCurrentMonth: boolean;
   isPast: boolean;
@@ -91,12 +71,16 @@ export interface CalendarDay {
 }
 
 /**
- * Generate calendar days for a given month with timezone awareness
+ * Generate the 42 days of a Monday-first month view.
  *
- * @param currentDate - Date representing the month to display
- * @param selectedDate - Currently selected date (or null)
- * @param monthSlots - Map of date strings to availability
- * @param timezone - IANA timezone for date calculations (e.g., "Europe/Berlin")
+ * Days are civil dates: a cell's label, `civilDate`, its `monthSlots` key and
+ * `date` (a local-midnight carrier) name the same day in every browser zone.
+ * Today and past days are judged in `timezone`.
+ *
+ * @param currentDate - Date whose local year and month are displayed
+ * @param selectedDate - Selected day as a carrier (its local fields), or null
+ * @param monthSlots - Map of "YYYY-MM-DD" to availability
+ * @param timezone - IANA timezone that decides today (e.g., "Europe/Berlin")
  * @returns Array of CalendarDay objects
  */
 export const generateCalendarDays = (
@@ -105,47 +89,27 @@ export const generateCalendarDays = (
   monthSlots: Record<string, boolean>,
   timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone
 ): CalendarDay[] => {
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
+  const month = fromLocalFields(currentDate).slice(0, 7);
+  const today = todayIn(timezone);
+  const selected = selectedDate ? fromLocalFields(selectedDate) : null;
 
-  const firstDay = new Date(year, month, 1);
-  const startDate = new Date(firstDay);
+  return monthGrid(currentDate.getFullYear(), currentDate.getMonth() + 1).map(
+    (civilDate) => {
+      const isCurrentMonth = civilDate.startsWith(month);
+      const isPast = civilDate < today;
 
-  // Adjust to Monday start (getDay() returns 0 for Sunday)
-  const dayOffset = (firstDay.getDay() + 6) % 7;
-  startDate.setDate(firstDay.getDate() - dayOffset);
-
-  const days = [];
-  // Get today's date string in the target timezone for comparison
-  const todayStr = getTodayInTimezone(timezone);
-
-  for (let i = 0; i < 42; i++) {
-    const date = new Date(startDate);
-    date.setDate(startDate.getDate() + i);
-
-    const isCurrentMonth = date.getMonth() === month;
-
-    // Format the date in the target timezone for proper comparison
-    const dateStr = formatDateInTimezone(date, timezone);
-    const isPast = dateStr < todayStr;
-    const isToday = dateStr === todayStr;
-    const isSelected =
-      !!selectedDate && isSameDayInTimezone(date, selectedDate, timezone);
-
-    // Check if this date has available slots using O(1) lookup
-    const hasSlots = Boolean(monthSlots[dateStr]);
-
-    days.push({
-      date,
-      day: date.getDate(),
-      isCurrentMonth,
-      isPast,
-      isToday,
-      isSelected,
-      hasSlots,
-      disabled: isPast || !isCurrentMonth,
-    });
-  }
-
-  return days;
+      return {
+        date: toLocalMidnight(civilDate),
+        civilDate,
+        day: Number(civilDate.slice(8)),
+        isCurrentMonth,
+        isPast,
+        isToday: civilDate === today,
+        isSelected: civilDate === selected,
+        // O(1) lookup by the same key the cell shows
+        hasSlots: Boolean(monthSlots[civilDate]),
+        disabled: isPast || !isCurrentMonth,
+      };
+    }
+  );
 };

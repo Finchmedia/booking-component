@@ -1,2 +1,2 @@
-export { BookingForm, type CurrentUser } from "./booking-form";
-export { BookingSuccess } from "./booking-success";
+export { BookingForm, type CurrentUser } from "./booking-form.js";
+export { BookingSuccess } from "./booking-success.js";

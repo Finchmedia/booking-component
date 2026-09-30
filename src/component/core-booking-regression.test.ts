@@ -630,6 +630,33 @@ describe("rescheduleBookingByToken", () => {
       "confirmed"
     );
   });
+
+  test("a location without a value is stored as sent and kept by both moves (O4)", async () => {
+    const seed = await seedResource(t);
+    // The Booker sends { type: "address" } without a value when the event has no address
+    const location = { type: "address" };
+    const booked = await book(t, seed, AT("09:00"), AT("10:00"), { location });
+    expect(booked!.location).toStrictEqual(location);
+
+    const byToken = await t.mutation(api.public.rescheduleBookingByToken, {
+      uid: booked!.uid,
+      token: booked!.managementToken!,
+      newStart: AT("10:00"),
+      newEnd: AT("11:00"),
+    });
+    const byId = await t.mutation(api.public.rescheduleBooking, {
+      bookingId: byToken!._id,
+      newStart: AT("11:00"),
+      newEnd: AT("12:00"),
+    });
+    for (const moved of [byToken, byId]) {
+      expect(moved!.location).toStrictEqual(location);
+      expect(Object.keys(moved!.location)).toEqual(["type"]);
+    }
+    // CONTROL: a location with a value keeps both keys
+    const withValue = await book(t, seed, AT("15:00"), AT("16:00"));
+    expect(withValue!.location).toStrictEqual(LOCATION);
+  });
 });
 
 // ============================================

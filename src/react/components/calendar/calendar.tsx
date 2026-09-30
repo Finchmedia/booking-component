@@ -2,13 +2,17 @@
 
 import { useEffect } from "react";
 import { useQuery } from "convex-helpers/react/cache/hooks";
-import { CalendarGrid } from "./calendar-grid";
-import { TimeSlotsPanel } from "./time-slots-panel";
-import { EventMetaPanel } from "./event-meta-panel";
-import { CalendarSkeleton } from "./calendar-skeleton";
-import { useBookingAPI } from "../../context";
-import { useConvexSlots } from "../../hooks/use-convex-slots";
-import { useIntersectionObserver } from "../../hooks/use-intersection-observer";
+import { CalendarGrid } from "./calendar-grid.js";
+import { TimeSlotsPanel } from "./time-slots-panel.js";
+import { EventMetaPanel } from "./event-meta-panel.js";
+import { CalendarSkeleton } from "./calendar-skeleton.js";
+import { BookingErrorDialog } from "../booker/booking-error-dialog.js";
+import { useBookingAPI } from "../../context.js";
+import { useConvexSlots } from "../../hooks/use-convex-slots.js";
+import { eventDeletedError } from "../../hooks/use-booking-validation.js";
+import { useIntersectionObserver } from "../../hooks/use-intersection-observer.js";
+import { fromLocalFields, toLocalMidnight, todayIn } from "../../utils/civil-date.js";
+import { effectiveSlotInterval } from "../../../shared/durations.js";
 
 interface CalendarProps {
   resourceId: string;
@@ -20,7 +24,8 @@ interface CalendarProps {
   organizerName?: string; // Organizer name to display
   organizerAvatar?: string; // Organizer avatar URL
 
-  // Controlled state props (lifted to parent)
+  // Controlled state props (lifted to parent). Days are carriers: a Date's
+  // local calendar fields name the day, as in the Dates this calendar emits.
   selectedDate: Date | null;
   onDateChange: (date: Date | null) => void;
   currentMonth: Date;
@@ -31,6 +36,8 @@ interface CalendarProps {
   onTimezoneChange: (timezone: string) => void;
   timeFormat: "12h" | "24h";
   onTimeFormatChange: (format: "12h" | "24h") => void;
+  /** Optional: disables slot selection, e.g. while a reschedule is being sent */
+  disabled?: boolean;
 }
 
 export const Calendar: React.FC<CalendarProps> = (props) => {
@@ -44,6 +51,12 @@ export const Calendar: React.FC<CalendarProps> = (props) => {
     return <CalendarSkeleton />;
   }
 
+  // A missing event type (the host's getEventType resolved null) cannot be
+  // booked: show the "deleted" notice instead of its calendar
+  if (eventType === null) {
+    return <BookingErrorDialog error={eventDeletedError(props.resourceId)} />;
+  }
+
   return <CalendarContent {...props} eventType={eventType} />;
 };
 
@@ -52,6 +65,7 @@ const CalendarContent: React.FC<
   CalendarProps & { eventType: NonNullable<ReturnType<typeof useQuery>> }
 > = ({
   resourceId,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- F13: slot queries do not send the event type yet (0.5.0)
   eventTypeId: _eventTypeId,
   onSlotSelect,
   title,
@@ -70,24 +84,21 @@ const CalendarContent: React.FC<
   onTimezoneChange,
   timeFormat,
   onTimeFormatChange,
+  disabled,
   // Loaded data
   eventType,
 }) => {
-  // Event type timezone (overrides browser timezone when locked)
-  const _eventTimezone = eventType?.timezone || "Europe/Berlin";
   const isTimezoneLocked = eventType?.lockTimeZoneToggle || false;
 
   // Use controlled duration from props
   const eventLength = selectedDuration;
 
-  // Extract slot interval and all duration options for smart defaulting
-  const slotInterval = eventType?.slotInterval;
-  const allDurationOptions = eventType
-    ? [eventType.lengthInMinutes, ...(eventType.lengthInMinutesOptions || [])]
-    : undefined;
+  // One slot grid for every selected duration (the event's slotInterval or its
+  // shortest duration); hosts checking starts use the same helper
+  const slotInterval = effectiveSlotInterval(eventType);
 
   // Intersection observer to detect when calendar becomes visible
-  const [calendarRef, _isIntersecting, hasIntersected] =
+  const [calendarRef, , hasIntersected] =
     useIntersectionObserver({
       rootMargin: "500px",
       triggerOnce: true,
@@ -99,21 +110,21 @@ const CalendarContent: React.FC<
     availableSlots,
     reservedSlots,
     isLoading,
-    fetchMonthSlots,
-    fetchSlots,
+    fetchMonthSlotsFor,
+    fetchSlotsForDate,
   } = useConvexSlots(
     resourceId,
     eventLength,
     slotInterval,
-    allDurationOptions,
+    undefined, // allDurationOptions: only used without a slotInterval
     hasIntersected,
-    timezone // Pass timezone for proper date string generation
+    timezone // Days are civil dates; only the deprecated fetchSlots reads the zone
   );
 
-  // Handle date selection
+  // Handle date selection: the clicked cell's label is the day queried
   const handleDateSelect = (date: Date) => {
     onDateChange(date);
-    fetchSlots(date);
+    fetchSlotsForDate(fromLocalFields(date));
   };
 
   // Navigation
@@ -135,23 +146,23 @@ const CalendarContent: React.FC<
   // Fetch month slots when calendar becomes visible or month changes.
   useEffect(() => {
     if (hasIntersected) {
-      fetchMonthSlots(new Date(monthYear, monthIndex, 1));
+      fetchMonthSlotsFor(monthYear, monthIndex + 1);
     }
-  }, [hasIntersected, monthYear, monthIndex, fetchMonthSlots]);
+  }, [hasIntersected, monthYear, monthIndex, fetchMonthSlotsFor]);
 
-  // Auto-select today's date when month slots are loaded
+  // Auto-select today (in the display zone) when month slots are loaded
   useEffect(() => {
     if (!selectedDate && Object.keys(monthSlots).length > 0) {
-      onDateChange(new Date());
+      onDateChange(toLocalMidnight(todayIn(timezone)));
     }
-  }, [monthSlots, selectedDate, onDateChange]);
+  }, [monthSlots, selectedDate, onDateChange, timezone]);
 
   // Fetch slots for selected date when it changes (including on mount with persisted date)
   useEffect(() => {
     if (selectedDate) {
-      fetchSlots(selectedDate);
+      fetchSlotsForDate(fromLocalFields(selectedDate));
     }
-  }, [selectedDate, fetchSlots]);
+  }, [selectedDate, fetchSlotsForDate]);
 
   return (
     <div
@@ -203,6 +214,7 @@ const CalendarContent: React.FC<
             onSlotSelect({ slot, duration: selectedDuration })
           }
           timezone={timezone}
+          disabled={disabled}
         />
       </div>
     </div>
