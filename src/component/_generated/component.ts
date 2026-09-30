@@ -1055,9 +1055,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {
-          bufferAfter?: number;
-          bufferBefore?: number;
-          description?: string;
+          bufferAfter?: null | number;
+          bufferBefore?: null | number;
+          description?: null | string;
           id: string;
           isActive?: boolean;
           lengthInMinutes?: number;
@@ -1068,10 +1068,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             type: string;
           }>;
           lockTimeZoneToggle?: boolean;
-          maxFutureMinutes?: number;
-          minNoticeMinutes?: number;
+          maxFutureMinutes?: null | number;
+          minNoticeMinutes?: null | number;
           requiresConfirmation?: boolean;
-          scheduleId?: string;
+          scheduleId?: null | string;
           slotInterval?: number;
           slug?: string;
           timezone?: string;

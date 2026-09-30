@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 /**
  * Event-type writes validate their settings (F16 writes, D29(c); plan
- * PR-54 with Codex R5).
+ * PR-54 with Codex R5) and updateEventType clears optional settings with
+ * null (N25, PR-59).
  *
  * - Lengths, length options and the slot interval are whole minutes greater
  *   than 0; buffers and notice are finite and 0 or more; the horizon is
@@ -190,5 +191,63 @@ describe("the length is one of its options (D29(c))", () => {
     await create(t, { lengthInMinutes: 60 });
     await create(t, { lengthInMinutes: 90, lengthInMinutesOptions: [90] });
     expect(await settings(t)).toMatchObject({ lengthInMinutes: 90, lengthInMinutesOptions: [90] });
+  });
+});
+
+describe("updateEventType: null clears a setting (N25)", () => {
+  const CLEARABLE = ["description", "scheduleId", "bufferBefore", "bufferAfter", "minNoticeMinutes", "maxFutureMinutes"] as const;
+
+  async function seedFull(t: T) {
+    await t.mutation(api.schedules.createSchedule, {
+      id: "sch-1", organizationId: ORG, name: "Hours", timezone: "Europe/Berlin", weeklyHours: [],
+    });
+    await create(t, {
+      description: "Talk", scheduleId: "sch-1", bufferBefore: 5, bufferAfter: 10, minNoticeMinutes: 60, maxFutureMinutes: 1440,
+    });
+  }
+
+  test("null removes each of the six settings; the others stay", async () => {
+    const { t } = setup();
+    await seedFull(t);
+    await update(t, {
+      description: null, scheduleId: null, bufferBefore: null, bufferAfter: null, minNoticeMinutes: null, maxFutureMinutes: null,
+    });
+    const row = await settings(t);
+    for (const key of CLEARABLE) expect(row, key).not.toHaveProperty(key);
+    expect(row).toEqual({ ...BASE, isActive: true });
+    expect(await t.query(api.public.getEventType, { eventTypeId: BASE.id })).not.toHaveProperty("scheduleId");
+  });
+
+  test.each(CLEARABLE)("null clears %s alone", async (key) => {
+    const { t } = setup();
+    await seedFull(t);
+    const before = await settings(t);
+    await update(t, { [key]: null });
+    const { [key]: _cleared, ...rest } = before;
+    expect(await settings(t)).toEqual(rest);
+  });
+
+  test("CONTROL: an omitted setting is unchanged", async () => {
+    const { t } = setup();
+    await seedFull(t);
+    const before = await settings(t);
+    await update(t, { title: "Renamed" });
+    expect(await settings(t)).toEqual({ ...before, title: "Renamed" });
+  });
+
+  test("clearing scheduleId releases the schedule for deleteSchedule", async () => {
+    const { t } = setup();
+    await seedFull(t);
+    await expect(t.mutation(api.schedules.deleteSchedule, { id: "sch-1" })).rejects.toThrow('Cannot delete schedule "sch-1"');
+    await update(t, { scheduleId: null });
+    await expect(t.mutation(api.schedules.deleteSchedule, { id: "sch-1" })).resolves.toEqual({ success: true });
+  });
+
+  test("null is only accepted where absence has a meaning", async () => {
+    const { t } = setup();
+    await seedFull(t);
+    for (const key of ["title", "lengthInMinutes", "lengthInMinutesOptions", "slotInterval", "timezone", "isActive"]) {
+      await expect(update(t, { [key]: null }), key).rejects.toThrow("Validator error");
+    }
   });
 });

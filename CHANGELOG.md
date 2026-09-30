@@ -169,6 +169,10 @@
   unchanged. `listHooks` and `getHook` return `payloadVersion`. Events queued
   by 0.4.x and delivered after the upgrade reach version 2 hooks not at all
   (logged); version 1 hooks still receive them.
+- `updateEventType` clears `description`, `scheduleId`, `bufferBefore`,
+  `bufferAfter`, `minNoticeMinutes` and `maxFutureMinutes` with `null` (N25,
+  D30); an omitted field stays unchanged. `makeInternalBookingAPI` forwards
+  `null`.
 
 ## 0.4.3 — Unreleased
 

@@ -265,9 +265,10 @@ endpoints to authorized host wrappers.
   item; its other resources, pools included, do not list it, although their
   availability counts it.
 - **Updates:** update mutations change the fields you pass and keep every
-  omitted one, so a field cannot be removed once set. Descriptions and an
-  event type's `lengthInMinutesOptions` can be emptied with `""` and `[]`; an
-  event type's `scheduleId` and numeric settings cannot be cleared.
+  omitted one. `updateEventType` removes `description`, `scheduleId`,
+  `bufferBefore`, `bufferAfter`, `minNoticeMinutes` and `maxFutureMinutes`
+  given `null`; other fields cannot be removed once set, but descriptions and
+  `lengthInMinutesOptions` can be emptied with `""` and `[]`.
 - **Input rules:** event-type lengths, length options and slot intervals are
   whole minutes above 0, buffers and notice 0 or more, `maxFutureMinutes`
   above 0, and the length is one of its options when there are any; an

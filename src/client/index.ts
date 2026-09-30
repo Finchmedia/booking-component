@@ -102,7 +102,8 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         lengthInMinutes: v.optional(v.number()),
         lengthInMinutesOptions: v.optional(v.array(v.number())),
         slotInterval: v.optional(v.number()),
-        description: v.optional(v.string()),
+        // null clears the field; omitted keeps it
+        description: v.optional(v.union(v.null(), v.string())),
         timezone: v.optional(v.string()),
         lockTimeZoneToggle: v.optional(v.boolean()),
         locations: v.optional(
@@ -114,11 +115,11 @@ export function makeInternalBookingAPI(component: ComponentApi) {
             })
           )
         ),
-        scheduleId: v.optional(v.string()),
-        bufferBefore: v.optional(v.number()),
-        bufferAfter: v.optional(v.number()),
-        minNoticeMinutes: v.optional(v.number()),
-        maxFutureMinutes: v.optional(v.number()),
+        scheduleId: v.optional(v.union(v.null(), v.string())),
+        bufferBefore: v.optional(v.union(v.null(), v.number())),
+        bufferAfter: v.optional(v.union(v.null(), v.number())),
+        minNoticeMinutes: v.optional(v.union(v.null(), v.number())),
+        maxFutureMinutes: v.optional(v.union(v.null(), v.number())),
         requiresConfirmation: v.optional(v.boolean()),
         isActive: v.optional(v.boolean()),
       },

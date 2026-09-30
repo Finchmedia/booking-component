@@ -1138,7 +1138,15 @@ export const getEventTypeBySlug = query({
 });
 
 /**
- * Changes the fields it is given and keeps every omitted one.
+ * A patch in which `null` clears a column. updateEventType accepts `null`
+ * only for the optional settings whose absence has a meaning.
+ */
+type ClearablePatch<T> = { [K in keyof T]?: T[K] | null };
+
+/**
+ * Changes the fields it is given and keeps every omitted one. `null` removes
+ * `description`, `scheduleId`, `bufferBefore`, `bufferAfter`,
+ * `minNoticeMinutes` or `maxFutureMinutes` (N25).
  *
  * The given settings are checked as in createEventType: lengths, length
  * options and the slot interval are whole minutes greater than 0, buffers and
@@ -1153,7 +1161,7 @@ export const updateEventType = mutation({
     id: v.string(),
     title: v.optional(v.string()),
     slug: v.optional(v.string()),
-    description: v.optional(v.string()),
+    description: v.optional(v.union(v.null(), v.string())),
     lengthInMinutes: v.optional(v.number()),
     lengthInMinutesOptions: v.optional(v.array(v.number())),
     slotInterval: v.optional(v.number()),
@@ -1168,11 +1176,11 @@ export const updateEventType = mutation({
         })
       )
     ),
-    scheduleId: v.optional(v.string()),
-    bufferBefore: v.optional(v.number()),
-    bufferAfter: v.optional(v.number()),
-    minNoticeMinutes: v.optional(v.number()),
-    maxFutureMinutes: v.optional(v.number()),
+    scheduleId: v.optional(v.union(v.null(), v.string())),
+    bufferBefore: v.optional(v.union(v.null(), v.number())),
+    bufferAfter: v.optional(v.union(v.null(), v.number())),
+    minNoticeMinutes: v.optional(v.union(v.null(), v.number())),
+    maxFutureMinutes: v.optional(v.union(v.null(), v.number())),
     requiresConfirmation: v.optional(v.boolean()),
     isActive: v.optional(v.boolean()),
   },
@@ -1190,7 +1198,7 @@ export const updateEventType = mutation({
     if (!eventType) {
       throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
     }
-    await assertScheduleReference(ctx, args.scheduleId);
+    await assertScheduleReference(ctx, args.scheduleId ?? undefined);
     // The length rule applies to the merged configuration, and only when
     // this update touches it.
     if (args.lengthInMinutes !== undefined || args.lengthInMinutesOptions !== undefined) {
@@ -1201,14 +1209,15 @@ export const updateEventType = mutation({
     }
 
     // The arguments besides `id` are event_types columns (their types are
-    // checked here); only the ones given are patched.
+    // checked here); only the ones given are patched, and `null` becomes
+    // `undefined`, which removes the field.
     const { id: _id, ...fields } = args;
-    const updates: Partial<WithoutSystemFields<Doc<"event_types">>> = fields;
+    const updates: ClearablePatch<WithoutSystemFields<Doc<"event_types">>> = fields;
     const filteredUpdates: Partial<WithoutSystemFields<Doc<"event_types">>> = { updatedAt: Date.now() };
 
     for (const [key, value] of Object.entries(updates)) {
       if (value !== undefined) {
-        Object.assign(filteredUpdates, { [key]: value });
+        Object.assign(filteredUpdates, { [key]: value ?? undefined });
       }
     }
 

@@ -123,15 +123,15 @@ export function isLengthOutsideOptions(lengthInMinutes: number, options: number[
   return options !== undefined && options.length > 0 && !options.includes(lengthInMinutes);
 }
 
-/** The numeric event-type settings of a write; `undefined` (not given) is not checked. */
+/** The numeric event-type settings of a write; `undefined` and `null` (a clear) are not checked. */
 export type EventTypeNumbers = {
   lengthInMinutes?: number;
   lengthInMinutesOptions?: number[];
   slotInterval?: number;
-  bufferBefore?: number;
-  bufferAfter?: number;
-  minNoticeMinutes?: number;
-  maxFutureMinutes?: number;
+  bufferBefore?: number | null;
+  bufferAfter?: number | null;
+  minNoticeMinutes?: number | null;
+  maxFutureMinutes?: number | null;
 };
 
 const WHOLE_MINUTES = "expected a whole number of minutes greater than 0";
@@ -151,12 +151,12 @@ export function assertEventTypeNumbers(fields: EventTypeNumbers): void {
   }
   for (const key of ["bufferBefore", "bufferAfter", "minNoticeMinutes"] as const) {
     const value = fields[key];
-    if (value !== undefined && !isNonNegativeMinutes(value)) {
+    if (value !== undefined && value !== null && !isNonNegativeMinutes(value)) {
       throwBookingError("INVALID_INPUT", `Invalid ${key} ${value}: expected a number of minutes of 0 or more`);
     }
   }
   const horizon = fields.maxFutureMinutes;
-  if (horizon !== undefined && !isPositiveMinutes(horizon)) {
+  if (horizon !== undefined && horizon !== null && !isPositiveMinutes(horizon)) {
     throwBookingError("INVALID_INPUT", `Invalid maxFutureMinutes ${horizon}: expected a number of minutes greater than 0`);
   }
 }
