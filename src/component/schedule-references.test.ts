@@ -38,9 +38,7 @@ describe("event-type writes name existing schedules", () => {
     });
     await expect(t.mutation(api.public.createEventType, eventType("et-2", { scheduleId: "never-created" })))
       .rejects.toMatchObject(unknown("never-created"));
-    await expect(t.query(api.public.getEventType, { eventTypeId: "et-2" })).rejects.toMatchObject({
-      data: { code: "EVENT_TYPE_NOT_FOUND" },
-    });
+    expect(await t.query(api.public.getEventType, { eventTypeId: "et-2" })).toBeNull();
     // An upsert of an existing id is checked too.
     await expect(t.mutation(api.public.createEventType, eventType(seed.eventTypeId, { scheduleId: "sch-typo" })))
       .rejects.toMatchObject(unknown("sch-typo"));
@@ -55,7 +53,7 @@ describe("event-type writes name existing schedules", () => {
     await t.mutation(api.public.updateEventType, { id: seed.eventTypeId, scheduleId: "sch-2" });
     await t.mutation(api.public.createEventType, eventType("et-2", { scheduleId: "" }));
     await t.mutation(api.public.createEventType, eventType("et-3"));
-    const read = async (id: string) => (await t.query(api.public.getEventType, { eventTypeId: id })).scheduleId;
+    const read = async (id: string) => (await t.query(api.public.getEventType, { eventTypeId: id }))?.scheduleId;
     expect([await read(seed.eventTypeId), await read("et-2"), await read("et-3")]).toEqual(["sch-2", "", undefined]);
   });
 });

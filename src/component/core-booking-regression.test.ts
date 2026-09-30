@@ -822,9 +822,8 @@ describe("event type CRUD", () => {
       requiresConfirmation: true,
     });
     expect(await t.query(api.public.listEventTypes, {})).toHaveLength(1);
-    await expect(t.query(api.public.getEventType, { eventTypeId: "ghost" })).rejects.toThrow(
-      "Event type not found: ghost"
-    );
+    // 0.5.0 (N1, D12): null, like getResource; 0.4.x threw "Event type not found: ghost".
+    expect(await t.query(api.public.getEventType, { eventTypeId: "ghost" })).toBeNull();
   });
 
   test("getEventTypeBySlug and listEventTypes scope by organization and active flag", async () => {
@@ -952,9 +951,7 @@ describe("event type CRUD", () => {
     expect(await t.mutation(api.public.deleteEventType, { id: "et-unused" })).toEqual({
       success: true,
     });
-    await expect(t.query(api.public.getEventType, { eventTypeId: "et-unused" })).rejects.toThrow(
-      "Event type not found: et-unused"
-    );
+    expect(await t.query(api.public.getEventType, { eventTypeId: "et-unused" })).toBeNull();
     await expect(t.mutation(api.public.deleteEventType, { id: "et-unused" })).rejects.toThrow(
       'Event type "et-unused" not found'
     );

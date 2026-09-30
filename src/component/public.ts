@@ -274,22 +274,21 @@ async function resolveScheduleArgs(
   return { schedule, timezone: schedule.timezone };
 }
 
+/**
+ * The event type with this ID, or null when there is none (like getResource
+ * and the getBooking* queries). Until 0.5.0 a missing ID threw
+ * EVENT_TYPE_NOT_FOUND "Event type not found: <id>".
+ */
 export const getEventType = query({
     args: {
         eventTypeId: v.string(),
     },
-    returns: eventTypeDoc,
+    returns: v.union(eventTypeDoc, v.null()),
     handler: async (ctx, args) => {
-        const eventType = await ctx.db
+        return await ctx.db
             .query("event_types")
             .withIndex("by_external_id", (q) => q.eq("id", args.eventTypeId))
             .unique();
-
-        if (!eventType) {
-            throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type not found: ${args.eventTypeId}`);
-        }
-
-        return eventType;
     },
 });
 

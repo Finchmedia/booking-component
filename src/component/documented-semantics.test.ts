@@ -193,7 +193,7 @@ describe("updates: an omitted field is unchanged", () => {
       eventType: { description: "Intro call", lengthInMinutesOptions: [30, 60], bufferBefore: 10 },
     });
     const read = async () => {
-      const eventType = await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId });
+      const eventType = (await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId }))!;
       return {
         description: eventType.description,
         lengthInMinutesOptions: eventType.lengthInMinutesOptions,

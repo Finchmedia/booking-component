@@ -146,7 +146,7 @@ describe("createMultiResourceBooking organization", () => {
   test("an event type without organization: the argument is kept, and without one none is stored", async () => {
     const { t } = setup();
     const seed = await seedResource(t, { eventType: { organizationId: undefined } });
-    expect((await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId })).organizationId).toBeUndefined();
+    expect((await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId }))!.organizationId).toBeUndefined();
 
     const explicit = await bundle(t, seed.eventTypeId, 10, "org-1");
     const none = await bundle(t, seed.eventTypeId, 12);

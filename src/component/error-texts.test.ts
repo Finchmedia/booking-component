@@ -148,7 +148,6 @@ describe("error texts per entry point", () => {
     await expect(t.mutation(api.public.createBooking, single(seed.eventTypeId, seed.resourceId))).resolves.toMatchObject({ status: "confirmed" });
 
     expect(await failuresOf({
-      "getEventType: missing event": () => t.query(api.public.getEventType, { eventTypeId: "ghost" }),
       ...both("missing event", "ghost", seed.resourceId),
       "createMultiResourceBooking: missing event": () =>
         t.mutation(api.multi_resource.createMultiResourceBooking, {
@@ -187,7 +186,6 @@ describe("error texts per entry point", () => {
       "createReservation: pool on the single-resource path": () =>
         t.mutation(api.public.createReservation, { resourceId: "pool-1", actorId: "x@example.com", ...hour("16:00") }),
     })).toEqual({
-      "getEventType: missing event": coded("EVENT_TYPE_NOT_FOUND", "Event type not found: ghost"),
       "createBooking: missing event": coded("EVENT_TYPE_NOT_FOUND", "Event type not found"),
       "createProvisionalBooking: missing event": coded("EVENT_TYPE_NOT_FOUND", "Event type not found"),
       "createMultiResourceBooking: missing event": coded("EVENT_TYPE_NOT_FOUND", 'Event type "ghost" not found'),

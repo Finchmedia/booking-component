@@ -142,6 +142,12 @@
   repeat the address. Validate both in your booking form and show the error;
   bookings stored earlier keep working, and their mail still renders in UTC
   or is skipped. Recipient verification stays host policy.
+- `getEventType` returns `null` for an unknown ID (N1, D12), like
+  `getResource` and the `getBooking*` queries; 0.4.x threw
+  `EVENT_TYPE_NOT_FOUND` "Event type not found: <id>". Its return type is
+  now the event type or `null`: handle `null` where you read the result, and
+  drop a wrapper's catch that mapped that error to `null` (it no longer
+  fires). The Booker already treats `null` as a deleted event type.
 - Booking statuses are a closed set (F16, D35): `status` is one of
   `provisional`, `pending`, `confirmed`, `cancelled`, `declined` and
   `completed` in the schema, in every returned booking and in the generated

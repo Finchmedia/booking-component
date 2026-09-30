@@ -894,7 +894,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           timezone: string;
           title: string;
           updatedAt?: number;
-        },
+        } | null,
         Name
       >;
       getEventTypeBySlug: FunctionReference<

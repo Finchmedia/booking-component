@@ -110,18 +110,10 @@ connect your management pages to the returned booking UID and secret token.
   extensionless relative imports that plain webpack 5 and Rspack builds could
   not resolve ("Can't resolve './context'") are gone.
 
-The Booker and Calendar treat a `null` event type as deleted. Until 0.5.0 the
-component's `getEventType` throws `Event type not found: <id>` instead, so make
-your public `getEventType` wrapper return `null` for that error:
-
-```ts
-try {
-  return await ctx.runQuery(components.booking.public.getEventType, args);
-} catch (error) {
-  if (error instanceof Error && error.message.includes("Event type not found")) return null;
-  throw error;
-}
-```
+The Booker and Calendar treat a `null` event type as deleted. The component's
+`getEventType` returns `null` for an unknown ID since 0.5.0, so a public wrapper
+can return its result as is. (0.4.x threw `Event type not found: <id>`; wrappers
+written for it that map that error to `null` keep working.)
 
 Like any Convex `useQuery` consumer, the Booker rethrows other query errors
 during rendering, so place it inside an error boundary.

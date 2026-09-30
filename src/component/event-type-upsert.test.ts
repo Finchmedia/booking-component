@@ -35,7 +35,7 @@ describe("createEventType on an existing id", () => {
 
     // A re-run of the same provisioning step, without isActive.
     await t.mutation(api.public.createEventType, etArgs(seed.eventTypeId, { title: "Consultation v2" }));
-    const stored = await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId });
+    const stored = (await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId }))!;
     expect({
       isActive: stored.isActive,
       title: stored.title,
@@ -46,7 +46,7 @@ describe("createEventType on an existing id", () => {
 
     // CONTROL: an explicit isActive still applies.
     await t.mutation(api.public.createEventType, etArgs(seed.eventTypeId, { isActive: true }));
-    expect((await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId })).isActive).toBe(true);
+    expect((await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId }))!.isActive).toBe(true);
     expect((await book(t, seed, utc(TUESDAY, "09:00"), utc(TUESDAY, "10:00"))).status).toBe("pending");
   });
 
@@ -54,21 +54,21 @@ describe("createEventType on an existing id", () => {
     const { t } = setup();
     await t.mutation(api.public.createEventType, etArgs("et-new"));
     await t.mutation(api.public.createEventType, etArgs("et-off", { isActive: false }));
-    expect((await t.query(api.public.getEventType, { eventTypeId: "et-new" })).isActive).toBe(true);
-    expect((await t.query(api.public.getEventType, { eventTypeId: "et-off" })).isActive).toBe(false);
+    expect((await t.query(api.public.getEventType, { eventTypeId: "et-new" }))!.isActive).toBe(true);
+    expect((await t.query(api.public.getEventType, { eventTypeId: "et-off" }))!.isActive).toBe(false);
   });
 
   test("an id of another organization is not re-homed", async () => {
     const { t } = setup();
     const seedA = await seedResource(t); // org-1: res-1, et-1, linked
-    const before = await t.query(api.public.getEventType, { eventTypeId: seedA.eventTypeId });
+    const before = (await t.query(api.public.getEventType, { eventTypeId: seedA.eventTypeId }))!;
 
     await expect(
       t.mutation(api.public.createEventType, etArgs(seedA.eventTypeId, { organizationId: "org-2", title: "Org 2 service" })),
     ).rejects.toMatchObject({
       data: { code: "ORGANIZATION_MISMATCH", message: 'Event type "et-1" belongs to another organization than "org-2"' },
     });
-    expect(await t.query(api.public.getEventType, { eventTypeId: seedA.eventTypeId })).toEqual(before);
+    expect(await t.query(api.public.getEventType, { eventTypeId: seedA.eventTypeId }))!.toEqual(before);
     expect(await t.query(api.public.listEventTypes, { organizationId: "org-2" })).toEqual([]);
     const booking = await book(t, seedA, utc(TUESDAY, "11:00"), utc(TUESDAY, "12:00"));
     expect([booking.organizationId, booking.eventTitle]).toEqual([ORG, "Consultation"]);
@@ -79,15 +79,15 @@ describe("createEventType on an existing id", () => {
     const seed = await seedResource(t);
     await t.mutation(api.public.createEventType, etArgs(seed.eventTypeId, { title: "Same org" }));
     await t.mutation(api.public.createEventType, etArgs(seed.eventTypeId, { title: "No org given", organizationId: undefined }));
-    const stored = await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId });
+    const stored = (await t.query(api.public.getEventType, { eventTypeId: seed.eventTypeId }))!;
     expect([stored.title, stored.organizationId]).toEqual(["No org given", ORG]);
   });
 
   test("an event type stored without organization can be adopted", async () => {
     const { t } = setup();
     await t.mutation(api.public.createEventType, etArgs("et-legacy", { organizationId: undefined }));
-    expect((await t.query(api.public.getEventType, { eventTypeId: "et-legacy" })).organizationId).toBeUndefined();
+    expect((await t.query(api.public.getEventType, { eventTypeId: "et-legacy" }))!.organizationId).toBeUndefined();
     await t.mutation(api.public.createEventType, etArgs("et-legacy", { organizationId: "org-2" }));
-    expect((await t.query(api.public.getEventType, { eventTypeId: "et-legacy" })).organizationId).toBe("org-2");
+    expect((await t.query(api.public.getEventType, { eventTypeId: "et-legacy" }))!.organizationId).toBe("org-2");
   });
 });

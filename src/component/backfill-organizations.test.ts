@@ -253,7 +253,7 @@ describe("paging", () => {
     for (const limit of [0, -1, 2.5, 501, Number.NaN]) {
       await expect(backfill(t, { limit, dryRun: true })).rejects.toThrow("limit must be an integer from 1 to 500");
     }
-    const eventType = await t.query(api.public.getEventType, { eventTypeId: "et-1" });
+    const eventType = (await t.query(api.public.getEventType, { eventTypeId: "et-1" }))!;
     for (const cursor of ["", "nope", "[1]", JSON.stringify([1, eventType._id])]) {
       await expect(backfill(t, { limit: 1, dryRun: true, cursor })).rejects.toThrow("Invalid backfill cursor");
     }
