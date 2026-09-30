@@ -25,6 +25,11 @@
   `(await ctx.runQuery(components.booking.public.listEventTypes, {})).filter((et) => ![et.lengthInMinutes, ...(et.lengthInMinutesOptions ?? [])].every((n) => Number.isFinite(n) && n > 0))`.
   Slot queries for such event types throw after the upgrade instead of
   offering slots on booked days.
+- Schedules in zones at UTC+12 or beyond (New Zealand, Fiji, Tonga, Samoa,
+  Kiribati, Kamchatka; Norfolk Island in summer) now use each day's own
+  weekly hours; until 0.4.2 every day used the next weekday's. If you shifted
+  `weeklyHours` by a day to compensate, shift them back when you upgrade.
+  Existing bookings are not moved.
 
 ### Security
 
@@ -50,6 +55,12 @@ The internal email mutations keep their names and arguments, so jobs queued by
 
 ### Fixed
 
+- Weekly hours apply to the weekday of the calendar day itself, whatever the
+  schedule's zone. At UTC+12 and beyond every date used the next weekday's
+  hours (a Tuesday-only schedule was closed on Tuesday and open on Monday), in
+  `getEffectiveAvailability` and the schedule-aware month view, and hosts that
+  validate bookings against the day view enforced the wrong days. Date
+  overrides were not affected.
 - The availability queries reject inputs that have no meaning instead of
   answering them with silent nonsense: an `eventLength` of zero, below zero,
   `NaN` or infinite (-900 offered 60 starts on a fully booked day), slot
@@ -124,7 +135,8 @@ The internal email mutations keep their names and arguments, so jobs queued by
   that hosts match. Changing any of them fails the suite and must be deliberate.
 - Time-sensitive tests can run under a chosen process time zone
   (`src/testing/process-time-zone.ts`).
-- Regression suites for input validation.
+- Regression suites for weekdays in 14 zones and for input validation. The
+  weekday suite runs under several process time zones.
 
 ## 0.4.2 — 23 September 2026
 

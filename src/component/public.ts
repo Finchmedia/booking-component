@@ -14,7 +14,7 @@ import {
 } from "./utils";
 import { isAvailable } from "./availability";
 import { computeAvailabilityForDate } from "./schedules";
-import { parseCivilDate } from "../shared/time.js";
+import { parseCivilDate, type CivilDate } from "../shared/time.js";
 import { assertDateOrder, assertEventLength, assertSlotIndices } from "./input_validation";
 import type { Doc } from "./_generated/dataModel";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
@@ -223,8 +223,9 @@ export const getMonthAvailability = query({
         // Iterate through each day in the range
         const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
-            // Extract date string in UTC context
-            const dateStr = currentDate.toISOString().split("T")[0];
+            // Extract date string in UTC context (canonical: the range was
+            // validated by parseCivilDate, so years have four digits)
+            const dateStr = currentDate.toISOString().split("T")[0] as CivilDate;
 
             if (pooledResource) {
                 availabilityByDate[dateStr] = false;

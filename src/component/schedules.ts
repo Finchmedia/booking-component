@@ -1,9 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { parseCivilDate } from "../shared/time.js";
+import { parseCivilDate, weekdayOf, type CivilDate } from "../shared/time.js";
 import { assertDateOrder } from "./input_validation";
-import { getDayOfWeekInTimezone } from "./utils";
 import { dateOverrideDoc, scheduleDoc, successResult } from "./validators";
 
 // ============================================
@@ -457,11 +456,16 @@ function timeToSlot(time: string): number {
  * Plain async helper that computes effective available slots for a scheduleId + date.
  * Exported so other component files (e.g. public.ts) can call it directly with ctx.db
  * instead of going through ctx.runQuery.
+ *
+ * Weekly hours are those of the calendar day's own weekday, not the weekday
+ * some instant of it has in the zone — reading `${date}T12:00Z` in the zone
+ * used the NEXT day's hours in zones at UTC+12 and beyond (New Zealand, Fiji,
+ * Tonga, Samoa, Kiribati; Norfolk Island in summer).
  */
 export async function computeAvailabilityForDate(
   ctx: QueryCtx,
   scheduleId: string,
-  date: string
+  date: CivilDate
 ): Promise<{ availableSlots: number[] }> {
   const schedule = await ctx.db
     .query("schedules")
@@ -498,11 +502,8 @@ export async function computeAvailabilityForDate(
     }
   }
 
-  // Get day of week for the date in the schedule's timezone
-  // This ensures correct day-of-week even when querying from different timezones
-  const dayOfWeek = getDayOfWeekInTimezone(date, schedule.timezone);
-
   // Find weekly hours for this day
+  const dayOfWeek = weekdayOf(date);
   const dayEntries = schedule.weeklyHours.filter(
     (h) => h.dayOfWeek === dayOfWeek
   );

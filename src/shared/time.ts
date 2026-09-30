@@ -33,3 +33,8 @@ export function parseCivilDate(value: string): CivilDate {
   throw new Error(`Invalid date "${value}": expected a calendar date as YYYY-MM-DD`);
 }
 
+/** Day of the week of a calendar day (0 = Sunday … 6 = Saturday), independent of any zone. */
+export function weekdayOf(date: CivilDate): number {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(new Date(0).setUTCFullYear(year, month - 1, day)).getUTCDay();
+}

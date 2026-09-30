@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { parseCivilDate } from "./time.js";
+import { parseCivilDate, weekdayOf, type CivilDate } from "./time.js";
+import { PROCESS_TIME_ZONES, withProcessTimeZones } from "../testing/process-time-zone.js";
 
 describe("parseCivilDate", () => {
   test.each([
@@ -35,3 +36,19 @@ describe("parseCivilDate", () => {
   });
 });
 
+describe("weekdayOf", () => {
+  test("is the calendar day's own weekday in every process time zone", async () => {
+    await withProcessTimeZones(PROCESS_TIME_ZONES, () => {
+      expect(weekdayOf("2027-03-07" as CivilDate)).toBe(0); // Sunday
+      expect(weekdayOf("2027-03-09" as CivilDate)).toBe(2); // Tuesday
+      expect(weekdayOf("2027-03-13" as CivilDate)).toBe(6); // Saturday
+      expect(weekdayOf("2028-02-29" as CivilDate)).toBe(2);
+      expect(weekdayOf("0099-01-01" as CivilDate)).toBe(4);
+      // Oracle: the weekday a UTC calendar reports for the same day.
+      for (let day = 1; day <= 31; day++) {
+        const date = parseCivilDate(`2027-1-${day}`);
+        expect(weekdayOf(date)).toBe(new Date(`${date}T00:00:00.000Z`).getUTCDay());
+      }
+    });
+  });
+});

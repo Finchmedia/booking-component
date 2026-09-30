@@ -16,30 +16,6 @@ export const BUSINESS_HOURS_END = 68; // 5:00 PM
 // ============================================================================
 
 /**
- * Get the day of week for a date in a specific timezone
- * @param dateStr - ISO date string "2025-12-03"
- * @param timezone - IANA timezone "Europe/Berlin"
- * @returns Day of week (0=Sunday, 6=Saturday)
- */
-export function getDayOfWeekInTimezone(dateStr: string, timezone: string): number {
-    // Parse the date string and get what day it is in the target timezone
-    // We use noon UTC to avoid edge cases around midnight
-    const timestamp = new Date(dateStr + "T12:00:00.000Z").getTime();
-
-    const formatter = new Intl.DateTimeFormat("en-US", {
-        weekday: "short",
-        timeZone: timezone,
-    });
-
-    const weekdayStr = formatter.format(new Date(timestamp));
-    const dayMap: Record<string, number> = {
-        "Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6
-    };
-
-    return dayMap[weekdayStr] ?? 0;
-}
-
-/**
  * Get the date string (YYYY-MM-DD) for a timestamp in a specific timezone
  * @param timestamp - Unix timestamp in milliseconds
  * @param timezone - IANA timezone "Europe/Berlin"
