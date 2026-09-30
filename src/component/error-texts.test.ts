@@ -510,6 +510,19 @@ describe("configuration writes and arguments", () => {
         t.mutation(api.multi_resource.createMultiResourceBooking, {
           eventTypeId: seed.eventTypeId, resources: [], ...hour("15:00"), timezone: "UTC", booker: BOOKER,
         }),
+      "createEventType: zero length": () =>
+        t.mutation(api.public.createEventType, {
+          id: "et-new", slug: "et-new", title: "x", lengthInMinutes: 0, timezone: "UTC", lockTimeZoneToggle: false, locations: [],
+        }),
+      "createEventType: length outside its options": () =>
+        t.mutation(api.public.createEventType, {
+          id: "et-new", slug: "et-new", title: "x", lengthInMinutes: 30, lengthInMinutesOptions: [60, 90], timezone: "UTC",
+          lockTimeZoneToggle: false, locations: [],
+        }),
+      "updateEventType: options without the stored length": () =>
+        t.mutation(api.public.updateEventType, { id: seed.eventTypeId, lengthInMinutesOptions: [30, 90] }),
+      "updateEventType: negative buffer": () => t.mutation(api.public.updateEventType, { id: seed.eventTypeId, bufferBefore: -5 }),
+      "updateEventType: zero horizon": () => t.mutation(api.public.updateEventType, { id: seed.eventTypeId, maxFutureMinutes: 0 }),
       "audit: limit 0": () => t.query(api.maintenance.audit, { check: "f10_weekday", limit: 0 }),
       "sweepOrphanedHolds: foreign cursor": () =>
         t.mutation(api.presence.sweepOrphanedHolds, { cursor: "not-a-cursor", limit: 10, dryRun: true }),
@@ -559,6 +572,13 @@ describe("configuration writes and arguments", () => {
       "updateSchedule: inverted window": coded("INVALID_INPUT", 'Invalid weeklyHours (dayOfWeek 2) window: startTime "10:00" must be before endTime "09:00"'),
       "registerHook: not a function handle": coded("INVALID_INPUT", 'Invalid hook functionHandle "hooks:onCreated": expected a function handle from createFunctionHandle'),
       "createMultiResourceBooking: no resources": coded("INVALID_INPUT", "At least one resource is required"),
+      "createEventType: zero length": coded("INVALID_INPUT", "Invalid lengthInMinutes 0: expected a whole number of minutes greater than 0"),
+      "createEventType: length outside its options":
+        coded("INVALID_INPUT", "Invalid lengthInMinutes 30: expected one of lengthInMinutesOptions (60, 90)"),
+      "updateEventType: options without the stored length":
+        coded("INVALID_INPUT", "Invalid lengthInMinutes 60: expected one of lengthInMinutesOptions (30, 90)"),
+      "updateEventType: negative buffer": coded("INVALID_INPUT", "Invalid bufferBefore -5: expected a number of minutes of 0 or more"),
+      "updateEventType: zero horizon": coded("INVALID_INPUT", "Invalid maxFutureMinutes 0: expected a number of minutes greater than 0"),
       "audit: limit 0": coded("INVALID_INPUT", "limit must be an integer from 1 to 500"),
       "sweepOrphanedHolds: foreign cursor": coded("INVALID_INPUT", "Invalid sweep cursor"),
     });

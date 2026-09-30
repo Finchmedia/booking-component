@@ -30,7 +30,13 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { parseCivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
 import { holdsActiveInventory } from "./inventory_helpers";
-import { isValidTimeZone } from "./input_validation";
+import {
+  isLengthOutsideOptions,
+  isNonNegativeMinutes,
+  isPositiveMinutes,
+  isValidTimeZone,
+  isWholePositiveMinutes,
+} from "./input_validation";
 import { sharesOrganization } from "./resource_event_types";
 import { getScheduleByExternalId, getWeeklySlots } from "./schedules";
 import { getLocalDateAndSlot } from "./utils";
@@ -419,9 +425,6 @@ function eventLengthIssue(eventType: Doc<"event_types">): AuditIssue | null {
   };
 }
 
-const isPositive = (value: number) => Number.isFinite(value) && value > 0;
-const isNonNegative = (value: number) => Number.isFinite(value) && value >= 0;
-
 function isCanonicalDate(value: string): boolean {
   try {
     return parseCivilDate(value) === value;
@@ -455,21 +458,26 @@ type Lookups = ReturnType<typeof lookups>;
 type ProblemsOf<C extends AuditIssue["check"]> = Extract<AuditIssue, { check: C; problems: unknown }>["problems"];
 
 /**
- * event_type_config: stored values the 0.5.0 configuration rules do not
- * accept: lengths, options and slot interval that are not positive numbers,
- * a length missing from non-empty options, negative or non-finite buffers,
- * notice and horizon, a zone Intl rejects, a scheduleId naming no schedule.
+ * event_type_config: stored values the 0.5.0 event-type writes reject (the
+ * predicates of input_validation.ts): lengths, options and slot interval that
+ * are not whole minutes greater than 0, a length missing from non-empty
+ * options, buffers and notice that are negative or not finite, a horizon
+ * that is not greater than 0, a zone Intl rejects, a scheduleId naming no
+ * schedule.
  */
 async function eventTypeConfigIssue(eventType: Doc<"event_types">, find: Lookups): Promise<AuditIssue | null> {
   const found: ProblemsOf<"event_type_config"> = [];
   const options = eventType.lengthInMinutesOptions;
-  if (!isPositive(eventType.lengthInMinutes)) found.push("lengthInMinutes");
-  if (options?.some((option) => !isPositive(option))) found.push("lengthInMinutesOptions");
-  if (options && options.length > 0 && !options.includes(eventType.lengthInMinutes)) found.push("lengthNotInOptions");
-  if (eventType.slotInterval !== undefined && !isPositive(eventType.slotInterval)) found.push("slotInterval");
-  for (const key of ["bufferBefore", "bufferAfter", "minNoticeMinutes", "maxFutureMinutes"] as const) {
+  if (!isWholePositiveMinutes(eventType.lengthInMinutes)) found.push("lengthInMinutes");
+  if (options?.some((option) => !isWholePositiveMinutes(option))) found.push("lengthInMinutesOptions");
+  if (isLengthOutsideOptions(eventType.lengthInMinutes, options)) found.push("lengthNotInOptions");
+  if (eventType.slotInterval !== undefined && !isWholePositiveMinutes(eventType.slotInterval)) found.push("slotInterval");
+  for (const key of ["bufferBefore", "bufferAfter", "minNoticeMinutes"] as const) {
     const value = eventType[key];
-    if (value !== undefined && !isNonNegative(value)) found.push(key);
+    if (value !== undefined && !isNonNegativeMinutes(value)) found.push(key);
+  }
+  if (eventType.maxFutureMinutes !== undefined && !isPositiveMinutes(eventType.maxFutureMinutes)) {
+    found.push("maxFutureMinutes");
   }
   if (!isValidTimeZone(eventType.timezone)) found.push("timezone");
   if (eventType.scheduleId && !(await find.schedule(eventType.scheduleId))) found.push("scheduleId");

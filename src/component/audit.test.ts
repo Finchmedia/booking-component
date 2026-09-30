@@ -8,7 +8,8 @@
  *   positive number.
  * One check and one page per call; the cursor is the complete
  * by_creation_time key, so rows with equal creation times are neither skipped
- * nor repeated.
+ * nor repeated. Event types with invalid lengths are seeded with raw inserts,
+ * because createEventType rejects them since 0.5.0.
  */
 import { describe, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
@@ -26,6 +27,22 @@ import {
   zoned,
   type T,
 } from "./setup.test.js";
+
+/** Stores an event type as a release before 0.5.0 could, past the write checks. */
+async function insertEventType(t: T, id: string, lengthInMinutes: number, lengthInMinutesOptions?: number[]) {
+  await t.run(async (ctx) => {
+    await ctx.db.insert("event_types", {
+      id,
+      slug: id,
+      title: "Consultation",
+      lengthInMinutes,
+      lengthInMinutesOptions,
+      timezone: "UTC",
+      lockTimeZoneToggle: false,
+      locations: [],
+    });
+  });
+}
 
 const AUCKLAND = "Pacific/Auckland";
 type Check = "f10_weekday" | "event_length_invalid";
@@ -183,13 +200,7 @@ describe("event_length_invalid", () => {
       ["nan-option", 30, [Number.NaN]],
     ];
     for (const [id, lengthInMinutes, lengthInMinutesOptions] of lengths) {
-      await seedResource(t, {
-        resourceId: `res-${id}`,
-        eventTypeId: id,
-        lengthInMinutes,
-        slotInterval: 15,
-        eventType: { lengthInMinutesOptions },
-      });
+      await insertEventType(t, id, lengthInMinutes, lengthInMinutesOptions);
     }
     const page = await audit(t, "event_length_invalid", 100);
     expect(page.scanned).toBe(lengths.length);
@@ -207,15 +218,7 @@ describe("event_length_invalid", () => {
 describe("paging", () => {
   async function seedEventTypes(t: T, count: number, prefix = "et") {
     for (let i = 0; i < count; i++) {
-      await t.mutation(api.public.createEventType, {
-        id: `${prefix}-${i}`,
-        slug: `${prefix}-${i}`,
-        title: "Consultation",
-        lengthInMinutes: i % 2 === 0 ? 0 : 60, // every other one is invalid
-        timezone: "UTC",
-        lockTimeZoneToggle: false,
-        locations: [],
-      });
+      await insertEventType(t, `${prefix}-${i}`, i % 2 === 0 ? 0 : 60); // every other one is invalid
     }
   }
   const idsOf = (pages: Array<Awaited<ReturnType<typeof audit>>>) =>

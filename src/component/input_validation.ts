@@ -7,8 +7,9 @@
 // slot indices outside the day, dates like "2027-02-30" — and answered them
 // with silent nonsense (candidates on fully booked days, another day's hours).
 // They now fail fast with an "Invalid …" error (code INVALID_INPUT); calendar
-// days are parsed with parseCivilDate (src/shared/time.ts). Host policy
-// (allowed durations, notice, horizon) stays in the host.
+// days are parsed with parseCivilDate (src/shared/time.ts). 0.5.0 adds
+// event-type settings. Host policy (allowed durations, notice, horizon)
+// stays in the host.
 
 import type { CivilDate } from "../shared/time.js";
 import { throwBookingError } from "../shared/booking-errors.js";
@@ -59,5 +60,87 @@ export function isValidTimeZone(timeZone: string): boolean {
 export function assertTimeZone(timeZone: string): void {
   if (!isValidTimeZone(timeZone)) {
     throwBookingError("INVALID_INPUT", `Invalid time zone "${timeZone}": expected an IANA time zone such as "Europe/Berlin"`);
+  }
+}
+
+// ============================================
+// EVENT-TYPE SETTINGS (0.5.0)
+// ============================================
+//
+// Event-type writes used to store any number: a length of 0 or NaN, negative
+// buffers, a length that is not among its own options. One predicate per rule,
+// shared with the maintenance audit, which lists stored rows that break them.
+// Reads stay tolerant of such rows.
+
+/** Lengths, length options and the slot interval: whole minutes greater than 0. */
+export function isWholePositiveMinutes(value: number): boolean {
+  return Number.isInteger(value) && value > 0;
+}
+
+/** Buffers and notice: a finite number of minutes, 0 or more. */
+export function isNonNegativeMinutes(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
+}
+
+/** The booking horizon (maxFutureMinutes): a finite number of minutes greater than 0. */
+export function isPositiveMinutes(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+/** A length that non-empty options do not include. */
+export function isLengthOutsideOptions(lengthInMinutes: number, options: number[] | undefined): boolean {
+  return options !== undefined && options.length > 0 && !options.includes(lengthInMinutes);
+}
+
+/** The numeric event-type settings of a write; `undefined` (not given) is not checked. */
+export type EventTypeNumbers = {
+  lengthInMinutes?: number;
+  lengthInMinutesOptions?: number[];
+  slotInterval?: number;
+  bufferBefore?: number;
+  bufferAfter?: number;
+  minNoticeMinutes?: number;
+  maxFutureMinutes?: number;
+};
+
+const WHOLE_MINUTES = "expected a whole number of minutes greater than 0";
+
+/** Checks each numeric setting a write gives (INVALID_INPUT). */
+export function assertEventTypeNumbers(fields: EventTypeNumbers): void {
+  if (fields.lengthInMinutes !== undefined && !isWholePositiveMinutes(fields.lengthInMinutes)) {
+    throwBookingError("INVALID_INPUT", `Invalid lengthInMinutes ${fields.lengthInMinutes}: ${WHOLE_MINUTES}`);
+  }
+  for (const option of fields.lengthInMinutesOptions ?? []) {
+    if (!isWholePositiveMinutes(option)) {
+      throwBookingError("INVALID_INPUT", `Invalid lengthInMinutesOptions entry ${option}: ${WHOLE_MINUTES}`);
+    }
+  }
+  if (fields.slotInterval !== undefined && !isWholePositiveMinutes(fields.slotInterval)) {
+    throwBookingError("INVALID_INPUT", `Invalid slotInterval ${fields.slotInterval}: ${WHOLE_MINUTES}`);
+  }
+  for (const key of ["bufferBefore", "bufferAfter", "minNoticeMinutes"] as const) {
+    const value = fields[key];
+    if (value !== undefined && !isNonNegativeMinutes(value)) {
+      throwBookingError("INVALID_INPUT", `Invalid ${key} ${value}: expected a number of minutes of 0 or more`);
+    }
+  }
+  const horizon = fields.maxFutureMinutes;
+  if (horizon !== undefined && !isPositiveMinutes(horizon)) {
+    throwBookingError("INVALID_INPUT", `Invalid maxFutureMinutes ${horizon}: expected a number of minutes greater than 0`);
+  }
+}
+
+/**
+ * The length must be one of the length options when there are any. Checked
+ * on the configuration a write leaves behind (the given fields merged over
+ * the stored ones), and only by writes that give either field, so a row
+ * stored before 0.5.0 that breaks it can still change its other settings.
+ */
+export function assertLengthInOptions(lengthInMinutes: number, options: number[] | undefined): void {
+  if (isLengthOutsideOptions(lengthInMinutes, options)) {
+    throwBookingError(
+      "INVALID_INPUT",
+      `Invalid lengthInMinutes ${lengthInMinutes}: expected one of lengthInMinutesOptions (${(options ?? []).join(", ")})`
+    );
   }
 }

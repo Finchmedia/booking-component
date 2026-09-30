@@ -110,6 +110,18 @@
   `eventTypeMissing`). Call `deleteAllLinksForResource` or
   `deleteAllLinksForEventType` once for those IDs, at the latest before
   re-creating one.
+- Event-type writes check their settings (F16, D29): `createEventType` and
+  `updateEventType` reject lengths, length options and slot intervals that
+  are not whole minutes above 0, negative or non-finite buffers and notice, a
+  `maxFutureMinutes` that is not above 0, and a `lengthInMinutes` missing
+  from non-empty `lengthInMinutesOptions` (`INVALID_INPUT`). The length rule
+  counts the stored value of the field a write omits, so changing only the
+  length or only the options must still leave a valid pair; an update that
+  touches neither works on rows stored before 0.5.0 that break the rules.
+  Lengths are still rounded up to the 15-minute grid. Run the
+  `event_type_config` audit check (it now also lists fractional minutes and a
+  horizon of 0) and repair the rows it lists before provisioning scripts
+  re-run `createEventType`, which checks every setting it passes.
 
 ### Added
 

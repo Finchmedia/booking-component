@@ -79,17 +79,21 @@ describe("event_type_config", () => {
       id: "sch-1", organizationId: ORG, name: "Schedule", timezone: "Europe/Berlin", weeklyHours: [],
     });
     const rows: Array<Partial<Doc<"event_types">> & { id: string }> = [
-      // Controls: valid, options containing the length, empty options, "" schedule, zero buffers and notice.
+      // Controls: valid, options containing the length, empty options, "" schedule, zero buffers and
+      // notice, fractional buffers, notice and horizon.
       { id: "ok" },
       { id: "ok-options", lengthInMinutes: 30, lengthInMinutesOptions: [30, 60], slotInterval: 15, scheduleId: "sch-1" },
       { id: "ok-empty-options", lengthInMinutesOptions: [], scheduleId: "" },
-      { id: "ok-zeros", bufferBefore: 0, bufferAfter: 0, minNoticeMinutes: 0, maxFutureMinutes: 0 },
+      { id: "ok-zeros", bufferBefore: 0, bufferAfter: 0, minNoticeMinutes: 0, maxFutureMinutes: 1 },
+      { id: "ok-fractions", bufferBefore: 2.5, minNoticeMinutes: 0.5, maxFutureMinutes: 90.5 },
       // Invalid.
       { id: "length", lengthInMinutes: 0 },
+      { id: "fraction", lengthInMinutes: 22.5, lengthInMinutesOptions: [22.5, 30.5], slotInterval: 7.5 },
       { id: "option", lengthInMinutesOptions: [60, Number.NaN] },
       { id: "not-in-options", lengthInMinutes: 45, lengthInMinutesOptions: [60, 90] },
       { id: "interval", slotInterval: -15 },
       { id: "numbers", bufferBefore: -5, bufferAfter: Number.NaN, minNoticeMinutes: -1, maxFutureMinutes: Number.POSITIVE_INFINITY },
+      { id: "no-horizon", maxFutureMinutes: 0 },
       { id: "zone", timezone: "Mars/Olympus_Mons" },
       { id: "schedule", scheduleId: "ghost" },
     ];
@@ -101,6 +105,11 @@ describe("event_type_config", () => {
     expect(scanned).toBe(rows.length);
     expect(issues).toEqual([
       { check: "event_type_config", eventTypeId: "length", problems: ["lengthInMinutes"] },
+      {
+        check: "event_type_config",
+        eventTypeId: "fraction",
+        problems: ["lengthInMinutes", "lengthInMinutesOptions", "slotInterval"],
+      },
       { check: "event_type_config", eventTypeId: "option", problems: ["lengthInMinutesOptions"] },
       { check: "event_type_config", eventTypeId: "not-in-options", problems: ["lengthNotInOptions"] },
       { check: "event_type_config", eventTypeId: "interval", problems: ["slotInterval"] },
@@ -109,6 +118,7 @@ describe("event_type_config", () => {
         eventTypeId: "numbers",
         problems: ["bufferBefore", "bufferAfter", "minNoticeMinutes", "maxFutureMinutes"],
       },
+      { check: "event_type_config", eventTypeId: "no-horizon", problems: ["maxFutureMinutes"] },
       { check: "event_type_config", eventTypeId: "zone", problems: ["timezone"] },
       { check: "event_type_config", eventTypeId: "schedule", problems: ["scheduleId"] },
     ]);

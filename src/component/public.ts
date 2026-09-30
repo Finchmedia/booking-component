@@ -31,6 +31,8 @@ import { throwBookingError } from "../shared/booking-errors.js";
 import {
     assertDateOrder,
     assertEventLength,
+    assertEventTypeNumbers,
+    assertLengthInOptions,
     assertSlotIndices,
     assertTimeZone,
     isValidTimeZone,
@@ -990,6 +992,13 @@ async function assertScheduleReference(ctx: QueryCtx, scheduleId: string | undef
   if (scheduleId) await getExistingSchedule(ctx, scheduleId);
 }
 
+/**
+ * Creates an event type, or updates the one with this `id` (keeping what it
+ * is not given). Lengths, length options and the slot interval must be whole
+ * minutes greater than 0, buffers and notice 0 or more, the horizon greater
+ * than 0, and the length one of the options when there are any, counting
+ * the stored options an upsert keeps (INVALID_INPUT).
+ */
 export const createEventType = mutation({
   args: {
     id: v.string(),
@@ -1021,6 +1030,7 @@ export const createEventType = mutation({
   returns: v.id("event_types"),
   handler: async (ctx, args) => {
     assertTimeZone(args.timezone);
+    assertEventTypeNumbers(args);
     await assertScheduleReference(ctx, args.scheduleId);
     const existing = await ctx.db
       .query("event_types")
@@ -1045,9 +1055,13 @@ export const createEventType = mutation({
           `Event type "${args.id}" belongs to another organization than "${args.organizationId}"`
         );
       }
+      // Omitted options stay, so the length is checked against the options
+      // the upsert leaves behind.
+      assertLengthInOptions(args.lengthInMinutes, args.lengthInMinutesOptions ?? existing.lengthInMinutesOptions);
       await ctx.db.patch(existing._id, { ...args, updatedAt: now });
       return existing._id;
     }
+    assertLengthInOptions(args.lengthInMinutes, args.lengthInMinutesOptions);
     return await ctx.db.insert("event_types", {
       ...args,
       isActive: args.isActive ?? true,
@@ -1107,6 +1121,17 @@ export const getEventTypeBySlug = query({
   },
 });
 
+/**
+ * Changes the fields it is given and keeps every omitted one.
+ *
+ * The given settings are checked as in createEventType: lengths, length
+ * options and the slot interval are whole minutes greater than 0, buffers and
+ * notice 0 or more, the horizon greater than 0 (INVALID_INPUT). An update
+ * that gives `lengthInMinutes` or `lengthInMinutesOptions` must leave a
+ * length that is one of the options (when there are any), counting the
+ * stored value of the field it omits. Other updates of an event type stored
+ * before 0.5.0 that breaks these rules still work.
+ */
 export const updateEventType = mutation({
   args: {
     id: v.string(),
@@ -1140,6 +1165,7 @@ export const updateEventType = mutation({
     if (args.timezone !== undefined) {
       assertTimeZone(args.timezone);
     }
+    assertEventTypeNumbers(args);
     const eventType = await ctx.db
       .query("event_types")
       .withIndex("by_external_id", (q) => q.eq("id", args.id))
@@ -1149,6 +1175,14 @@ export const updateEventType = mutation({
       throwBookingError("EVENT_TYPE_NOT_FOUND", `Event type "${args.id}" not found`);
     }
     await assertScheduleReference(ctx, args.scheduleId);
+    // The length rule applies to the merged configuration, and only when
+    // this update touches it.
+    if (args.lengthInMinutes !== undefined || args.lengthInMinutesOptions !== undefined) {
+      assertLengthInOptions(
+        args.lengthInMinutes ?? eventType.lengthInMinutes,
+        args.lengthInMinutesOptions ?? eventType.lengthInMinutesOptions
+      );
+    }
 
     // The arguments besides `id` are event_types columns (their types are
     // checked here); only the ones given are patched.

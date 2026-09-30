@@ -268,6 +268,11 @@ endpoints to authorized host wrappers.
   omitted one, so a field cannot be removed once set. Descriptions and an
   event type's `lengthInMinutesOptions` can be emptied with `""` and `[]`; an
   event type's `scheduleId` and numeric settings cannot be cleared.
+- **Input rules:** event-type lengths, length options and slot intervals are
+  whole minutes above 0, buffers and notice 0 or more, `maxFutureMinutes`
+  above 0, and the length is one of its options when there are any; an
+  update that changes only the length or only the options is checked
+  against the stored other field. Violations throw `INVALID_INPUT`.
 - **Links and deletes:** an event type with an `organizationId` links only
   resources of that organization (`ORGANIZATION_MISMATCH`); an event type
   without one links any resource. `deleteResource` and `deleteEventType`
