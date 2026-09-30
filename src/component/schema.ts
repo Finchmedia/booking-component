@@ -258,5 +258,7 @@ export default defineSchema({
     organizationId: v.optional(v.string()), // External org ID from auth system
     enabled: v.boolean(),
     createdAt: v.number(),
+    // Absent: version 1 payloads (per emitter, frozen). 2: bookingHookEventV2.
+    payloadVersion: v.optional(v.literal(2)),
   }).index("by_event", ["eventType", "enabled"]),
 });

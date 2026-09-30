@@ -5,8 +5,9 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { FunctionHandle, WithoutSystemFields } from "convex/server";
 import type { Doc } from "./_generated/dataModel";
-import { assertStillBookable, terminateBooking } from "./booking_lifecycle";
+import { assertStillBookable, buildHookEventV2, terminateBooking } from "./booking_lifecycle";
 import { throwBookingError } from "../shared/booking-errors.js";
+import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 import {
   bookingHistoryDoc,
   hookDoc,
@@ -105,14 +106,21 @@ export const getHook = query({
 /**
  * Registers a host function, given as a handle from `createFunctionHandle`,
  * for one lifecycle event (organization-scoped or global). The handle runs
- * with every matching payload, management token and booker details included,
- * so keep registration server-side and administrator-only.
+ * with every matching payload, booker details included, so keep
+ * registration server-side and administrator-only.
+ *
+ * `payloadVersion` selects the payload the handle receives as its args:
+ * - omitted: version 1, whose shape depends on the emitting function and
+ *   which mostly carries the management token (docs/hook-payloads-v1.md);
+ * - 2: one envelope per event name, `bookingHookEventV2`, without the token
+ *   (docs/hook-payloads-v2.md).
  */
 export const registerHook = mutation({
   args: {
     eventType: v.string(),
     functionHandle: v.string(),
     organizationId: v.optional(v.string()),
+    payloadVersion: v.optional(v.literal(2)),
   },
   returns: v.id("hooks"),
   handler: async (ctx, args) => {
@@ -131,6 +139,7 @@ export const registerHook = mutation({
       organizationId: args.organizationId,
       enabled: true,
       createdAt: Date.now(),
+      payloadVersion: args.payloadVersion,
     });
   },
 });
@@ -183,10 +192,16 @@ export const triggerHooks = internalMutation({
   args: {
     eventType: v.string(),
     organizationId: v.optional(v.string()),
+    // Version 1 payload, the emitter's own shape (frozen, see hook-payloads-v1.test.ts)
     payload: v.any(),
     emailContext: v.optional(bookingEmailContextValidator),
     // Resend config passed from main app (components can't access process.env)
     resendOptions: v.optional(bookingEmailOptionsValidator),
+    // Version 2 payload (bookingHookEventV2, built by buildHookEventV2). Jobs
+    // queued before 0.5.0 lack it; their version 2 hooks are skipped. Kept
+    // v.any() so a payload problem can only fail the version 2 handler, never
+    // the emails and version 1 hooks of the event.
+    payloadV2: v.optional(v.any()),
   },
   // Only ever scheduled, and scheduled jobs keep no result: nothing to report.
   returns: v.null(),
@@ -364,9 +379,18 @@ export const triggerHooks = internalMutation({
         console.error(`Skipped hook ${hook._id}: functionHandle is not a function handle`);
         continue;
       }
+      // Each registration gets the payload version it registered for.
+      let payload: unknown = args.payload;
+      if (hook.payloadVersion === 2) {
+        if (args.payloadV2 === undefined) {
+          console.warn(`Skipped hook ${hook._id}: this ${args.eventType} event was queued without a version 2 payload`);
+          continue;
+        }
+        payload = args.payloadV2;
+      }
       try {
         const handle = hook.functionHandle as FunctionHandle<"mutation">;
-        await ctx.scheduler.runAfter(0, handle, args.payload);
+        await ctx.scheduler.runAfter(0, handle, payload as Record<string, unknown>);
       } catch (error) {
         // Log error but don't fail the main operation
         console.error(`Failed to trigger hook ${hook._id}:`, error);
@@ -491,6 +515,13 @@ export const transitionBookingState = mutation({
           uid: booking.uid,
           managementToken: booking.managementToken,
         },
+        // booking.<toStatus> of an allowed transition: pending, confirmed,
+        // cancelled, completed or declined.
+        payloadV2: await buildHookEventV2(ctx, hookEventType as BookingHookEventV2["event"], args.bookingId, {
+          previousStatus: currentStatus,
+          reason: args.reason,
+          changedBy: args.changedBy,
+        }),
         resendOptions: args.resendOptions,
       });
     }

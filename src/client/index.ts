@@ -10,6 +10,9 @@ export {
   type EventTypeDurations,
 } from "../shared/durations.js";
 
+// The payload of hooks registered with payloadVersion: 2
+export { bookingHookEventV2, type BookingHookEventV2 } from "../shared/hook-events-v2.js";
+
 // The codes of the component's ConvexError({ code, message }) rejections
 export {
   BOOKING_ERROR_CODES,
@@ -676,6 +679,7 @@ export function makeInternalBookingAPI(component: ComponentApi) {
         eventType: v.string(),
         functionHandle: v.string(),
         organizationId: v.optional(v.string()),
+        payloadVersion: v.optional(v.literal(2)),
       },
       handler: async (ctx, args) => {
         return await ctx.runMutation(component.hooks.registerHook, args);

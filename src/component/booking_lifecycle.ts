@@ -1,16 +1,18 @@
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { assertValidRange, getRequiredSlots } from "./utils";
 import { assertSingleResourceSupported } from "./inventory_helpers";
 import { isLinked, sharesOrganization } from "./resource_event_types";
 import { releaseAllSlotsForBooking } from "./slot_helpers";
 import { throwBookingError } from "../shared/booking-errors.js";
+import type { BookingHookEventV2 } from "../shared/hook-events-v2.js";
 
 // ============================================
 // BOOKING LIFECYCLE
 // ============================================
-// Steps several entry points share. Payloads, hooks and error texts of the
-// individual entry points stay with them.
+// Steps several entry points share. Version 1 hook payloads and error texts
+// of the individual entry points stay with them; version 2 hook payloads are
+// built here, one shape per event for every entry point.
 
 // ============================================
 // BOOKING RULES
@@ -212,4 +214,67 @@ export async function terminateBooking(
     cancellationReason: opts.reason,
     updatedAt: opts.now,
   });
+}
+
+// ============================================
+// HOOK PAYLOADS, VERSION 2
+// ============================================
+
+type HookEventV2Name = BookingHookEventV2["event"];
+
+/**
+ * The version 2 hook payload of an event, read from the booking as the
+ * emitting mutation wrote it (call it after the writes). `details` are what
+ * the booking does not store: the status before the event, the reason and
+ * the actor the mutation recorded, and for a move the original booking.
+ * The management token is never included.
+ */
+export async function buildHookEventV2(
+  ctx: QueryCtx,
+  event: HookEventV2Name,
+  bookingId: Id<"bookings">,
+  details: {
+    previousStatus?: string;
+    reason?: string;
+    changedBy?: string;
+    original?: Doc<"bookings">;
+  } = {},
+): Promise<BookingHookEventV2> {
+  const booking = await ctx.db.get(bookingId);
+  if (!booking) throw new Error("Booking not found after write");
+  const items = await ctx.db
+    .query("booking_items")
+    .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
+    .collect();
+  const payload: BookingHookEventV2 = {
+    version: 2,
+    event,
+    bookingId: booking._id,
+    uid: booking.uid,
+    organizationId: booking.organizationId,
+    resourceId: booking.resourceId,
+    resourceIds: items.length > 0 ? items.map((item) => item.resourceId) : [booking.resourceId],
+    eventTypeId: booking.eventTypeId,
+    status: booking.status,
+    previousStatus: details.previousStatus,
+    start: booking.start,
+    end: booking.end,
+    timezone: booking.timezone,
+    bookerName: booking.bookerName,
+    bookerEmail: booking.bookerEmail,
+    eventTitle: booking.eventTitle,
+    reason: details.reason,
+    changedBy: details.changedBy,
+    isMultiResource: items.length > 0,
+  };
+  if (event !== "booking.rescheduled") return payload;
+  const original = details.original;
+  if (!original) throw new Error("A booking.rescheduled payload needs the original booking");
+  return {
+    ...payload,
+    originalBookingId: original._id,
+    newBookingId: booking._id,
+    previousStart: original.start,
+    previousEnd: original.end,
+  };
 }

@@ -177,8 +177,11 @@ const S = "string";
 const N = "number";
 const B = "boolean";
 
-const WITH_ORG = ["emailContext", "eventType", "organizationId", "payload"];
-const WITHOUT_ORG = ["emailContext", "eventType", "payload"];
+// The envelope is the internal triggerHooks job, not what a hook receives. Since
+// 0.5.0 every emitter adds `payloadV2` for payloadVersion 2 hooks
+// (hook-payloads-v2.test.ts); the v1 payloads below are unchanged.
+const WITH_ORG = ["emailContext", "eventType", "organizationId", "payload", "payloadV2"];
+const WITHOUT_ORG = ["emailContext", "eventType", "payload", "payloadV2"];
 
 function omit<V extends Record<string, Shape>>(shape: V, ...keys: string[]): Record<string, Shape> {
   return Object.fromEntries(Object.entries(shape).filter(([key]) => !keys.includes(key)));
@@ -305,7 +308,7 @@ const TRANSITION_PINS: Record<string, Emitted[]> = {
   "transitionBookingState provisional -> confirmed": [{ eventType: "booking.confirmed", envelope: WITH_ORG, payload: TRANSITION(MODERN) }],
   "transitionBookingState provisional -> pending": [{ eventType: "booking.pending", envelope: WITH_ORG, payload: TRANSITION(MODERN) }],
   // No notification for completion, so no emailContext either.
-  "transitionBookingState confirmed -> completed": [{ eventType: "booking.completed", envelope: ["eventType", "organizationId", "payload"], payload: TRANSITION(MODERN) }],
+  "transitionBookingState confirmed -> completed": [{ eventType: "booking.completed", envelope: ["eventType", "organizationId", "payload", "payloadV2"], payload: TRANSITION(MODERN) }],
 };
 
 // ============================================
@@ -478,11 +481,12 @@ function hookPayloadsDoc(): string {
     "",
     "<!-- Generated from the pins in src/component/hook-payloads-v1.test.ts. Do not edit by hand; after a deliberate change run `npx vitest run src/component/hook-payloads-v1.test.ts -u`. -->",
     "",
-    "A hook registered with `registerHook` runs its function handle with the event's payload as the",
-    "function's arguments. The payload depends on the function that emitted the event, not only on",
-    "the event type: `booking.cancelled` has four shapes. A handler with an argument validator must",
-    "accept every shape of its event, and an added key fails such a validator just like a missing one,",
-    "so each emitter keeps the shape below within version 1.",
+    "A hook registered with `registerHook` without `payloadVersion` runs its function handle with the",
+    "event's payload as the function's arguments. The payload depends on the function that emitted the",
+    "event, not only on the event type: `booking.cancelled` has four shapes. A handler with an argument",
+    "validator must accept every shape of its event, and an added key fails such a validator just like",
+    "a missing one, so each emitter keeps the shape below within version 1. Register with",
+    "`payloadVersion: 2` for one shape per event ([version 2](hook-payloads-v2.md)).",
     "",
     "Payloads contain booker contact details and, where shown, the booking's management token.",
     "Register hooks only from trusted server code.",

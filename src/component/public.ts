@@ -18,7 +18,12 @@ import {
     getExistingSchedule,
     getScheduleDaySlots,
 } from "./schedules";
-import { assertSingleBookable, assertStillBookable, terminateBooking } from "./booking_lifecycle";
+import {
+    assertSingleBookable,
+    assertStillBookable,
+    buildHookEventV2,
+    terminateBooking,
+} from "./booking_lifecycle";
 import { deleteLinks } from "./resource_event_types";
 import { generateManagementToken } from "./tokens";
 import { parseCivilDate, type CivilDate } from "../shared/time.js";
@@ -641,6 +646,8 @@ export const createReservation = mutation({
                 status: "confirmed",
                 bookerEmail: actorId,
             },
+            // The legacy path records no history, so no changedBy.
+            payloadV2: await buildHookEventV2(ctx, "booking.created", bookingId),
             resendOptions: args.resendOptions,
         });
 
@@ -772,6 +779,7 @@ export const createBooking = mutation({
         uid,
         managementToken,
       },
+      payloadV2: await buildHookEventV2(ctx, "booking.created", bookingId, { changedBy: "system" }),
       resendOptions: args.resendOptions,
     });
 
@@ -904,10 +912,11 @@ export const cancelReservation = mutation({
         }
 
         // 3. Release, record history and stamp the cancellation
+        const changedBy = args.cancelledBy ?? "unknown";
         await terminateBooking(ctx, booking, {
             to: "cancelled",
             reason: args.reason,
-            changedBy: args.cancelledBy ?? "unknown",
+            changedBy,
             now: Date.now(),
         });
 
@@ -929,6 +938,11 @@ export const cancelReservation = mutation({
                 eventTitle: booking.eventTitle,
                 previousStatus: booking.status,
             },
+            payloadV2: await buildHookEventV2(ctx, "booking.cancelled", booking._id, {
+                previousStatus: booking.status,
+                reason: args.reason,
+                changedBy,
+            }),
             resendOptions: args.resendOptions,
         });
 
@@ -1495,6 +1509,11 @@ export const cancelBookingByToken = mutation({
         end: booking.end,
         timezone: booking.timezone,
       },
+      payloadV2: await buildHookEventV2(ctx, "booking.cancelled", booking._id, {
+        previousStatus: booking.status,
+        reason,
+        changedBy: "user",
+      }),
       resendOptions: args.resendOptions,
     });
 
@@ -1609,6 +1628,11 @@ async function moveBooking(
       resources,
       isMultiResource: items.length > 0,
     },
+    payloadV2: await buildHookEventV2(ctx, "booking.rescheduled", newBookingId, {
+      reason,
+      changedBy,
+      original,
+    }),
     resendOptions: args.resendOptions,
   });
   return booking;

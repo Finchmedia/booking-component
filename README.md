@@ -164,10 +164,13 @@ UID alone must never be enough to obtain it.
 
 **Registering a hook is an administrator action.** A hook's function handle
 runs for every matching event, and its payload carries the booker's contact
-details and, for most events, the management token. Keep `registerHook`,
-`updateHook` and `unregisterHook` behind server-side administrator checks.
-Payloads differ per emitting function; handlers with argument validators must
-accept the [version 1 payload shapes](https://github.com/Finchmedia/booking-component/blob/main/docs/hook-payloads-v1.md).
+details. Keep `registerHook`, `updateHook` and `unregisterHook` behind
+server-side administrator checks. Register with `payloadVersion: 2` to receive
+[one shape per event](https://github.com/Finchmedia/booking-component/blob/main/docs/hook-payloads-v2.md),
+without the management token: a handler can declare `args: bookingHookEventV2`
+from `@mrfinch/booking`. Without it a hook keeps the frozen
+[version 1 payloads](https://github.com/Finchmedia/booking-component/blob/main/docs/hook-payloads-v1.md),
+which differ per emitting function and for most events carry the token.
 
 The optional `makeInternalBookingAPI(components.booking)` factory creates only
 internal queries and mutations. Its exports are accessed through `internal.*`.

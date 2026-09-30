@@ -52,6 +52,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           eventType: string;
           functionHandle: string;
           organizationId?: string;
+          payloadVersion?: 2;
         } | null,
         Name
       >;
@@ -67,13 +68,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           eventType: string;
           functionHandle: string;
           organizationId?: string;
+          payloadVersion?: 2;
         }>,
         Name
       >;
       registerHook: FunctionReference<
         "mutation",
         "internal",
-        { eventType: string; functionHandle: string; organizationId?: string },
+        {
+          eventType: string;
+          functionHandle: string;
+          organizationId?: string;
+          payloadVersion?: 2;
+        },
         string,
         Name
       >;

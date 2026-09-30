@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { getRequiredSlots, assertValidRange } from "./utils";
 import {
   assertResourcesBookable,
+  buildHookEventV2,
   loadBookableEventType,
   terminateBooking,
 } from "./booking_lifecycle";
@@ -346,6 +347,7 @@ export const createMultiResourceBooking = mutation({
         isMultiResource: true,
         resources: args.resources,
       },
+      payloadV2: await buildHookEventV2(ctx, "booking.created", bookingId, { changedBy: "system" }),
       resendOptions: args.resendOptions,
     });
 
@@ -422,10 +424,11 @@ export const cancelMultiResourceBooking = mutation({
     // Release every booked resource (quantity_availability for pooled
     // resources, daily_availability otherwise), record history and stamp the
     // cancellation — shared with every other cancel path.
+    const changedBy = args.cancelledBy ?? "unknown";
     await terminateBooking(ctx, booking, {
       to: "cancelled",
       reason: args.reason,
-      changedBy: args.cancelledBy ?? "unknown",
+      changedBy,
       now: Date.now(),
     });
 
@@ -450,6 +453,11 @@ export const cancelMultiResourceBooking = mutation({
         cancelledBy: args.cancelledBy,
         isMultiResource: true,
       },
+      payloadV2: await buildHookEventV2(ctx, "booking.cancelled", booking._id, {
+        previousStatus: booking.status,
+        reason: args.reason,
+        changedBy,
+      }),
       resendOptions: args.resendOptions,
     });
 

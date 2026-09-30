@@ -113,6 +113,15 @@
   host code only; a host that forwards it from clients should forward
   `rescheduleContext` instead. Both at once throw `INVALID_INPUT`.
   `makeInternalBookingAPI` forwards the new argument.
+- Hook payloads, version 2 (N7): `registerHook({ …, payloadVersion: 2 })`
+  delivers one envelope per event, whichever function emitted it, built from
+  the written booking and without the management token. Handlers declare
+  `args: bookingHookEventV2` (exported with the `BookingHookEventV2` type from
+  `@mrfinch/booking`); see [docs/hook-payloads-v2.md](docs/hook-payloads-v2.md).
+  Hooks registered without `payloadVersion` keep the version 1 payloads,
+  unchanged. `listHooks` and `getHook` return `payloadVersion`. Events queued
+  by 0.4.x and delivered after the upgrade reach version 2 hooks not at all
+  (logged); version 1 hooks still receive them.
 
 ## 0.4.3 — Unreleased
 

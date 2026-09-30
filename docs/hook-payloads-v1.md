@@ -2,11 +2,12 @@
 
 <!-- Generated from the pins in src/component/hook-payloads-v1.test.ts. Do not edit by hand; after a deliberate change run `npx vitest run src/component/hook-payloads-v1.test.ts -u`. -->
 
-A hook registered with `registerHook` runs its function handle with the event's payload as the
-function's arguments. The payload depends on the function that emitted the event, not only on
-the event type: `booking.cancelled` has four shapes. A handler with an argument validator must
-accept every shape of its event, and an added key fails such a validator just like a missing one,
-so each emitter keeps the shape below within version 1.
+A hook registered with `registerHook` without `payloadVersion` runs its function handle with the
+event's payload as the function's arguments. The payload depends on the function that emitted the
+event, not only on the event type: `booking.cancelled` has four shapes. A handler with an argument
+validator must accept every shape of its event, and an added key fails such a validator just like
+a missing one, so each emitter keeps the shape below within version 1. Register with
+`payloadVersion: 2` for one shape per event ([version 2](hook-payloads-v2.md)).
 
 Payloads contain booker contact details and, where shown, the booking's management token.
 Register hooks only from trusted server code.
