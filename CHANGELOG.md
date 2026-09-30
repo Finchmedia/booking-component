@@ -188,32 +188,6 @@
   documented host duties; time-dependent suites run under several process time zones.
 - The npm package omits test files and `src/testing/`. Internal refactors (shared cancel
   path, typed patches, `hooks:triggerHooks` returning `null`) change no behaviour.
-- Characterization tests pin the registered component function paths (checked
-  against the generated `ComponentApi`), the v1 hook payload shapes per emitter
-  and stored booking shape, and the entry-point error texts and check order
-  that hosts match. Changing any of them fails the suite and must be deliberate.
-- Time-sensitive tests can run under a chosen process time zone
-  (`src/testing/process-time-zone.ts`).
-- Regression suites for weekdays in 14 zones, DST days (including a sweep
-  against an `Intl`-only oracle), input validation, zone validation, the new
-  schedule arguments and the audit. The time-dependent ones run under several
-  process time zones.
-- Link-integrity and lifecycle suites: duplicate link rows, cancellation
-  metadata per row kind, and a parity table across the cancel-like paths
-  (single and bundle rows, pool units included).
-- A drift test compares the argument validator of every
-  `makeInternalBookingAPI` wrapper with its component function's
-  (`exportArgs()`, nested fields and optional flags included). The only
-  allowed difference is a component `v.id(…)` taken as a string.
-- `listBookings` is compared with a copy of the 0.4.2 implementation over
-  randomized bookings with many equal starts, every selector, status, date
-  and limit combination, with the documents each call reads counted.
-- Canary tests run the nested Resend component's delivery worker: mail waiting
-  for a batch goes out with the newest key, a rejected key of another account
-  fails its whole batch, and one account with several senders sends all mail.
-  A Resend upgrade that changes this fails them.
-- The documented host duties are pinned as current behaviour: eligibility per
-  entry point, `scheduleId: ""`, and omitted or emptied update fields.
 - `npm run lint` runs with `--max-warnings=0` and fails on unused bindings in package
   sources, `_`-prefixed ones included (tests keep the escape); three unused props carry
   tracked exceptions. Packaging tests import and type-check the compiled `/react` entry.
