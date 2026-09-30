@@ -133,3 +133,18 @@ describe("Node ESM import of the compiled package", () => {
     );
   });
 });
+
+describe("deprecation markers in the compiled /react types", () => {
+  it("reach the .d.ts for BookingValidation* and the 'rescheduled' status", () => {
+    const types = readFileSync(join(packageDir, "dist/react/types.d.ts"), "utf8");
+    const documented = (declaration, marker = "@deprecated") =>
+      new RegExp(`${marker}[^/]*\\*/\\s*${declaration}`).test(types);
+
+    expect(documented("export type BookingValidationError\\b")).toBe(true);
+    expect(documented("export interface BookingValidationResult\\b")).toBe(true);
+    expect(documented("status:", '"rescheduled" is deprecated')).toBe(true);
+    // Control: a current type carries no marker
+    expect(types).toMatch(/export interface Booking\b/);
+    expect(documented("export interface Booking\\b")).toBe(false);
+  });
+});

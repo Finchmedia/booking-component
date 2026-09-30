@@ -65,6 +65,7 @@ const CalendarContent: React.FC<
   CalendarProps & { eventType: NonNullable<ReturnType<typeof useQuery>> }
 > = ({
   resourceId,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- F13: slot queries do not send the event type yet (0.5.0)
   eventTypeId: _eventTypeId,
   onSlotSelect,
   title,
@@ -87,8 +88,6 @@ const CalendarContent: React.FC<
   // Loaded data
   eventType,
 }) => {
-  // Event type timezone (overrides browser timezone when locked)
-  const _eventTimezone = eventType?.timezone || "Europe/Berlin";
   const isTimezoneLocked = eventType?.lockTimeZoneToggle || false;
 
   // Use controlled duration from props
@@ -99,7 +98,7 @@ const CalendarContent: React.FC<
   const slotInterval = effectiveSlotInterval(eventType);
 
   // Intersection observer to detect when calendar becomes visible
-  const [calendarRef, _isIntersecting, hasIntersected] =
+  const [calendarRef, , hasIntersected] =
     useIntersectionObserver({
       rootMargin: "500px",
       triggerOnce: true,

@@ -42,12 +42,10 @@ export default [
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-explicit-any": "off",
       "no-unused-vars": "off",
+      // No '^_' escape outside tests: a prefix must not silence unused state
       "@typescript-eslint/no-unused-vars": [
-        "warn",
-        {
-          argsIgnorePattern: "^_",
-          varsIgnorePattern: "^_",
-        },
+        "error",
+        { ignoreRestSiblings: true },
       ],
       "@typescript-eslint/no-unused-expressions": [
         "error",
@@ -85,11 +83,23 @@ export default [
       ],
       "@typescript-eslint/no-explicit-any": "off",
       "no-unused-vars": "off",
+      // No '^_' escape outside tests: a prefix must not silence unused state
       "@typescript-eslint/no-unused-vars": [
-        "warn",
+        "error",
+        { ignoreRestSiblings: true },
+      ],
+    },
+  },
+  // Tests - stubs may keep deliberately unused '_'-prefixed bindings
+  {
+    files: ["**/*.test.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
         {
           argsIgnorePattern: "^_",
           varsIgnorePattern: "^_",
+          ignoreRestSiblings: true,
         },
       ],
     },

@@ -35,7 +35,9 @@ export const EventMetaPanel: React.FC<EventMetaPanelProps> = ({
   selectedDuration,
   onDurationChange,
   userTimezone,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- timezone lock not implemented yet (later feature)
   onTimezoneChange: _onTimezoneChange,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- timezone lock not implemented yet (later feature)
   timezoneLocked: _timezoneLocked,
   organizerName = "Organizer",
   organizerAvatar,

@@ -308,6 +308,19 @@
   such as `getEventType`, no longer overrides `publicApi` for it. Names outside
   both interfaces still come from `adminApi` when it has them.
 
+### Maintenance and documentation
+
+- Unused variables, props and parameters in package sources fail
+  `npm run lint`, including `_`-prefixed ones; the prefix had hidden unfinished
+  work such as the missing Booker error message. Rest siblings
+  (`const { id: _id, ...rest }`) stay allowed and tests keep the `_` escape.
+  The lint script runs with `--max-warnings=0`. The unused `Calendar`
+  `eventTypeId` (slot queries do not send it yet) and `EventMetaPanel`'s
+  `onTimezoneChange` and `timezoneLocked` (the time zone lock is not
+  implemented) carry tracked lint exceptions; the props are unchanged.
+- Removed the internal `LegacyBookingProviderProps` type, which
+  `@mrfinch/booking/react` never exported.
+
 ## 0.4.2 — 23 September 2026
 
 ### Added

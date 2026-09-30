@@ -224,8 +224,10 @@ export type ListsAllOperations<API, List extends readonly (keyof API)[]> =
   [Exclude<keyof API, List[number]>] extends [never] ? true : false;
 
 // A new interface member fails to compile until it is listed
+/* eslint-disable @typescript-eslint/no-unused-vars -- compile-time checks only */
 const _allPublicListed: ListsAllOperations<PublicBookingAPI, typeof PUBLIC_OPERATIONS> = true;
 const _allAdminListed: ListsAllOperations<AdminBookingAPI, typeof ADMIN_OPERATIONS> = true;
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
 const PUBLIC_KEYS: ReadonlySet<PropertyKey> = new Set(PUBLIC_OPERATIONS);
 const ADMIN_KEYS: ReadonlySet<PropertyKey> = new Set(ADMIN_OPERATIONS);
@@ -396,17 +398,4 @@ export function useBookingAPI(): BookingAPI {
     );
   }
   return api;
-}
-
-// ============================================
-// LEGACY SUPPORT (Deprecated)
-// ============================================
-
-/**
- * @deprecated Use BookingProviderProps with publicApi/adminApi instead.
- * This type is kept for documentation purposes only.
- */
-export interface LegacyBookingProviderProps {
-  api: PublicBookingAPI & AdminBookingAPI;
-  children: ReactNode;
 }
