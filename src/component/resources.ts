@@ -175,6 +175,11 @@ export const createResource = mutation({
         throwBookingError("RESOURCE_IN_USE", "Cannot change inventory mode while resource slots are reserved");
       }
     }
+    // Flagging their ID as a pool strands them whatever the capacity (moves
+    // and the single-resource paths refuse pools), as in updateResource.
+    if (args.isFungible === true) {
+      await assertNoActiveSingleBookings(ctx, args.id);
+    }
 
     const now = Date.now();
     return await ctx.db.insert("resources", {

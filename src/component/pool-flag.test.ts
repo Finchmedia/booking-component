@@ -1,7 +1,9 @@
 /**
  * N16 (plan PR-60, decision D28 (A)): updateResource refuses isFungible
  * false -> true while active bookings WITHOUT booking_items (single-resource
- * bookings, legacy rows included) hold the resource. The flag alone, with
+ * bookings, legacy rows included) hold the resource, and createResource
+ * refuses isFungible: true on an id such bookings already hold (legacy
+ * reservations can precede the resource document). The flag alone, with
  * capacity one, keeps the bitmap, but moves and the single-resource paths
  * refuse pools, so those bookings would be stranded. Bundles keep their
  * items and stay movable, so they do not block the change (unlike
@@ -68,6 +70,49 @@ describe("isFungible: true on an exclusive resource", () => {
     });
     await expect(t.mutation(api.resources.updateResource, { id: seed.resourceId, isFungible: true }))
       .rejects.toMatchObject({ data: POOL_FLAG_REFUSED });
+  });
+
+  test("createResource on an id with an active legacy reservation refuses the flag at capacity one too", async () => {
+    const { t } = setup();
+    // Legacy reservations can precede a resource document.
+    const legacyId = await t.mutation(api.public.createReservation, {
+      resourceId: "res-x", actorId: "ops@example.com", start: utc(TUESDAY, "09:00"), end: utc(TUESDAY, "10:00"),
+    });
+    const create = (extra: { quantity?: number; isFungible?: boolean }) =>
+      t.mutation(api.resources.createResource, {
+        id: "res-x", organizationId: "org-1", name: "X", type: "room", timezone: "UTC", ...extra,
+      });
+
+    for (const quantity of [1, undefined]) {
+      await expect(create({ isFungible: true, quantity })).rejects.toMatchObject({ data: POOL_FLAG_REFUSED });
+    }
+    // CONTROL: capacity above one kept its inventory-mode refusal and text.
+    await expect(create({ isFungible: true, quantity: 3 })).rejects.toThrow(
+      "Cannot change inventory mode while resource has active bookings"
+    );
+    expect(await t.query(api.resources.getResource, { id: "res-x" })).toBeNull();
+    // The reservation stays movable; the audit has nothing to report.
+    const moved = await t.mutation(api.public.rescheduleBooking, {
+      bookingId: legacyId, newStart: utc(TUESDAY, "11:00"), newEnd: utc(TUESDAY, "12:00"),
+    });
+    expect(moved.status).toBe("confirmed");
+    // CONTROL: without the flag the resource is created (and a later flag change is refused as before).
+    expect(await create({})).toBeDefined();
+    await expect(t.mutation(api.resources.updateResource, { id: "res-x", isFungible: true }))
+      .rejects.toMatchObject({ data: POOL_FLAG_REFUSED });
+    expect((await t.query(api.maintenance.audit, { check: "booking_integrity", limit: 10 })).issues).toEqual([]);
+  });
+
+  test("createResource with the flag on an id without active single bookings is accepted", async () => {
+    const { t } = setup();
+    const reservationId = await t.mutation(api.public.createReservation, {
+      resourceId: "res-y", actorId: "ops@example.com", start: utc(TUESDAY, "09:00"), end: utc(TUESDAY, "10:00"),
+    });
+    await t.mutation(api.public.cancelReservation, { reservationId });
+    expect(await t.mutation(api.resources.createResource, {
+      id: "res-y", organizationId: "org-1", name: "Y", type: "room", timezone: "UTC", isFungible: true, quantity: 1,
+    })).toBeDefined();
+    expect((await t.query(api.resources.getResource, { id: "res-y" }))?.isFungible).toBe(true);
   });
 
   test("bundles do not block it and stay movable", async () => {

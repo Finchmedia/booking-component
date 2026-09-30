@@ -89,9 +89,10 @@ bumping.
   multi-day bookings stay possible.
 - `updateResource` refuses `isFungible: true` while active single-resource
   bookings (pending, confirmed or provisional, without bundle items; legacy
-  reservations included) hold the resource (N16): `RESOURCE_IN_USE`. With
-  capacity one the flag used to be accepted and left them unmovable; bundles
-  do not block it. End or move those bookings first. `booking_integrity`
+  reservations included) hold the resource (N16): `RESOURCE_IN_USE`, and so
+  does `createResource` on an ID that legacy reservations already hold
+  without a resource document. With capacity one the flag used to be
+  accepted and left them unmovable; bundles do not block it. End or move those bookings first. `booking_integrity`
   lists bookings an earlier flag change stranded (`poolWithoutItems`):
   cancel them, or set `isFungible: false` again.
 - One set of booking rules for every path (F6). `createBooking`,
@@ -296,8 +297,9 @@ Each of these changes behaviour; its _Upgrading_ entry says what to do.
   carries a missing or foreign organization over to the new booking.
 - `backfillBookingOrganizations` no longer gives a booking an organization
   that owns none of its resources.
-- The pool flag no longer strands a resource's single-resource bookings
-  (N16).
+- The pool flag no longer strands a resource's single-resource bookings,
+  whether set by `updateResource` or by `createResource` on an ID legacy
+  reservations hold (N16).
 - A resource or event type created again with a deleted ID starts unlinked
   (N12).
 - `listBookings` no longer gives limits of 0, negative or fractional values
