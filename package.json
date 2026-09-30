@@ -38,7 +38,12 @@
     "dist",
     "src",
     "docs",
-    "!src/**/*.test.ts"
+    "!src/**/*.test.*",
+    "!src/**/*.test-d.*",
+    "!src/testing/**",
+    "!dist/**/*.test.*",
+    "!dist/**/*.test-d.*",
+    "!dist/testing/**"
   ],
   "exports": {
     "./package.json": "./package.json",

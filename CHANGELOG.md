@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.3 — Unreleased
+
+### Maintenance and documentation
+
+- The npm package excludes every test file (`*.test.*`, `*.test-d.*`) and the
+  test-only helpers in `src/testing/`, under `src/` and `dist/` alike.
+  Previously only `*.test.ts` was excluded, so a `.test.tsx` file would have
+  shipped. No published runtime file changes.
+
+### Tests
+
+- Characterization tests pin the registered component function paths (checked
+  against the generated `ComponentApi`). Moving or renaming a function fails
+  the suite and must be deliberate.
+- Time-sensitive tests can run under a chosen process time zone
+  (`src/testing/process-time-zone.ts`).
+
 ## 0.4.2 — 23 September 2026
 
 ### Added
