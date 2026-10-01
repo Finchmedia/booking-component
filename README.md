@@ -3,6 +3,8 @@
 [![npm version](https://badge.fury.io/js/@mrfinch%2Fbooking.svg)](https://www.npmjs.com/package/@mrfinch/booking)
 [![Convex Component](https://www.convex.dev/components/badge/mrfinch/booking)](https://www.convex.dev/components/mrfinch/booking)
 
+<!-- START: Include on https://convex.dev/components -->
+
 Booking and availability for Convex apps. Reserve rooms, people or equipment;
 combine resources into a booking; and track quantities for interchangeable items.
 Use the React Booker or build your own interface.
@@ -12,8 +14,10 @@ Use the React Booker or build your own interface.
 [Live Demo](https://convexbooking.dev/book)
 
 Upgrading from 0.4.x? Read the [upgrade guide](https://convexbooking.dev/docs/upgrading)
-and the 0.5.0 notes in the [CHANGELOG](CHANGELOG.md). The 0.4.x README and docs stay
-available at the [v0.4.3 tag](https://github.com/Finchmedia/booking-component/tree/v0.4.3).
+and the 0.5.0 notes in the
+[CHANGELOG](https://github.com/Finchmedia/booking-component/blob/main/CHANGELOG.md).
+The 0.4.x README and docs stay available at the
+[v0.4.3 tag](https://github.com/Finchmedia/booking-component/tree/v0.4.3).
 
 ## Install
 
@@ -79,6 +83,8 @@ export default function BookingPage() {
 The Booker handles date, duration and slot selection, contact details and
 confirmation for one exclusive resource. Use `onBookingComplete(booking)` to
 connect your management pages to the returned booking UID and secret token.
+
+<!-- END: Include on https://convex.dev/components -->
 
 ## Booker behavior
 
