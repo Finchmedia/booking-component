@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1 — 1 October 2026
+
+### Documentation
+
+- The README links the [upgrade guide](https://convexbooking.dev/docs/upgrading),
+  the 0.5.0 notes and the `v0.4.3` tag for 0.4.x users. It also says that the
+  bundled Resend child component stays idle until host functions pass
+  `resendOptions`, when to use `makeInternalBookingAPI` instead of your own
+  wrappers, and where the typed error codes are. No code changes.
+
 ## 0.5.0 — 30 September 2026
 
 The contract release: coded errors, one set of booking rules, closed booking
