@@ -11,6 +11,10 @@ Use the React Booker or build your own interface.
 [API Reference](https://convexbooking.dev/docs/api) ·
 [Live Demo](https://convexbooking.dev/book)
 
+Upgrading from 0.4.x? Read the [upgrade guide](https://convexbooking.dev/docs/upgrading)
+and the 0.5.0 notes in the [CHANGELOG](CHANGELOG.md). The 0.4.x README and docs stay
+available at the [v0.4.3 tag](https://github.com/Finchmedia/booking-component/tree/v0.4.3).
+
 ## Install
 
 Start with an existing [Convex app](https://docs.convex.dev/get-started).
@@ -32,6 +36,11 @@ const app = defineApp();
 app.use(booking);
 export default app;
 ```
+
+The component registers the [Resend component](https://www.convex.dev/components/resend)
+as its own child for optional email; it comes with the package. Email stays off
+until your host functions pass `resendOptions` with an API key, so apps without
+email need no Resend setup.
 
 For the optional React UI, also install its peer dependencies. Keep your existing
 React 18 or 19 installation and use the matching React DOM version.
@@ -297,7 +306,9 @@ const resource = await ctx.runQuery(components.booking.resources.getResource, {
 Import `components` from your host's `./_generated/api`. Its generated types
 provide the version-matched arguments and return values. See the
 [API reference](https://convexbooking.dev/docs/api) for schedule-aware queries,
-booking operations, metadata and hooks.
+booking operations, metadata and hooks. Expected failures are typed: catch them
+with `isBookingError` and map `error.data.code` to your own messages (see
+[Errors](#details-to-rely-on) below).
 
 Protect administration with role and organization checks. Protect booking details
 with ownership checks or management tokens. Keep resets and seed functions
@@ -328,6 +339,9 @@ which differ per emitting function and for most events carry the token.
 
 The optional `makeInternalBookingAPI(components.booking)` factory creates only
 internal queries and mutations. Its exports are accessed through `internal.*`.
+Use it for trusted server code (crons, scripts, seeds, `npx convex run`) that
+needs no checks of its own. Anything a browser calls needs your own wrapper
+that checks access first and then calls `components.booking.*` directly.
 The old public `makeBookingAPI` factory was removed in 0.4.0; migrate public
 endpoints to authorized host wrappers.
 
